@@ -1,80 +1,216 @@
 import AppKit
 import SwiftUI
 import TangoDisplayCore
+import os.log
 
-// MARK: - Wrapper VC that adds a preset bar below the AU's native view
+// MARK: - Wrapper VC: hosts the AU's native view + a preset bar at the bottom.
+//
+// Modeled on Embrace's EditSystemEffectController (iccir/Embrace): the AU
+// view is a direct subview of our content view (no NSScrollView, no clip
+// view, no nested wrapper), and the window resizes in response to
+// NSViewFrameDidChangeNotification on the AU view, keeping the titlebar
+// fixed by adjusting origin.y.
+//
+// Note: this requires V2 AUs to be loaded *in-process* (see
+// AudioUnitPluginManager.instantiate). When V2 AUs are loaded via the
+// out-of-process bridge, their view comes back wrapped in NSRemoteView and
+// frame changes from the plugin process don't surface to the host —
+// plugin-driven UI resize (e.g. MJUC's expander) silently breaks.
 
 final class PluginWindowViewController: NSViewController {
     private let pluginVC: NSViewController
     private let player: LocalPlayerSource
+    private let slotId: UUID
+    private let barHeight: CGFloat = 44
     private var sizeObservation: NSKeyValueObservation?
+    private var barView: NSView!
+    private var inFrameCallback = false
+    /// Descendant views we've already attached `frameDidChange` observers
+    /// to. Some plugins resize an inner peer NSView rather than the root,
+    /// so we observe the full tree and rescan on every frame change.
+    private var observedViews = Set<ObjectIdentifier>()
 
-    init(pluginVC: NSViewController, player: LocalPlayerSource) {
+    private static let log = OSLog(subsystem: "com.tangodisplay", category: "PluginWindow")
+
+    init(pluginVC: NSViewController, player: LocalPlayerSource, slotId: UUID) {
         self.pluginVC = pluginVC
         self.player = player
+        self.slotId = slotId
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        view = NSView()
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
         addChild(pluginVC)
-        view.addSubview(pluginVC.view)
+        let effectView = pluginVC.view
+        let natural = effectView.frame.size
+        let naturalW = natural.width  > 0 ? natural.width  : 600
+        let naturalH = natural.height > 0 ? natural.height : 400
 
-        // Legacy V2 AU views carry their natural size in frame before TAMC is cleared.
-        // Capture it now so we can set preferredContentSize synchronously below.
-        let naturalPluginSize = pluginVC.view.frame.size
+        let contentSize = NSSize(width: naturalW, height: naturalH + barHeight)
+        view.setFrameSize(contentSize)
 
-        pluginVC.view.translatesAutoresizingMaskIntoConstraints = false
+        // Match Embrace's setFrame sequence: zero autoresize mask while we
+        // place the view, then restore so the plugin can autoresize with
+        // future window resizes if it supports them.
+        let originalMask = effectView.autoresizingMask
+        effectView.autoresizingMask = []
+        effectView.frame = NSRect(x: 0, y: barHeight, width: naturalW, height: naturalH)
+        effectView.autoresizingMask = originalMask
+        view.addSubview(effectView)
 
-        let barVC = NSHostingController(rootView: PluginWindowPresetBar(player: player))
+        // Preset bar pinned to the bottom; stretches horizontally with the window.
+        let barVC = NSHostingController(rootView: PluginWindowPresetBar(
+            player: player,
+            slotId: slotId
+        ))
         addChild(barVC)
-        view.addSubview(barVC.view)
-        barVC.view.translatesAutoresizingMaskIntoConstraints = false
+        let bar = barVC.view
+        bar.frame = NSRect(x: 0, y: 0, width: contentSize.width, height: barHeight)
+        bar.autoresizingMask = [.width, .maxYMargin]
+        view.addSubview(bar)
+        self.barView = bar
 
-        let barHeight: CGFloat = 44
-        NSLayoutConstraint.activate([
-            pluginVC.view.topAnchor.constraint(equalTo: view.topAnchor),
-            pluginVC.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            pluginVC.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            pluginVC.view.bottomAnchor.constraint(equalTo: barVC.view.topAnchor),
-
-            barVC.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            barVC.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            barVC.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            barVC.view.heightAnchor.constraint(equalToConstant: barHeight),
-        ])
-
-        // For V2 AUs (e.g. AUGraphicEQ): use the natural frame captured above.
-        if naturalPluginSize != .zero {
-            preferredContentSize = NSSize(width: naturalPluginSize.width,
-                                          height: naturalPluginSize.height + barHeight)
+        // V3 AUs publish via preferredContentSize.
+        sizeObservation = pluginVC.observe(\.preferredContentSize, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.adoptPreferredContentSize() }
         }
 
-        // For V3 AUs that report size via preferredContentSize (possibly async):
-        // KVO fires with .initial immediately and then again whenever the size changes.
-        // NSWindow does not auto-resize after creation, so we also call setContentSize.
-        sizeObservation = pluginVC.observe(\.preferredContentSize, options: [.initial, .new]) { [weak self] vc, _ in
-            guard let self else { return }
-            let sz = vc.preferredContentSize
-            guard sz != .zero else { return }
-            let newSize = NSSize(width: sz.width, height: sz.height + 44)
-            self.preferredContentSize = newSize
-            DispatchQueue.main.async { [weak self] in
-                self?.view.window?.setContentSize(newSize)
-            }
+        // V2 AUs (JUCE plugins) post frame changes when their editor
+        // resizes. Observe the whole subview tree so we don't miss
+        // resizes that originate on an inner peer NSView.
+        installFrameObservers(on: effectView)
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        guard let window = view.window else { return }
+        // If the plugin's view doesn't support being resized, take the
+        // resize grip off the window (Embrace's pattern). JUCE plugins
+        // typically have no autoresize mask set.
+        let mask = pluginVC.view.autoresizingMask
+        if !mask.contains(.width) && !mask.contains(.height) {
+            window.styleMask.remove(.resizable)
+        }
+        snapWindowToPluginFrame()
+    }
+
+    @objc private func pluginFrameDidChange(_ note: Notification) {
+        // A child view may have just been resized; re-walk so any newly
+        // added descendants pick up observers too.
+        installFrameObservers(on: pluginVC.view)
+        snapWindowToPluginFrame()
+    }
+
+    /// Recursively attach `frameDidChange` and `boundsDidChange` observers
+    /// to `view` and every descendant. Idempotent via `observedViews`.
+    private func installFrameObservers(on view: NSView) {
+        let id = ObjectIdentifier(view)
+        if observedViews.insert(id).inserted {
+            view.postsFrameChangedNotifications = true
+            view.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(pluginFrameDidChange(_:)),
+                name: NSView.frameDidChangeNotification,
+                object: view
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(pluginFrameDidChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: view
+            )
+        }
+        for sub in view.subviews {
+            installFrameObservers(on: sub)
         }
     }
 
-    override var preferredContentSize: NSSize {
-        get { super.preferredContentSize }
-        set { super.preferredContentSize = newValue }
+    /// Recursive bounding box of every descendant view (frame) translated
+    /// into the root view's coord space. Catches a subview that grew past
+    /// the root's bounds.
+    private func contentExtent(of root: NSView) -> NSRect {
+        var box = root.bounds
+        for sub in root.subviews {
+            let subBox = contentExtent(of: sub)
+            box = box.union(sub.convert(subBox, to: root))
+        }
+        return box
+    }
+
+    private func adoptPreferredContentSize() {
+        let size = pluginVC.preferredContentSize
+        guard size.width > 0, size.height > 0 else { return }
+        // Treat preferredContentSize as a frame request: write it into the
+        // plugin's NSView so the rest of the pipeline (frameDidChange)
+        // handles the window resize via the same code path.
+        if abs(pluginVC.view.frame.width  - size.width)  > 0.5 ||
+           abs(pluginVC.view.frame.height - size.height) > 0.5 {
+            pluginVC.view.setFrameSize(size)
+        }
+    }
+
+    /// Resize the host window to match the plugin's current frame (plus
+    /// the preset bar). Modeled on Embrace's `_resizeWindowWithOldSize:newSize:`.
+    private func snapWindowToPluginFrame() {
+        guard !inFrameCallback,
+              let window = view.window,
+              !window.inLiveResize else { return }
+
+        let root = pluginVC.view.frame.size
+        let extent = contentExtent(of: pluginVC.view).size
+        let target = NSSize(
+            width:  max(root.width,  extent.width),
+            height: max(root.height, extent.height)
+        )
+        guard target.width > 0, target.height > 0 else { return }
+
+        let content = window.contentRect(forFrameRect: window.frame).size
+        let currentPluginH = max(0, content.height - barHeight)
+        let deltaW = target.width  - content.width
+        let deltaH = target.height - currentPluginH
+        if abs(deltaW) < 0.5 && abs(deltaH) < 0.5 { return }
+
+        inFrameCallback = true
+        defer { inFrameCallback = false }
+
+        let effectView = pluginVC.view
+        let oldMask = effectView.autoresizingMask
+        effectView.autoresizingMask = []
+
+        var frame = window.frame
+        frame.size.width  += deltaW
+        frame.size.height += deltaH
+        // Keep window top fixed: growing height pushes origin.y down by
+        // the same amount (NSWindow uses bottom-left origin).
+        frame.origin.y    -= deltaH
+        window.setFrame(frame, display: true, animate: false)
+
+        effectView.frame = NSRect(x: 0,
+                                  y: barHeight,
+                                  width: target.width,
+                                  height: target.height)
+        effectView.autoresizingMask = oldMask
+
+        #if DEBUG
+        let newContent = window.contentRect(forFrameRect: window.frame).size
+        os_log(.debug, log: Self.log,
+               "resize plugin=%{public}@ window=%{public}@",
+               NSStringFromSize(target),
+               NSStringFromSize(newContent))
+        #endif
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
@@ -82,12 +218,17 @@ final class PluginWindowViewController: NSViewController {
 
 private struct PluginWindowPresetBar: View {
     @ObservedObject var player: LocalPlayerSource
+    let slotId: UUID
     @State private var showSaveAlert = false
     @State private var presetName = ""
 
+    private var presets: [AudioUnitPreset] {
+        player.slotPresets[slotId] ?? []
+    }
+
     private var activePresetLabel: String {
-        guard let id = player.activePresetID,
-              let p = player.availablePresets.first(where: { $0.id == id }) else { return "None" }
+        guard let id = player.slotActivePresetIDs[slotId],
+              let p = presets.first(where: { $0.id == id }) else { return "None" }
         return p.name
     }
 
@@ -99,27 +240,27 @@ private struct PluginWindowPresetBar: View {
                     .foregroundColor(.secondary)
                     .font(.system(size: 12))
 
-                if !player.availablePresets.isEmpty {
-                    let factoryPresets = player.availablePresets.filter(\.isFactory)
-                    let userPresets = player.availablePresets.filter(\.isUser)
+                if !presets.isEmpty {
+                    let factoryPresets = presets.filter(\.isFactory)
+                    let userPresets = presets.filter(\.isUser)
                     Menu {
                         if !factoryPresets.isEmpty {
                             Section("Factory") {
                                 ForEach(factoryPresets) { p in
-                                    Button(p.name) { player.applyPreset(p) }
+                                    Button(p.name) { player.applyPreset(p, toSlot: slotId) }
                                 }
                             }
                         }
                         if !userPresets.isEmpty {
                             Section("Saved") {
                                 ForEach(userPresets) { p in
-                                    Button(p.name) { player.applyPreset(p) }
+                                    Button(p.name) { player.applyPreset(p, toSlot: slotId) }
                                 }
                             }
                             Divider()
                             ForEach(userPresets) { p in
                                 Button("Delete \"\(p.name)\"", role: .destructive) {
-                                    try? player.deletePreset(p)
+                                    try? player.deletePreset(p, fromSlot: slotId)
                                 }
                             }
                         }
@@ -152,11 +293,11 @@ private struct PluginWindowPresetBar: View {
             Button("Save") {
                 let name = presetName.trimmingCharacters(in: .whitespaces)
                 guard !name.isEmpty else { return }
-                try? player.saveCurrentAsPreset(named: name)
+                try? player.saveCurrentAsPreset(named: name, forSlot: slotId)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Enter a name for the current EQ settings.")
+            Text("Enter a name for the current plugin settings.")
         }
     }
 }

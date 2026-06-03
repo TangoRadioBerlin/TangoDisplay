@@ -68,21 +68,31 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     private var hoggedDeviceUID: String? = nil
     private let audioDeviceQueue = DispatchQueue(label: "com.tangodisplay.audio-device", qos: .userInitiated)
 
-    // MARK: - Private — Audio Unit plugin
+    // MARK: - Private — Audio Unit plugin chain
 
     private let pluginManager = AudioUnitPluginManager()
-    private var activeAudioUnitPlugin: AVAudioUnit?
-    private var pluginLoadTask: Task<Void, Never>?
-    private var pluginLoadGeneration: Int = 0
+
+    private final class SlotRuntime {
+        var avUnit: AVAudioUnit?
+        var status: AudioUnitPluginStatus = .noPluginSelected
+        var presetManager: AudioUnitPresetManager?
+        var availablePresets: [AudioUnitPreset] = []
+        var activePresetID: UUID? = nil
+        var pluginWindow: NSWindow?
+        var pluginWindowVC: PluginWindowViewController?
+        var paramObserverTree: AUParameterTree?
+        var paramObserverToken: AUParameterObserverToken?
+        var currentPresetObservation: NSKeyValueObservation?
+        var loadGeneration: Int = 0
+        var loadTask: Task<Void, Never>?
+        var isApplyingPreset: Bool = false
+    }
+
+    private var slotRuntimes: [UUID: SlotRuntime] = [:]
     @Published private(set) var audioUnitPluginStatus: AudioUnitPluginStatus = .noPluginSelected
-    private var pluginWindow: NSWindow?
-    private var presetManager: AudioUnitPresetManager?
-    @Published private(set) var availablePresets: [AudioUnitPreset] = []
-    @Published private(set) var activePresetID: UUID? = nil
-    private var parameterObserverToken: AUParameterObserverToken?
-    private var parameterObserverTree: AUParameterTree?
-    private var currentPresetObservation: NSKeyValueObservation?
-    private var isApplyingPreset = false
+    @Published private(set) var slotStatuses: [UUID: AudioUnitPluginStatus] = [:]
+    @Published private(set) var slotPresets: [UUID: [AudioUnitPreset]] = [:]
+    @Published private(set) var slotActivePresetIDs: [UUID: UUID] = [:]
 
     // MARK: - Private — auto-gap
 
@@ -497,10 +507,13 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     }
 
     func stop() {
-        pluginLoadTask?.cancel()
-        pluginLoadTask = nil
-        pluginWindow?.close()
-        pluginWindow = nil
+        for runtime in slotRuntimes.values {
+            runtime.loadTask?.cancel()
+            runtime.loadTask = nil
+            runtime.pluginWindow?.close()
+            runtime.pluginWindow = nil
+            runtime.pluginWindowVC = nil
+        }
         currentEntryID = nil
         isCurrentEntryMarkedAsPlayed = false
         isActivePlaying = false
@@ -868,28 +881,36 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
     // MARK: - Private: audio graph
 
+    private func liveChainUnits() -> [(slot: AudioUnitChainSlot, unit: AVAudioUnit)] {
+        guard settings.audioUnitPluginEnabled, !settings.audioUnitPluginBypassed else { return [] }
+        return settings.audioUnitPluginChain.compactMap { slot in
+            guard slot.isEnabled,
+                  let runtime = slotRuntimes[slot.id],
+                  let unit = runtime.avUnit else { return nil }
+            return (slot, unit)
+        }
+    }
+
     private func connectAudioGraph(format: AVAudioFormat?) {
         audioEngine.disconnectNodeOutput(playerNode)
         audioEngine.disconnectNodeOutput(eq)
         audioEngine.disconnectNodeOutput(replayGainMixer)
-        if let plugin = activeAudioUnitPlugin {
-            audioEngine.disconnectNodeOutput(plugin)
+        for runtime in slotRuntimes.values {
+            if let unit = runtime.avUnit {
+                audioEngine.disconnectNodeOutput(unit)
+            }
         }
         audioEngine.disconnectNodeOutput(balanceMixer)
 
         audioEngine.connect(playerNode, to: eq, format: format)
         audioEngine.connect(eq, to: replayGainMixer, format: format)
 
-        let usePlugin = settings.audioUnitPluginEnabled
-            && !settings.audioUnitPluginBypassed
-            && activeAudioUnitPlugin != nil
-        if usePlugin, let plugin = activeAudioUnitPlugin {
-            audioEngine.connect(replayGainMixer, to: plugin, format: format)
-            audioEngine.connect(plugin, to: balanceMixer, format: format)
-        } else {
-            audioEngine.connect(replayGainMixer, to: balanceMixer, format: format)
+        var prev: AVAudioNode = replayGainMixer
+        for (_, unit) in liveChainUnits() {
+            audioEngine.connect(prev, to: unit, format: format)
+            prev = unit
         }
-
+        audioEngine.connect(prev, to: balanceMixer, format: format)
         audioEngine.connect(balanceMixer, to: audioEngine.mainMixerNode, format: format)
     }
 
@@ -902,20 +923,26 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         audioEngine.stop()
         connectAudioGraph(format: format)
 
-        do {
-            try audioEngine.start()
-        } catch {
-            // Plugin caused engine start failure (e.g. format incompatibility). Fall back to safe graph.
-            os_log(.error, "TangoDisplay: engine start failed with plugin, falling back: %{public}@",
-                   error.localizedDescription)
-            let name = settings.selectedAudioUnitPlugin?.name ?? ""
-            let failedPlugin = activeAudioUnitPlugin
-            activeAudioUnitPlugin = nil
-            audioUnitPluginStatus = .failed(name, reason: error.localizedDescription)
-            connectAudioGraph(format: format)
-            try? audioEngine.start()
-            if let plugin = failedPlugin {
-                audioEngine.detach(plugin)
+        // If a plugin in the live chain breaks engine startup (e.g. format incompatibility),
+        // drop slots from the end of the live chain one at a time and retry until it starts
+        // — this preserves the working portion of the chain.
+        while true {
+            do {
+                try audioEngine.start()
+                break
+            } catch {
+                let live = liveChainUnits()
+                guard let last = live.last else {
+                    os_log(.error, "TangoDisplay: engine start failed with no live plugins: %{public}@",
+                           error.localizedDescription)
+                    try? audioEngine.start()
+                    break
+                }
+                os_log(.error, "TangoDisplay: engine start failed; disabling slot %{public}@: %{public}@",
+                       last.slot.selection.name, error.localizedDescription)
+                markSlotFailed(id: last.slot.id, reason: error.localizedDescription)
+                audioEngine.stop()
+                connectAudioGraph(format: format)
             }
         }
 
@@ -925,234 +952,399 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             seekTo(savedElapsed)
             if wasPlaying { playerNode.play() }
         }
+        recomputeChainStatus()
     }
 
-    // MARK: - Audio Unit plugin actions
-
-    func selectAudioUnitPlugin(_ selection: AudioUnitPluginSelection) {
-        pluginLoadTask?.cancel()
-        pluginLoadTask = nil
-        closePluginWindow()
-        detachActivePlugin()
-        settings.selectedAudioUnitPlugin = selection
-        if settings.audioUnitPluginEnabled {
-            startPluginLoad(selection)
-        } else {
-            audioUnitPluginStatus = .disabled
+    private func markSlotFailed(id: UUID, reason: String) {
+        guard let runtime = slotRuntimes[id] else { return }
+        let name = settings.audioUnitPluginChain.first(where: { $0.id == id })?.selection.name ?? ""
+        runtime.status = .failed(name, reason: reason)
+        slotStatuses[id] = runtime.status
+        if let unit = runtime.avUnit {
+            audioEngine.disconnectNodeOutput(unit)
+            audioEngine.detach(unit)
         }
+        teardownSlotObservers(runtime)
+        runtime.avUnit = nil
+    }
+
+    // MARK: - Audio Unit chain actions
+
+    /// Append a plugin to the chain. No-op if the chain is already at the max.
+    @discardableResult
+    func addPluginSlot(_ selection: AudioUnitPluginSelection) -> UUID? {
+        guard settings.audioUnitPluginChain.count < AudioUnitChainSlot.maxSlots else { return nil }
+        let slot = AudioUnitChainSlot(selection: selection, isEnabled: true)
+        settings.audioUnitPluginChain.append(slot)
+        slotRuntimes[slot.id] = SlotRuntime()
+        slotStatuses[slot.id] = .loading(selection.name)
+        if settings.audioUnitPluginEnabled {
+            startSlotLoad(slot)
+        } else {
+            slotStatuses[slot.id] = .disabled
+        }
+        recomputeChainStatus()
+        return slot.id
+    }
+
+    /// Replace what's loaded in an existing slot. Preserves the slot's id and position.
+    func replacePluginSlot(id: UUID, with selection: AudioUnitPluginSelection) {
+        guard let index = settings.audioUnitPluginChain.firstIndex(where: { $0.id == id }) else { return }
+        tearDownSlot(id: id, detachAVUnit: true)
+        var updated = settings.audioUnitPluginChain[index]
+        updated.selection = selection
+        updated.lastUsedPresetName = nil
+        settings.audioUnitPluginChain[index] = updated
+        slotRuntimes[id] = SlotRuntime()
+        if settings.audioUnitPluginEnabled {
+            startSlotLoad(updated)
+        } else {
+            slotStatuses[id] = .disabled
+        }
+        rewireGraphSafely()
+    }
+
+    func removePluginSlot(id: UUID) {
+        tearDownSlot(id: id, detachAVUnit: true)
+        slotRuntimes.removeValue(forKey: id)
+        slotStatuses.removeValue(forKey: id)
+        slotPresets.removeValue(forKey: id)
+        slotActivePresetIDs.removeValue(forKey: id)
+        settings.audioUnitPluginChain.removeAll { $0.id == id }
+        rewireGraphSafely()
+    }
+
+    func moveSlot(from source: Int, to destination: Int) {
+        var chain = settings.audioUnitPluginChain
+        guard source >= 0, source < chain.count,
+              destination >= 0, destination <= chain.count,
+              source != destination else { return }
+        let item = chain.remove(at: source)
+        let target = destination > source ? destination - 1 : destination
+        chain.insert(item, at: min(target, chain.count))
+        settings.audioUnitPluginChain = chain
+        rewireGraphSafely()
+    }
+
+    func setSlotEnabled(id: UUID, enabled: Bool) {
+        guard let index = settings.audioUnitPluginChain.firstIndex(where: { $0.id == id }) else { return }
+        settings.audioUnitPluginChain[index].isEnabled = enabled
+        rewireGraphSafely()
+        recomputeChainStatus()
     }
 
     func enableAudioUnitPlugin() {
         settings.audioUnitPluginEnabled = true
-        guard let selection = settings.selectedAudioUnitPlugin else {
-            audioUnitPluginStatus = .noPluginSelected
-            return
+        // Kick off any slots that didn't load yet.
+        for slot in settings.audioUnitPluginChain where slotRuntimes[slot.id]?.avUnit == nil {
+            startSlotLoad(slot)
         }
-        if activeAudioUnitPlugin != nil {
-            audioUnitPluginStatus = settings.audioUnitPluginBypassed
-                ? .bypassed(selection.name) : .active(selection.name)
-            rewireGraphSafely()
-        } else {
-            startPluginLoad(selection)
-        }
+        rewireGraphSafely()
     }
 
     func disableAudioUnitPlugin() {
         settings.audioUnitPluginEnabled = false
-        audioUnitPluginStatus = .disabled
         rewireGraphSafely()
+        recomputeChainStatus()
     }
 
     func bypassAudioUnitPlugin(_ bypassed: Bool) {
         settings.audioUnitPluginBypassed = bypassed
-        if let name = settings.selectedAudioUnitPlugin?.name {
-            audioUnitPluginStatus = bypassed ? .bypassed(name) : .active(name)
-        }
         rewireGraphSafely()
+        recomputeChainStatus()
     }
 
-    func removeAudioUnitPlugin() {
-        pluginLoadTask?.cancel()
-        pluginLoadTask = nil
-        closePluginWindow()
-        detachActivePlugin()
-        settings.selectedAudioUnitPlugin = nil
-        settings.audioUnitPluginEnabled = false
-        settings.audioUnitPluginBypassed = false
-        audioUnitPluginStatus = .noPluginSelected
-        rewireGraphSafely()
-    }
-
-    func openPluginWindow() {
-        guard let avUnit = activeAudioUnitPlugin else { return }
-        if let existing = pluginWindow {
+    func openPluginWindow(slotId: UUID) {
+        guard let runtime = slotRuntimes[slotId], let avUnit = runtime.avUnit else { return }
+        if let existing = runtime.pluginWindow {
             existing.makeKeyAndOrderFront(nil)
             return
         }
+        let title = settings.audioUnitPluginChain.first(where: { $0.id == slotId })?.selection.name ?? "Plugin"
         avUnit.auAudioUnit.requestViewController { [weak self] viewController in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, let runtime = self.slotRuntimes[slotId] else { return }
                 guard let vc = viewController else {
-                    self.audioUnitPluginStatus = .failed(
-                        self.settings.selectedAudioUnitPlugin?.name ?? "",
-                        reason: "Plugin editor unavailable")
+                    runtime.status = .failed(title, reason: "Plugin editor unavailable")
+                    self.slotStatuses[slotId] = runtime.status
+                    self.recomputeChainStatus()
                     return
                 }
-                let wrapper = PluginWindowViewController(pluginVC: vc, player: self)
-                let window = NSWindow(contentViewController: wrapper)
-                window.title = self.settings.selectedAudioUnitPlugin?.name ?? "Plugin"
-                window.styleMask = [.titled, .closable, .resizable]
+                let wrapper = PluginWindowViewController(pluginVC: vc, player: self, slotId: slotId)
+                // Force loadView/viewDidLoad so wrapper.view is sized.
+                _ = wrapper.view
+                let initialSize: NSSize = wrapper.view.frame.size != .zero
+                    ? wrapper.view.frame.size
+                    : NSSize(width: 600, height: 400)
+
+                let window = NSWindow(
+                    contentRect: NSRect(origin: .zero, size: initialSize),
+                    styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.title = title
+                // Each plugin window stays standalone — never auto-merged into a
+                // tab group (which would also disable the resize handle). A
+                // unique tabbingIdentifier means even if macOS tries to group,
+                // there's no other window it could group with.
+                window.tabbingMode = .disallowed
+                window.tabbingIdentifier = "tangodisplay.plugin.\(slotId.uuidString)"
+                window.isRestorable = false
+                // Bypass `contentViewController = wrapper` deliberately: that
+                // setter binds the window's content size to the VC's
+                // preferredContentSize, which silently overrides manual resize
+                // and our own setContentSize calls. Setting contentView
+                // directly keeps the window freely resizable. We then hold the
+                // wrapper VC strongly in SlotRuntime since the window doesn't.
+                window.contentView = wrapper.view
+                window.contentMinSize = NSSize(width: 200, height: 100)
+                window.contentMaxSize = NSSize(width: 4096, height: 4096)
                 window.isReleasedWhenClosed = false
+                window.center()
                 window.makeKeyAndOrderFront(nil)
-                self.pluginWindow = window
+                // Defensive: if macOS somehow grouped us anyway, break out.
+                if window.tabGroup != nil {
+                    window.moveTabToNewWindow(nil)
+                }
+                runtime.pluginWindow = window
+                runtime.pluginWindowVC = wrapper
             }
         }
     }
 
-    func closePluginWindow() {
-        pluginWindow?.close()
-        pluginWindow = nil
+    func closePluginWindow(slotId: UUID) {
+        slotRuntimes[slotId]?.pluginWindow?.close()
+        slotRuntimes[slotId]?.pluginWindow = nil
+        slotRuntimes[slotId]?.pluginWindowVC = nil
     }
 
-    // MARK: - Presets
+    // MARK: - Presets (per slot)
 
-    func applyPreset(_ preset: AudioUnitPreset) {
-        guard let avUnit = activeAudioUnitPlugin, let manager = presetManager else { return }
-        isApplyingPreset = true
+    func applyPreset(_ preset: AudioUnitPreset, toSlot slotId: UUID) {
+        guard let runtime = slotRuntimes[slotId],
+              let avUnit = runtime.avUnit,
+              let manager = runtime.presetManager else { return }
+        runtime.isApplyingPreset = true
         do {
-            try manager.applyPreset(preset, to: avUnit, originator: parameterObserverToken)
-            activePresetID = preset.id
-            settings.lastUsedAUPresetName = preset.name
+            try manager.applyPreset(preset, to: avUnit, originator: runtime.paramObserverToken)
+            runtime.activePresetID = preset.id
+            slotActivePresetIDs[slotId] = preset.id
+            updateSlotPresetName(slotId: slotId, name: preset.name)
         } catch {
             os_log(.error, "TangoDisplay: applyPreset failed: %{public}@", error.localizedDescription)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.isApplyingPreset = false }
-    }
-
-    func saveCurrentAsPreset(named name: String) throws {
-        guard let avUnit = activeAudioUnitPlugin, let manager = presetManager else { return }
-        let preset = try manager.savePreset(name: name, from: avUnit)
-        availablePresets = manager.factoryPresets(for: avUnit) + manager.userPresets()
-        activePresetID = preset.id
-        settings.lastUsedAUPresetName = preset.name
-    }
-
-    func deletePreset(_ preset: AudioUnitPreset) throws {
-        guard let avUnit = activeAudioUnitPlugin, let manager = presetManager else { return }
-        try manager.deletePreset(preset)
-        availablePresets = manager.factoryPresets(for: avUnit) + manager.userPresets()
-        if activePresetID == preset.id {
-            activePresetID = nil
-            settings.lastUsedAUPresetName = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak runtime] in
+            runtime?.isApplyingPreset = false
         }
     }
 
-    // MARK: - Private: plugin internals
+    func saveCurrentAsPreset(named name: String, forSlot slotId: UUID) throws {
+        guard let runtime = slotRuntimes[slotId],
+              let avUnit = runtime.avUnit,
+              let manager = runtime.presetManager else { return }
+        let preset = try manager.savePreset(name: name, from: avUnit)
+        let all = manager.factoryPresets(for: avUnit) + manager.userPresets()
+        runtime.availablePresets = all
+        runtime.activePresetID = preset.id
+        slotPresets[slotId] = all
+        slotActivePresetIDs[slotId] = preset.id
+        updateSlotPresetName(slotId: slotId, name: preset.name)
+    }
+
+    func deletePreset(_ preset: AudioUnitPreset, fromSlot slotId: UUID) throws {
+        guard let runtime = slotRuntimes[slotId],
+              let avUnit = runtime.avUnit,
+              let manager = runtime.presetManager else { return }
+        try manager.deletePreset(preset)
+        let all = manager.factoryPresets(for: avUnit) + manager.userPresets()
+        runtime.availablePresets = all
+        slotPresets[slotId] = all
+        if runtime.activePresetID == preset.id {
+            runtime.activePresetID = nil
+            slotActivePresetIDs.removeValue(forKey: slotId)
+            updateSlotPresetName(slotId: slotId, name: nil)
+        }
+    }
+
+    private func updateSlotPresetName(slotId: UUID, name: String?) {
+        guard let index = settings.audioUnitPluginChain.firstIndex(where: { $0.id == slotId }) else { return }
+        settings.audioUnitPluginChain[index].lastUsedPresetName = name
+    }
+
+    // MARK: - Private: chain internals
 
     private func initializePluginStatus() {
-        guard let selection = settings.selectedAudioUnitPlugin else {
+        guard !settings.audioUnitPluginChain.isEmpty else {
             audioUnitPluginStatus = .noPluginSelected
             return
         }
-        guard settings.audioUnitPluginEnabled else {
-            audioUnitPluginStatus = .disabled
-            return
+        for slot in settings.audioUnitPluginChain {
+            if slotRuntimes[slot.id] == nil {
+                slotRuntimes[slot.id] = SlotRuntime()
+            }
+            if !settings.audioUnitPluginEnabled {
+                slotStatuses[slot.id] = .disabled
+                continue
+            }
+            if slotRuntimes[slot.id]?.avUnit != nil { continue }
+            if pluginManager.isAvailable(slot.selection) {
+                startSlotLoad(slot)
+            } else {
+                slotStatuses[slot.id] = .unavailable(slot.selection.name)
+            }
         }
-        // Plugin already live from a previous session cycle — no need to reload.
-        if activeAudioUnitPlugin != nil {
-            audioUnitPluginStatus = settings.audioUnitPluginBypassed
-                ? .bypassed(selection.name) : .active(selection.name)
-            return
-        }
-        if pluginManager.isAvailable(selection) {
-            startPluginLoad(selection)
-        } else {
-            audioUnitPluginStatus = .unavailable(selection.name)
-        }
+        recomputeChainStatus()
     }
 
-    private func startPluginLoad(_ selection: AudioUnitPluginSelection) {
-        pluginLoadTask?.cancel()
-        pluginLoadGeneration += 1
-        let gen = pluginLoadGeneration
-        audioUnitPluginStatus = .loading(selection.name)
-        pluginLoadTask = Task { [weak self] in
+    private func startSlotLoad(_ slot: AudioUnitChainSlot) {
+        let runtime = slotRuntimes[slot.id] ?? SlotRuntime()
+        slotRuntimes[slot.id] = runtime
+        runtime.loadTask?.cancel()
+        runtime.loadGeneration += 1
+        let gen = runtime.loadGeneration
+        let slotId = slot.id
+        let selection = slot.selection
+        runtime.status = .loading(selection.name)
+        slotStatuses[slotId] = runtime.status
+        recomputeChainStatus()
+
+        runtime.loadTask = Task { [weak self, weak runtime] in
             guard let self else { return }
             do {
                 let avUnit = try await pluginManager.instantiate(selection)
-                await MainActor.run { [weak self] in
-                    guard let self, self.pluginLoadGeneration == gen else {
-                        // Load became stale (user changed selection or removed plugin while loading).
-                        return
-                    }
+                await MainActor.run { [weak self, weak runtime] in
+                    guard let self, let runtime,
+                          runtime.loadGeneration == gen,
+                          self.settings.audioUnitPluginChain.contains(where: { $0.id == slotId })
+                    else { return }
                     self.audioEngine.attach(avUnit)
-                    self.activeAudioUnitPlugin = avUnit
-                    self.audioUnitPluginStatus = .active(selection.name)
-                    self.rewireGraphSafely()
-                    // Set up preset manager and auto-restore last-used preset
+                    runtime.avUnit = avUnit
+                    runtime.status = .active(selection.name)
+                    self.slotStatuses[slotId] = runtime.status
+
                     let manager = AudioUnitPresetManager(for: selection)
-                    self.presetManager = manager
-                    let allPresets = manager.factoryPresets(for: avUnit) + manager.userPresets()
-                    self.availablePresets = allPresets
-                    // Install observers first so tokens are available when applying the restore preset.
-                    if let tree = avUnit.auAudioUnit.parameterTree {
-                        self.parameterObserverTree = tree
-                        self.parameterObserverToken = tree.token(byAddingParameterObserver: { [weak self] _, _ in
-                            DispatchQueue.main.async {
-                                guard let self, !self.isApplyingPreset else { return }
-                                self.activePresetID = nil
-                                self.settings.lastUsedAUPresetName = nil
-                            }
-                        })
-                    }
-                    // Also watch currentPreset via KVO: V2 AU UIs (e.g. AUGraphicEQ "Flat" button)
-                    // apply factory presets through the V2 path which doesn't fire the parameter tree
-                    // observer above, but does change currentPreset.
-                    self.currentPresetObservation = avUnit.auAudioUnit.observe(
-                        \.currentPreset, options: [.new]
-                    ) { [weak self] _, _ in
-                        DispatchQueue.main.async {
-                            guard let self, !self.isApplyingPreset else { return }
-                            self.activePresetID = nil
-                            self.settings.lastUsedAUPresetName = nil
+                    runtime.presetManager = manager
+                    let all = manager.factoryPresets(for: avUnit) + manager.userPresets()
+                    runtime.availablePresets = all
+                    self.slotPresets[slotId] = all
+
+                    self.installSlotObservers(slotId: slotId, runtime: runtime, avUnit: avUnit)
+
+                    // Restore last-used preset for this slot.
+                    let savedName = self.settings.audioUnitPluginChain
+                        .first(where: { $0.id == slotId })?.lastUsedPresetName
+                    if let savedName, let match = all.first(where: { $0.name == savedName }) {
+                        runtime.isApplyingPreset = true
+                        try? manager.applyPreset(match, to: avUnit, originator: runtime.paramObserverToken)
+                        runtime.activePresetID = match.id
+                        self.slotActivePresetIDs[slotId] = match.id
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak runtime] in
+                            runtime?.isApplyingPreset = false
                         }
                     }
-                    // Restore last-used preset with guard flags to suppress observer feedback.
-                    if let savedName = self.settings.lastUsedAUPresetName,
-                       let match = allPresets.first(where: { $0.name == savedName }) {
-                        self.isApplyingPreset = true
-                        try? manager.applyPreset(match, to: avUnit, originator: self.parameterObserverToken)
-                        self.activePresetID = match.id
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                            self?.isApplyingPreset = false
-                        }
-                    }
+
+                    self.rewireGraphSafely()
                 }
             } catch {
-                await MainActor.run { [weak self] in
-                    guard let self, self.pluginLoadGeneration == gen else { return }
-                    self.audioUnitPluginStatus = .failed(selection.name, reason: error.localizedDescription)
-                    // Graph already on safe path (no plugin was attached).
+                await MainActor.run { [weak self, weak runtime] in
+                    guard let self, let runtime, runtime.loadGeneration == gen else { return }
+                    runtime.status = .failed(selection.name, reason: error.localizedDescription)
+                    self.slotStatuses[slotId] = runtime.status
+                    self.recomputeChainStatus()
                 }
             }
         }
     }
 
-    private func detachActivePlugin() {
-        guard let plugin = activeAudioUnitPlugin else { return }
-        // Disconnect before detach so the engine does not hold a reference to the node.
-        audioEngine.disconnectNodeOutput(plugin)
-        audioEngine.detach(plugin)
-        if let tree = parameterObserverTree, let token = parameterObserverToken {
+    private func installSlotObservers(slotId: UUID, runtime: SlotRuntime, avUnit: AVAudioUnit) {
+        if let tree = avUnit.auAudioUnit.parameterTree {
+            runtime.paramObserverTree = tree
+            runtime.paramObserverToken = tree.token(byAddingParameterObserver: { [weak self, weak runtime] _, _ in
+                DispatchQueue.main.async {
+                    guard let self, let runtime, !runtime.isApplyingPreset else { return }
+                    runtime.activePresetID = nil
+                    self.slotActivePresetIDs.removeValue(forKey: slotId)
+                    self.updateSlotPresetName(slotId: slotId, name: nil)
+                }
+            })
+        }
+        // KVO on currentPreset catches V2 AU UIs (e.g. AUGraphicEQ "Flat") that bypass the parameter tree.
+        runtime.currentPresetObservation = avUnit.auAudioUnit.observe(\.currentPreset, options: [.new]) {
+            [weak self, weak runtime] _, _ in
+            DispatchQueue.main.async {
+                guard let self, let runtime, !runtime.isApplyingPreset else { return }
+                runtime.activePresetID = nil
+                self.slotActivePresetIDs.removeValue(forKey: slotId)
+                self.updateSlotPresetName(slotId: slotId, name: nil)
+            }
+        }
+    }
+
+    private func teardownSlotObservers(_ runtime: SlotRuntime) {
+        if let tree = runtime.paramObserverTree, let token = runtime.paramObserverToken {
             tree.removeParameterObserver(token)
         }
-        parameterObserverToken = nil
-        parameterObserverTree = nil
-        currentPresetObservation = nil
-        activeAudioUnitPlugin = nil
-        presetManager = nil
-        availablePresets = []
-        activePresetID = nil
+        runtime.paramObserverTree = nil
+        runtime.paramObserverToken = nil
+        runtime.currentPresetObservation = nil
+    }
+
+    private func tearDownSlot(id: UUID, detachAVUnit: Bool) {
+        guard let runtime = slotRuntimes[id] else { return }
+        runtime.loadTask?.cancel()
+        runtime.loadTask = nil
+        runtime.pluginWindow?.close()
+        runtime.pluginWindow = nil
+        runtime.pluginWindowVC = nil
+        teardownSlotObservers(runtime)
+        if detachAVUnit, let unit = runtime.avUnit {
+            audioEngine.disconnectNodeOutput(unit)
+            audioEngine.detach(unit)
+        }
+        runtime.avUnit = nil
+        runtime.presetManager = nil
+        runtime.availablePresets = []
+        runtime.activePresetID = nil
+        slotPresets.removeValue(forKey: id)
+        slotActivePresetIDs.removeValue(forKey: id)
+    }
+
+    private func recomputeChainStatus() {
+        let chain = settings.audioUnitPluginChain
+        guard !chain.isEmpty else {
+            audioUnitPluginStatus = .noPluginSelected
+            return
+        }
+        if !settings.audioUnitPluginEnabled {
+            audioUnitPluginStatus = .disabled
+            return
+        }
+        // Surface a failure if any slot is broken.
+        if let failed = chain.compactMap({ slot -> (String, String)? in
+            if case .failed(let n, let r) = slotStatuses[slot.id] ?? .noPluginSelected {
+                return (n, r)
+            }
+            return nil
+        }).first {
+            audioUnitPluginStatus = .failed(failed.0, reason: failed.1)
+            return
+        }
+        if settings.audioUnitPluginBypassed {
+            audioUnitPluginStatus = .bypassed(chainSummaryName(chain))
+            return
+        }
+        // Loading wins over active so the UI shows progress.
+        if chain.contains(where: { if case .loading = slotStatuses[$0.id] ?? .noPluginSelected { return true } else { return false } }) {
+            audioUnitPluginStatus = .loading(chainSummaryName(chain))
+            return
+        }
+        audioUnitPluginStatus = .active(chainSummaryName(chain))
+    }
+
+    private func chainSummaryName(_ chain: [AudioUnitChainSlot]) -> String {
+        if chain.count == 1 { return chain[0].selection.name }
+        return "\(chain.count) plugins"
     }
 
     // MARK: - Private: observers

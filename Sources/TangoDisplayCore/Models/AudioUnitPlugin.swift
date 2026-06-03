@@ -48,6 +48,27 @@ public struct AudioUnitPluginSelection: Codable, Equatable, Identifiable {
     }
 }
 
+public struct AudioUnitChainSlot: Codable, Equatable, Identifiable {
+    public static let maxSlots: Int = 4
+
+    public let id: UUID
+    public var selection: AudioUnitPluginSelection
+    public var isEnabled: Bool
+    public var lastUsedPresetName: String?
+
+    public init(
+        id: UUID = UUID(),
+        selection: AudioUnitPluginSelection,
+        isEnabled: Bool = true,
+        lastUsedPresetName: String? = nil
+    ) {
+        self.id = id
+        self.selection = selection
+        self.isEnabled = isEnabled
+        self.lastUsedPresetName = lastUsedPresetName
+    }
+}
+
 public enum AudioUnitPluginStatus: Equatable {
     case disabled
     case noPluginSelected

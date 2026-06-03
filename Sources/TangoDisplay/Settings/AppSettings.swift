@@ -262,22 +262,15 @@ final class AppSettings: ObservableObject {
     @Published var audioUnitPluginBypassed: Bool {
         didSet { UserDefaults.standard.set(audioUnitPluginBypassed, forKey: kPrefix + "audioUnitPluginBypassed") }
     }
-    @Published var selectedAudioUnitPlugin: AudioUnitPluginSelection? {
+    @Published var audioUnitPluginChain: [AudioUnitChainSlot] {
         didSet {
-            if let sel = selectedAudioUnitPlugin,
-               let data = try? JSONEncoder().encode(sel) {
-                UserDefaults.standard.set(data, forKey: kPrefix + "selectedAudioUnitPlugin")
-            } else {
-                UserDefaults.standard.removeObject(forKey: kPrefix + "selectedAudioUnitPlugin")
+            // Enforce the cap at the model boundary so any caller is safe.
+            if audioUnitPluginChain.count > AudioUnitChainSlot.maxSlots {
+                audioUnitPluginChain = Array(audioUnitPluginChain.prefix(AudioUnitChainSlot.maxSlots))
+                return
             }
-        }
-    }
-    @Published var lastUsedAUPresetName: String? {
-        didSet {
-            if let name = lastUsedAUPresetName {
-                UserDefaults.standard.set(name, forKey: kPrefix + "lastUsedAUPresetName")
-            } else {
-                UserDefaults.standard.removeObject(forKey: kPrefix + "lastUsedAUPresetName")
+            if let data = try? JSONEncoder().encode(audioUnitPluginChain) {
+                UserDefaults.standard.set(data, forKey: kPrefix + "audioUnitPluginChain")
             }
         }
     }
@@ -409,13 +402,28 @@ final class AppSettings: ObservableObject {
         }
         audioUnitPluginEnabled = ud.object(forKey: kPrefix + "audioUnitPluginEnabled").flatMap { $0 as? Bool } ?? false
         audioUnitPluginBypassed = ud.object(forKey: kPrefix + "audioUnitPluginBypassed").flatMap { $0 as? Bool } ?? false
-        if let data = ud.data(forKey: kPrefix + "selectedAudioUnitPlugin"),
-           let sel = try? JSONDecoder().decode(AudioUnitPluginSelection.self, from: data) {
-            selectedAudioUnitPlugin = sel
+        if let data = ud.data(forKey: kPrefix + "audioUnitPluginChain"),
+           let chain = try? JSONDecoder().decode([AudioUnitChainSlot].self, from: data) {
+            audioUnitPluginChain = Array(chain.prefix(AudioUnitChainSlot.maxSlots))
+        } else if let data = ud.data(forKey: kPrefix + "selectedAudioUnitPlugin"),
+                  let sel = try? JSONDecoder().decode(AudioUnitPluginSelection.self, from: data) {
+            // Migrate the legacy single-plugin setting into a one-slot chain.
+            let legacyPreset = ud.string(forKey: kPrefix + "lastUsedAUPresetName")
+            let migrated = [AudioUnitChainSlot(
+                selection: sel,
+                isEnabled: true,
+                lastUsedPresetName: legacyPreset
+            )]
+            audioUnitPluginChain = migrated
+            // didSet does not fire from init — persist + clean legacy keys manually.
+            if let migratedData = try? JSONEncoder().encode(migrated) {
+                ud.set(migratedData, forKey: kPrefix + "audioUnitPluginChain")
+            }
+            ud.removeObject(forKey: kPrefix + "selectedAudioUnitPlugin")
+            ud.removeObject(forKey: kPrefix + "lastUsedAUPresetName")
         } else {
-            selectedAudioUnitPlugin = nil
+            audioUnitPluginChain = []
         }
-        lastUsedAUPresetName = ud.string(forKey: kPrefix + "lastUsedAUPresetName")
         decibelMeterEnabled = ud.object(forKey: kPrefix + "decibelMeterEnabled").flatMap { $0 as? Bool } ?? false
         decibelMeterLowThreshold  = ud.object(forKey: kPrefix + "decibelMeterLowThreshold").flatMap { $0 as? Int } ?? 60
         decibelMeterHighThreshold = ud.object(forKey: kPrefix + "decibelMeterHighThreshold").flatMap { $0 as? Int } ?? 80

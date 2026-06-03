@@ -49,7 +49,7 @@ A native macOS menu-bar app that shows a clean, fullscreen dancer display on an 
 ### Option A — Download pre-built app (easiest)
 
 1. Go to the [Releases](https://github.com/richardsladetdj-creator/TangoDisplay/releases) page
-2. Download `TangoDisplay-v3.23.0-universal.zip` (works on both Apple Silicon and Intel Macs)
+2. Download `TangoDisplay-v3.24.0-beta.2-universal.zip` (works on both Apple Silicon and Intel Macs)
 3. Unzip and drag `TangoDisplay.app` to your `/Applications` folder
 4. **Right-click › Open** on first launch (required because the app is ad-hoc signed, not notarised)
 5. Grant the permissions macOS requests (see [Permissions](#permissions) below)
@@ -135,6 +135,16 @@ Key design decisions:
 ---
 
 ## Changelog
+
+### v3.24.0-beta.2 (pre-release — not distributed via auto-update)
+- **Fix**: Audio Unit editor windows now auto-resize when a plugin's built-in expander or scale controls change its UI size (e.g. Klanghelm MJUC's expander at SIZE 100%). Root cause: V2 plugins were being loaded out-of-process, and frame-change events from the plugin's NSView never reached the host across Apple's V2→V3 NSRemoteView bridge. V2 AUs now load in-process; V3 AUs continue to load out-of-process for crash isolation.
+- Plugin editor window hosting restructured to match Embrace's resize pattern (plugin view as a direct subview of the window content, resize driven by NSViewFrameDidChangeNotification, titlebar kept fixed).
+- macOS automatic window tabbing disabled app-wide so plugin editor windows are never auto-merged into a tab group (which would disable their resize handle).
+
+### v3.24.0-beta.1 (pre-release — not distributed via auto-update)
+- **Audio Unit Plugin Chain** (new): the Setlist player can now host **up to 4 Audio Units in series** instead of a single Apple-bundled plugin. Configure the chain in **Player Settings › Audio Unit Plugins**: add plugins, reorder with the up/down arrows, bypass slots individually, open each plugin's editor window, and save/recall presets per slot. A new toolbar popover in the Setlist view gives quick chain access (bypass, slot enable, editor windows) for live use.
+- **Third-party plugins supported**: the browser now lists every `kAudioUnitType_Effect` Audio Unit installed on the system (e.g. FabFilter Pro-Q4, Klanghelm MJUC), not just the curated Apple effects. AUv3 plugins are loaded out-of-process via XPC so a plugin crash is isolated from TangoDisplay; AUv2 plugins fall back to in-process. **Third-party Audio Units run at your own risk** — an unstable plugin may still interrupt playback.
+- The legacy single-plugin setting from previous versions is migrated automatically into slot 1 of the new chain on first launch.
 
 ### v3.23.0
 - **Setlist Remote** (new): toggle on in **Settings › Player › Setlist Remote** to control volume, cortina volume, and replay gain from your phone over Wi-Fi. A built-in web page shows the URL and a QR code; a 4-digit PIN regenerates each time the app launches.

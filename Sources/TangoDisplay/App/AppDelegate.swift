@@ -9,6 +9,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeyService = HotkeyService()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Disable macOS automatic window tabbing app-wide. Plugin editor
+        // windows would otherwise get auto-merged into a tabbed container,
+        // which disables the resize handle and breaks setContentSize calls.
+        NSWindow.allowsAutomaticWindowTabbing = false
+
         guard let appState else { return }
         appState.profileStore.load()
         appState.start()

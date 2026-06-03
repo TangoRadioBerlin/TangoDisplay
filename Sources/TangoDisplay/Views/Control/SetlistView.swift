@@ -472,6 +472,7 @@ struct SetlistView: View {
     @State private var showBalancePopover = false
     @State private var showAutoGapPopover = false
     @State private var showReplayGainPopover = false
+    @State private var showPluginChainPopover = false
     @State private var scrollTrigger: UUID? = nil
     @State private var showLastTandaWarning = false
     @State private var pasteMonitor: Any? = nil
@@ -820,12 +821,15 @@ struct SetlistView: View {
                             .environmentObject(settings)
                     }
                     .help("ReplayGain normalisation")
-                    if settings.selectedAudioUnitPlugin != nil {
-                        Button { player.openPluginWindow() } label: {
-                            Label("Plugin", systemImage: "puzzlepiece.fill")
+                    if !settings.audioUnitPluginChain.isEmpty {
+                        Button { showPluginChainPopover.toggle() } label: {
+                            Label("Plugins", systemImage: "puzzlepiece.fill")
                         }
-                        .disabled(!settings.audioUnitPluginEnabled || settings.audioUnitPluginBypassed)
-                        .help("Open audio plugin window")
+                        .popover(isPresented: $showPluginChainPopover) {
+                            PluginChainPopoverView(player: player)
+                                .environmentObject(settings)
+                        }
+                        .help("Audio Unit plugin chain")
                     }
                 }
             }
