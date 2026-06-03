@@ -18,7 +18,7 @@ struct PlayingView: View {
                         Text(settings.displayLabel(for: genre).uppercased())
                             .font(profile.genreFont)
                             .foregroundColor(profile.genreSwiftUIColor)
-                            .multilineTextAlignment(.center)
+                            .positioned(offsetX: profile.genreOffsetX, offsetY: profile.genreOffsetY)
                     }
                 case .artist:
                     if profile.showArtistDance, let artist = state.currentTrack?.artist, !artist.isEmpty {
@@ -26,9 +26,9 @@ struct PlayingView: View {
                         Text(displayArtist)
                             .font(profile.artistFont)
                             .foregroundColor(profile.artistSwiftUIColor)
-                            .multilineTextAlignment(.center)
                             .lineLimit(Self.dynamicLineLimit(displayArtist))
                             .minimumScaleFactor(0.5)
+                            .positioned(offsetX: profile.artistOffsetX, offsetY: profile.artistOffsetY)
                     }
                 case .year:
                     if profile.showYearDance, let year = state.currentTrack?.year {
@@ -37,7 +37,7 @@ struct PlayingView: View {
                             Text(displayYear)
                                 .font(profile.yearFont)
                                 .foregroundColor(profile.yearSwiftUIColor)
-                                .multilineTextAlignment(.center)
+                                .positioned(offsetX: profile.yearOffsetX, offsetY: profile.yearOffsetY)
                         }
                     }
                 case .title:
@@ -46,9 +46,9 @@ struct PlayingView: View {
                         Text(displayTitle)
                             .font(profile.titleFont)
                             .foregroundColor(profile.titleSwiftUIColor)
-                            .multilineTextAlignment(.center)
                             .lineLimit(Self.dynamicLineLimit(displayTitle))
                             .minimumScaleFactor(0.5)
+                            .positioned(offsetX: profile.titleOffsetX, offsetY: profile.titleOffsetY)
                     }
                 case .singer:
                     if profile.showSingerDance,
@@ -66,9 +66,9 @@ struct PlayingView: View {
                             Text(singer)
                                 .font(profile.singerFont)
                                 .foregroundColor(profile.singerSwiftUIColor)
-                                .multilineTextAlignment(.center)
                                 .lineLimit(Self.dynamicLineLimit(singer))
                                 .minimumScaleFactor(0.5)
+                                .positioned(offsetX: profile.singerOffsetX, offsetY: profile.singerOffsetY)
                         }
                     }
                 case .lastTandaLabel:
@@ -76,7 +76,7 @@ struct PlayingView: View {
                         Text(settings.lastTandaLabel.uppercased())
                             .font(profile.lastTandaLabelFont)
                             .foregroundColor(profile.lastTandaLabelSwiftUIColor)
-                            .multilineTextAlignment(.center)
+                            .positioned(offsetX: profile.lastTandaLabelOffsetX, offsetY: profile.lastTandaLabelOffsetY)
                     }
                 case .trackCounter:
                     if settings.showTrackCounter,
@@ -86,7 +86,7 @@ struct PlayingView: View {
                             .font(profile.trackCounterFont)
                             .foregroundColor(profile.trackCounterSwiftUIColor)
                             .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
-                            .multilineTextAlignment(.center)
+                            .positioned(offsetX: profile.trackCounterOffsetX, offsetY: profile.trackCounterOffsetY)
                     }
                 case .cortinaLabel, .cortinaArtist, .cortinaTitle, .nextUpLabel:
                     EmptyView()

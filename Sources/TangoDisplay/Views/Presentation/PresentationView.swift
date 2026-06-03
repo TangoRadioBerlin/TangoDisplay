@@ -121,6 +121,7 @@ struct PresentationView: View {
                     .foregroundColor(activeProfile.trackCounterSwiftUIColor)
                     .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
                     .padding(24)
+                    .offset(x: activeProfile.trackCounterOffsetX, y: activeProfile.trackCounterOffsetY)
                     .allowsHitTesting(false)
             }
         }

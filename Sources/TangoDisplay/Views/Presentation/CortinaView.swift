@@ -20,7 +20,7 @@ struct CortinaView: View {
                             .font(profile.cortinaLabelFont)
                             .tracking(12)
                             .foregroundColor(profile.cortinaLabelSwiftUIColor)
-                            .multilineTextAlignment(.center)
+                            .positioned(offsetX: profile.cortinaLabelOffsetX, offsetY: profile.cortinaLabelOffsetY)
                     case .cortinaArtist:
                         if profile.showCortinaTrackDuringCortina,
                            profile.showCortinaTrackArtist,
@@ -28,9 +28,9 @@ struct CortinaView: View {
                             Text(settings.transform(artist, for: .artist))
                                 .font(profile.cortinaArtistFont)
                                 .foregroundColor(profile.cortinaArtistSwiftUIColor)
-                                .multilineTextAlignment(.center)
                                 .lineLimit(2)
                                 .minimumScaleFactor(0.5)
+                                .positioned(offsetX: profile.cortinaArtistOffsetX, offsetY: profile.cortinaArtistOffsetY)
                         }
                     case .cortinaTitle:
                         if profile.showCortinaTrackDuringCortina,
@@ -39,9 +39,9 @@ struct CortinaView: View {
                             Text(settings.transform(title, for: .title))
                                 .font(profile.cortinaTitleFont)
                                 .foregroundColor(profile.cortinaTitleSwiftUIColor)
-                                .multilineTextAlignment(.center)
                                 .lineLimit(2)
                                 .minimumScaleFactor(0.5)
+                                .positioned(offsetX: profile.cortinaTitleOffsetX, offsetY: profile.cortinaTitleOffsetY)
                         }
                     default:
                         EmptyView()
@@ -68,6 +68,7 @@ struct CortinaView: View {
                                     .font(profile.nextUpLabelFont)
                                     .tracking(4)
                                     .foregroundColor(profile.nextUpLabelSwiftUIColor)
+                                    .positioned(offsetX: profile.nextUpLabelOffsetX, offsetY: profile.nextUpLabelOffsetY)
                             }
                         case .genre:
                             if showComingUp, let next = state.nextTrack,
@@ -75,6 +76,7 @@ struct CortinaView: View {
                                 Text(settings.displayLabel(for: next.genre))
                                     .font(profile.genreFont)
                                     .foregroundColor(profile.genreSwiftUIColor)
+                                    .positioned(offsetX: profile.genreOffsetX, offsetY: profile.genreOffsetY)
                             }
                         case .artist:
                             if showComingUp, let next = state.nextTrack, profile.showArtistCortina {
@@ -83,7 +85,7 @@ struct CortinaView: View {
                                     .foregroundColor(profile.artistSwiftUIColor)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.5)
-                                    .multilineTextAlignment(.center)
+                                    .positioned(offsetX: profile.artistOffsetX, offsetY: profile.artistOffsetY)
                             }
                         case .year:
                             if showComingUp, let next = state.nextTrack,
@@ -93,7 +95,7 @@ struct CortinaView: View {
                                     Text(displayYear)
                                         .font(profile.yearFont)
                                         .foregroundColor(profile.yearSwiftUIColor)
-                                        .multilineTextAlignment(.center)
+                                        .positioned(offsetX: profile.yearOffsetX, offsetY: profile.yearOffsetY)
                                 }
                             }
                         case .title:
@@ -102,9 +104,9 @@ struct CortinaView: View {
                                 Text(settings.transform(next.title, for: .title))
                                     .font(profile.titleFont)
                                     .foregroundColor(profile.titleSwiftUIColor)
-                                    .multilineTextAlignment(.center)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.5)
+                                    .positioned(offsetX: profile.titleOffsetX, offsetY: profile.titleOffsetY)
                             }
                         case .singer:
                             if showComingUp, let next = state.nextTrack,
@@ -122,9 +124,9 @@ struct CortinaView: View {
                                     Text(singer)
                                         .font(profile.singerFont)
                                         .foregroundColor(profile.singerSwiftUIColor)
-                                        .multilineTextAlignment(.center)
                                         .lineLimit(2)
                                         .minimumScaleFactor(0.5)
+                                        .positioned(offsetX: profile.singerOffsetX, offsetY: profile.singerOffsetY)
                                 }
                             }
                         case .lastTandaLabel:
@@ -132,7 +134,7 @@ struct CortinaView: View {
                                 Text(settings.lastTandaLabel.uppercased())
                                     .font(profile.lastTandaLabelFont)
                                     .foregroundColor(profile.lastTandaLabelSwiftUIColor)
-                                    .multilineTextAlignment(.center)
+                                    .positioned(offsetX: profile.lastTandaLabelOffsetX, offsetY: profile.lastTandaLabelOffsetY)
                             }
                         default:
                             EmptyView()

@@ -186,6 +186,32 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     public var overrideTextFontItalic: Bool
     public var overrideTextColor:      String
 
+    // Per-element position offsets (points), analogous to albumArtworkOffsetX/Y.
+    // A non-zero X left-aligns that element (see ColorExtension.positioned); 0 keeps it centred.
+    // Shared between the dance display and the cortina "coming up" section, like the fonts/colours.
+    public var titleOffsetX: Double
+    public var titleOffsetY: Double
+    public var artistOffsetX: Double
+    public var artistOffsetY: Double
+    public var genreOffsetX: Double
+    public var genreOffsetY: Double
+    public var yearOffsetX: Double
+    public var yearOffsetY: Double
+    public var singerOffsetX: Double
+    public var singerOffsetY: Double
+    public var trackCounterOffsetX: Double
+    public var trackCounterOffsetY: Double
+    public var lastTandaLabelOffsetX: Double
+    public var lastTandaLabelOffsetY: Double
+    public var cortinaLabelOffsetX: Double
+    public var cortinaLabelOffsetY: Double
+    public var cortinaArtistOffsetX: Double
+    public var cortinaArtistOffsetY: Double
+    public var cortinaTitleOffsetX: Double
+    public var cortinaTitleOffsetY: Double
+    public var nextUpLabelOffsetX: Double
+    public var nextUpLabelOffsetY: Double
+
     public init(id: UUID, name: String, isBuiltIn: Bool,
                 titleFontName: String = "System", titleFontSize: Double = 72,
                 titleFontBold: Bool = true, titleFontItalic: Bool = false,
@@ -277,7 +303,18 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 trackCounterFontBold: Bool = false, trackCounterFontItalic: Bool = false,
                 overrideTextFontName: String = "System", overrideTextFontSize: Double = 72,
                 overrideTextFontBold: Bool = false, overrideTextFontItalic: Bool = false,
-                overrideTextColor: String = "#FFFFFF") {
+                overrideTextColor: String = "#FFFFFF",
+                titleOffsetX: Double = 0, titleOffsetY: Double = 0,
+                artistOffsetX: Double = 0, artistOffsetY: Double = 0,
+                genreOffsetX: Double = 0, genreOffsetY: Double = 0,
+                yearOffsetX: Double = 0, yearOffsetY: Double = 0,
+                singerOffsetX: Double = 0, singerOffsetY: Double = 0,
+                trackCounterOffsetX: Double = 0, trackCounterOffsetY: Double = 0,
+                lastTandaLabelOffsetX: Double = 0, lastTandaLabelOffsetY: Double = 0,
+                cortinaLabelOffsetX: Double = 0, cortinaLabelOffsetY: Double = 0,
+                cortinaArtistOffsetX: Double = 0, cortinaArtistOffsetY: Double = 0,
+                cortinaTitleOffsetX: Double = 0, cortinaTitleOffsetY: Double = 0,
+                nextUpLabelOffsetX: Double = 0, nextUpLabelOffsetY: Double = 0) {
         self.id = id
         self.name = name
         self.isBuiltIn = isBuiltIn
@@ -396,6 +433,17 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.overrideTextFontBold   = overrideTextFontBold
         self.overrideTextFontItalic = overrideTextFontItalic
         self.overrideTextColor      = overrideTextColor
+        self.titleOffsetX = titleOffsetX;             self.titleOffsetY = titleOffsetY
+        self.artistOffsetX = artistOffsetX;           self.artistOffsetY = artistOffsetY
+        self.genreOffsetX = genreOffsetX;             self.genreOffsetY = genreOffsetY
+        self.yearOffsetX = yearOffsetX;               self.yearOffsetY = yearOffsetY
+        self.singerOffsetX = singerOffsetX;           self.singerOffsetY = singerOffsetY
+        self.trackCounterOffsetX = trackCounterOffsetX; self.trackCounterOffsetY = trackCounterOffsetY
+        self.lastTandaLabelOffsetX = lastTandaLabelOffsetX; self.lastTandaLabelOffsetY = lastTandaLabelOffsetY
+        self.cortinaLabelOffsetX = cortinaLabelOffsetX; self.cortinaLabelOffsetY = cortinaLabelOffsetY
+        self.cortinaArtistOffsetX = cortinaArtistOffsetX; self.cortinaArtistOffsetY = cortinaArtistOffsetY
+        self.cortinaTitleOffsetX = cortinaTitleOffsetX; self.cortinaTitleOffsetY = cortinaTitleOffsetY
+        self.nextUpLabelOffsetX = nextUpLabelOffsetX;  self.nextUpLabelOffsetY = nextUpLabelOffsetY
     }
 
     // Custom decoder so existing JSON lacking the image keys still loads cleanly.
@@ -551,6 +599,30 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         overrideTextFontBold   = try c.decodeIfPresent(Bool.self,   forKey: .overrideTextFontBold)   ?? false
         overrideTextFontItalic = try c.decodeIfPresent(Bool.self,   forKey: .overrideTextFontItalic) ?? false
         overrideTextColor      = try c.decodeIfPresent(String.self, forKey: .overrideTextColor)      ?? titleColor
+
+        // Per-element position offsets — absent in older JSON, default to 0 (centred, no offset).
+        titleOffsetX          = try c.decodeIfPresent(Double.self, forKey: .titleOffsetX)          ?? 0
+        titleOffsetY          = try c.decodeIfPresent(Double.self, forKey: .titleOffsetY)          ?? 0
+        artistOffsetX         = try c.decodeIfPresent(Double.self, forKey: .artistOffsetX)         ?? 0
+        artistOffsetY         = try c.decodeIfPresent(Double.self, forKey: .artistOffsetY)         ?? 0
+        genreOffsetX          = try c.decodeIfPresent(Double.self, forKey: .genreOffsetX)          ?? 0
+        genreOffsetY          = try c.decodeIfPresent(Double.self, forKey: .genreOffsetY)          ?? 0
+        yearOffsetX           = try c.decodeIfPresent(Double.self, forKey: .yearOffsetX)           ?? 0
+        yearOffsetY           = try c.decodeIfPresent(Double.self, forKey: .yearOffsetY)           ?? 0
+        singerOffsetX         = try c.decodeIfPresent(Double.self, forKey: .singerOffsetX)         ?? 0
+        singerOffsetY         = try c.decodeIfPresent(Double.self, forKey: .singerOffsetY)         ?? 0
+        trackCounterOffsetX   = try c.decodeIfPresent(Double.self, forKey: .trackCounterOffsetX)   ?? 0
+        trackCounterOffsetY   = try c.decodeIfPresent(Double.self, forKey: .trackCounterOffsetY)   ?? 0
+        lastTandaLabelOffsetX = try c.decodeIfPresent(Double.self, forKey: .lastTandaLabelOffsetX) ?? 0
+        lastTandaLabelOffsetY = try c.decodeIfPresent(Double.self, forKey: .lastTandaLabelOffsetY) ?? 0
+        cortinaLabelOffsetX   = try c.decodeIfPresent(Double.self, forKey: .cortinaLabelOffsetX)   ?? 0
+        cortinaLabelOffsetY   = try c.decodeIfPresent(Double.self, forKey: .cortinaLabelOffsetY)   ?? 0
+        cortinaArtistOffsetX  = try c.decodeIfPresent(Double.self, forKey: .cortinaArtistOffsetX)  ?? 0
+        cortinaArtistOffsetY  = try c.decodeIfPresent(Double.self, forKey: .cortinaArtistOffsetY)  ?? 0
+        cortinaTitleOffsetX   = try c.decodeIfPresent(Double.self, forKey: .cortinaTitleOffsetX)   ?? 0
+        cortinaTitleOffsetY   = try c.decodeIfPresent(Double.self, forKey: .cortinaTitleOffsetY)   ?? 0
+        nextUpLabelOffsetX    = try c.decodeIfPresent(Double.self, forKey: .nextUpLabelOffsetX)    ?? 0
+        nextUpLabelOffsetY    = try c.decodeIfPresent(Double.self, forKey: .nextUpLabelOffsetY)    ?? 0
 
         // Migration: append items to order lists if absent
         if !danceItemOrder.contains(.lastTandaLabel) {

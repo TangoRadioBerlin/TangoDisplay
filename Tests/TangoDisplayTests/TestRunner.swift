@@ -1036,6 +1036,519 @@ func runAudioUnitPluginTests() {
     }
 }
 
+// MARK: - TandaPosition label tests
+
+func runTandaPositionTests() {
+    suite("TandaPosition — label") {
+        test("with total") {
+            try expectEqual(TandaPosition(current: 2, total: 4).label, "Track 2 of 4")
+        }
+        test("without total") {
+            try expectEqual(TandaPosition(current: 3, total: nil).label, "Track 3")
+        }
+    }
+}
+
+// MARK: - AudioUnitPreset tests
+
+func runAudioUnitPresetTests() {
+    suite("AudioUnitPreset — kind predicates") {
+        test("factory preset") {
+            let p = AudioUnitPreset(name: "Hall", kind: .factory(number: 3))
+            try expect(p.isFactory)
+            try expect(!p.isUser)
+            try expectEqual(p.factoryNumber, 3)
+        }
+        test("user preset") {
+            let p = AudioUnitPreset(name: "Mine", kind: .user(parameterData: Data([1, 2, 3])))
+            try expect(!p.isFactory)
+            try expect(p.isUser)
+            try expectNil(p.factoryNumber)
+        }
+        test("explicit id is retained") {
+            let id = UUID()
+            let p = AudioUnitPreset(id: id, name: "X", kind: .factory(number: 0))
+            try expectEqual(p.id, id)
+        }
+        test("Equatable — same kind & id are equal") {
+            let id = UUID()
+            try expect(AudioUnitPreset(id: id, name: "A", kind: .factory(number: 1))
+                       == AudioUnitPreset(id: id, name: "A", kind: .factory(number: 1)))
+        }
+    }
+}
+
+// MARK: - AudioUnitPluginStatus shortDisplayText (exact strings)
+
+func runAudioUnitPluginStatusShortTextTests() {
+    suite("AudioUnitPluginStatus — shortDisplayText exact") {
+        test("loading") {
+            try expectEqual(AudioUnitPluginStatus.loading("MJUC").shortDisplayText, "AU: Loading MJUC…")
+        }
+        test("active") {
+            try expectEqual(AudioUnitPluginStatus.active("MJUC").shortDisplayText, "AU: MJUC")
+        }
+        test("bypassed (name omitted)") {
+            try expectEqual(AudioUnitPluginStatus.bypassed("MJUC").shortDisplayText, "AU: Bypassed")
+        }
+        test("unavailable") {
+            try expectEqual(AudioUnitPluginStatus.unavailable("Red 2 EQ").shortDisplayText,
+                            "AU: Not available — Red 2 EQ")
+        }
+        test("failed (reason omitted)") {
+            try expectEqual(AudioUnitPluginStatus.failed("REAMP", reason: "timeout").shortDisplayText,
+                            "AU: Failed to load")
+        }
+    }
+}
+
+// MARK: - ReplayGainMode tests
+
+func runReplayGainModeTests() {
+    suite("ReplayGainMode — displayName & coding") {
+        test("display names") {
+            try expectEqual(ReplayGainMode.off.displayName, "Off")
+            try expectEqual(ReplayGainMode.track.displayName, "Track Gain")
+            try expectEqual(ReplayGainMode.album.displayName, "Album Gain")
+            try expectEqual(ReplayGainMode.auto.displayName, "Auto")
+        }
+        test("id equals rawValue") {
+            try expectEqual(ReplayGainMode.auto.id, "auto")
+        }
+        test("rawValues are stable") {
+            try expectEqual(ReplayGainMode.allCases.map(\.rawValue), ["off", "track", "album", "auto"])
+        }
+        test("codable round-trip for all cases") {
+            for mode in ReplayGainMode.allCases {
+                let data = try JSONEncoder().encode([mode])
+                let back = try JSONDecoder().decode([ReplayGainMode].self, from: data)
+                try expectEqual(back, [mode])
+            }
+        }
+    }
+}
+
+// MARK: - LoudnessAnalysisResult tests
+
+func runLoudnessAnalysisResultTests() {
+    let modDate = Date(timeIntervalSince1970: 1_700_000_000)
+    let analysedAt = Date(timeIntervalSince1970: 1_700_000_500)
+    func make() -> LoudnessAnalysisResult {
+        LoudnessAnalysisResult(
+            filePath: "/music/a.flac", fileSize: 4242, modifiedDate: modDate,
+            duration: 180, integratedLoudnessLufs: -12.5, calculatedReplayGainDb: -5.5,
+            targetLoudnessLufs: -18.0, samplePeak: 0.9, truePeak: 0.95, analysedAt: analysedAt)
+    }
+    suite("LoudnessAnalysisResult — cacheKey & coding") {
+        test("cacheKey derives path/size/modDate") {
+            let k = make().cacheKey
+            try expectEqual(k.filePath, "/music/a.flac")
+            try expectEqual(k.fileSize, 4242)
+            try expectEqual(k.modifiedDate, modDate)
+        }
+        test("cacheKey equals a freshly built key") {
+            try expect(make().cacheKey == LoudnessAnalysisCacheKey(
+                filePath: "/music/a.flac", fileSize: 4242, modifiedDate: modDate))
+        }
+        test("codable round-trip") {
+            let r = make()
+            let data = try JSONEncoder().encode(r)
+            let back = try JSONDecoder().decode(LoudnessAnalysisResult.self, from: data)
+            try expectEqual(back, r)
+        }
+    }
+}
+
+// MARK: - Codable model round-trips (Track, ReplayGainInfo)
+
+func runCodableModelTests() {
+    suite("Track — codable & hashable") {
+        test("round-trip with all fields") {
+            let rg = ReplayGainInfo(trackGainDb: -7.0, trackPeak: 0.9, albumGainDb: -6.0, albumPeak: 0.88)
+            let t = Track(title: "A", artist: "B", genre: "Tango", persistentID: "pid",
+                          year: 1947, comment: "c", albumArtist: "aa", grouping: "g", replayGainInfo: rg)
+            let data = try JSONEncoder().encode(t)
+            let back = try JSONDecoder().decode(Track.self, from: data)
+            try expectEqual(back, t)
+            try expectEqual(back.replayGainInfo, rg)
+        }
+        test("round-trip with nil optionals") {
+            let t = Track(title: "A", artist: "B", genre: "", persistentID: "pid")
+            let data = try JSONEncoder().encode(t)
+            let back = try JSONDecoder().decode(Track.self, from: data)
+            try expectEqual(back, t)
+            try expectNil(back.year)
+            try expectNil(back.replayGainInfo)
+        }
+        test("hashable — equal tracks collide in a Set") {
+            let t1 = Track(title: "A", artist: "B", genre: "T", persistentID: "1")
+            let t2 = Track(title: "A", artist: "B", genre: "T", persistentID: "1")
+            try expect(Set([t1]).contains(t2))
+        }
+    }
+    suite("ReplayGainInfo — codable") {
+        test("round-trip preserves nils") {
+            let rg = ReplayGainInfo(trackGainDb: -7.0, trackPeak: nil, albumGainDb: nil, albumPeak: 0.5)
+            let data = try JSONEncoder().encode(rg)
+            let back = try JSONDecoder().decode(ReplayGainInfo.self, from: data)
+            try expectEqual(back, rg)
+        }
+    }
+}
+
+// MARK: - Enum displayName / coding tests
+
+func runEnumDisplayTests() {
+    suite("DisplayTextItem — displayName & coding") {
+        test("representative display names") {
+            try expectEqual(DisplayTextItem.genre.displayName, "Genre")
+            try expectEqual(DisplayTextItem.trackCounter.displayName, "Track Counter")
+            try expectEqual(DisplayTextItem.nextUpLabel.displayName, "Next Up Label")
+            try expectEqual(DisplayTextItem.lastTandaLabel.displayName, "Last Tanda Label")
+        }
+        test("rawValue codable round-trip for all cases") {
+            for item in DisplayTextItem.allCases {
+                let data = try JSONEncoder().encode([item])
+                let back = try JSONDecoder().decode([DisplayTextItem].self, from: data)
+                try expectEqual(back, [item])
+            }
+        }
+    }
+    suite("SingerSource — displayName & rawValue") {
+        test("display names") {
+            try expectEqual(SingerSource.comments.displayName, "Comments")
+            try expectEqual(SingerSource.albumArtist.displayName, "Album Artist")
+            try expectEqual(SingerSource.grouping.displayName, "Grouping")
+        }
+        test("rawValues stable") {
+            try expectEqual(SingerSource.albumArtist.rawValue, "albumArtist")
+        }
+    }
+    suite("TransitionStyle — displayName") {
+        test("display names") {
+            try expectEqual(TransitionStyle.fade.displayName, "Crossfade")
+            try expectEqual(TransitionStyle.cut.displayName, "Hard Cut")
+            try expectEqual(TransitionStyle.fadeToBlack.displayName, "Fade Through Black")
+            try expectEqual(TransitionStyle.push.displayName, "Push")
+            try expectEqual(TransitionStyle.zoom.displayName, "Zoom")
+        }
+    }
+    suite("GenreBackground — isCortinaEntry") {
+        test("empty genreKey is the cortina sentinel") {
+            try expect(GenreBackground(genreKey: "").isCortinaEntry)
+        }
+        test("non-empty genreKey is not the sentinel") {
+            try expect(!GenreBackground(genreKey: "tango").isCortinaEntry)
+        }
+    }
+}
+
+// MARK: - AppearanceProfile matching logic tests
+
+func runAppearanceProfileMatchingTests() {
+    func profile(_ mutate: (inout AppearanceProfile) -> Void) -> AppearanceProfile {
+        var p = AppearanceProfile(id: UUID(), name: "P", isBuiltIn: false)
+        mutate(&p)
+        return p
+    }
+    func track(artist: String = "A", genre: String = "Tango",
+               comment: String? = nil, albumArtist: String? = nil, grouping: String? = nil) -> Track {
+        Track(title: "T", artist: artist, genre: genre, persistentID: "1",
+              comment: comment, albumArtist: albumArtist, grouping: grouping)
+    }
+
+    suite("AppearanceProfile — singerValue") {
+        test("comments source") {
+            let p = profile { $0.singerSource = .comments }
+            try expectEqual(p.singerValue(from: track(comment: "Echániz")), "Echániz")
+        }
+        test("albumArtist source") {
+            let p = profile { $0.singerSource = .albumArtist }
+            try expectEqual(p.singerValue(from: track(albumArtist: "Di Sarli")), "Di Sarli")
+        }
+        test("grouping source") {
+            let p = profile { $0.singerSource = .grouping }
+            try expectEqual(p.singerValue(from: track(grouping: "Vocal")), "Vocal")
+        }
+        test("nil when chosen field is absent") {
+            let p = profile { $0.singerSource = .comments }
+            try expectNil(p.singerValue(from: track(comment: nil)))
+        }
+    }
+
+    suite("AppearanceProfile — matchingArtistBackground") {
+        let bg = ArtistBackground(artistName: "Di Sarli", imageFilename: "artist-1.jpg")
+        test("disabled returns nil") {
+            let p = profile { $0.artistBackgroundsEnabled = false; $0.artistBackgrounds = [bg] }
+            try expectNil(p.matchingArtistBackground(for: "Carlos Di Sarli"))
+        }
+        test("partial, case-insensitive match") {
+            let p = profile { $0.artistBackgroundsEnabled = true; $0.artistBackgrounds = [bg] }
+            try expect(p.matchingArtistBackground(for: "Orquesta Carlos Di Sarli")?.id == bg.id)
+            try expect(p.matchingArtistBackground(for: "di sarli")?.id == bg.id)
+        }
+        test("diacritic-insensitive match") {
+            let angel = ArtistBackground(artistName: "Angel", imageFilename: "a.jpg")
+            let p = profile { $0.artistBackgroundsEnabled = true; $0.artistBackgrounds = [angel] }
+            try expect(p.matchingArtistBackground(for: "Ángel D'Agostino")?.id == angel.id)
+        }
+        test("no match returns nil") {
+            let p = profile { $0.artistBackgroundsEnabled = true; $0.artistBackgrounds = [bg] }
+            try expectNil(p.matchingArtistBackground(for: "Pugliese"))
+        }
+        test("empty entry name is skipped") {
+            let empty = ArtistBackground(artistName: "", imageFilename: "x.jpg")
+            let p = profile { $0.artistBackgroundsEnabled = true; $0.artistBackgrounds = [empty] }
+            try expectNil(p.matchingArtistBackground(for: "Anything"))
+        }
+    }
+
+    suite("AppearanceProfile — matchingGenreBackground") {
+        let detector = CortinaDetector(useAllowlist: true, allowlistGenres: ["cortina"],
+                                       useDenylist: true, denylistGenres: ["tango", "vals", "milonga"],
+                                       denylistPartialGenres: ["tango", "vals", "milonga"])
+        let tangoBg = GenreBackground(genreKey: "Tango", imageFilename: "g-tango.jpg")
+        let cortinaBg = GenreBackground(genreKey: "", imageFilename: "g-cortina.jpg")
+
+        test("disabled returns nil") {
+            let p = profile { $0.genreBackgroundsEnabled = false; $0.genreBackgrounds = [tangoBg] }
+            try expectNil(p.matchingGenreBackground(for: "Tango", using: detector))
+        }
+        test("cortina genre returns the sentinel entry") {
+            let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [tangoBg, cortinaBg] }
+            try expect(p.matchingGenreBackground(for: "Cortina", using: detector)?.id == cortinaBg.id)
+        }
+        test("cortina sentinel without an image returns nil") {
+            let noImg = GenreBackground(genreKey: "", imageFilename: nil)
+            let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [noImg] }
+            try expectNil(p.matchingGenreBackground(for: "Cortina", using: detector))
+        }
+        test("exact case-insensitive genre match") {
+            let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [tangoBg] }
+            try expect(p.matchingGenreBackground(for: "tango", using: detector)?.id == tangoBg.id)
+        }
+        test("word-boundary partial match when key is in the partial set") {
+            let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [tangoBg] }
+            try expect(p.matchingGenreBackground(for: "Tango Instrumental", using: detector)?.id == tangoBg.id)
+        }
+        test("entry without an image is skipped") {
+            let noImg = GenreBackground(genreKey: "Tango", imageFilename: nil)
+            let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [noImg] }
+            try expectNil(p.matchingGenreBackground(for: "Tango", using: detector))
+        }
+        test("empty genre returns nil on the non-cortina path") {
+            let allowOnly = CortinaDetector(useAllowlist: true, allowlistGenres: ["cortina"],
+                                            useDenylist: false, denylistGenres: [])
+            let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [tangoBg] }
+            try expectNil(p.matchingGenreBackground(for: "", using: allowOnly))
+        }
+    }
+}
+
+// MARK: - AppearanceProfile decoding / migration tests
+
+func runAppearanceProfileMigrationTests() {
+    func decode(_ json: String) throws -> AppearanceProfile {
+        try JSONDecoder().decode(AppearanceProfile.self, from: Data(json.utf8))
+    }
+
+    // Minimal legacy JSON: only the keys the decoder requires via plain `decode`.
+    let minimalJSON = """
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Legacy", "isBuiltIn": false,
+      "titleFontName": "System", "titleFontSize": 72,
+      "artistFontName": "System", "artistFontSize": 96,
+      "genreFontName": "System", "genreFontSize": 36,
+      "backgroundColor": "#000000",
+      "titleColor": "#FFFFFF", "artistColor": "#EEEEEE", "genreColor": "#AAAAAA",
+      "transitionStyle": "fade", "transitionDuration": 0.4
+    }
+    """
+
+    // Legacy JSON carrying the old aggregate visibility flags but none of the per-type ones.
+    let legacyFlagsJSON = """
+    {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "name": "LegacyFlags", "isBuiltIn": false,
+      "titleFontName": "System", "titleFontSize": 72,
+      "artistFontName": "System", "artistFontSize": 96,
+      "genreFontName": "System", "genreFontSize": 36,
+      "backgroundColor": "#000000",
+      "titleColor": "#FFFFFF", "artistColor": "#EEEEEE", "genreColor": "#AAAAAA",
+      "transitionStyle": "fade", "transitionDuration": 0.4,
+      "showYear": true, "showSinger": true, "showAlbumArtwork": true
+    }
+    """
+
+    suite("AppearanceProfile — decoding defaults") {
+        test("missing optional keys fall back to defaults") {
+            let p = try decode(minimalJSON)
+            try expect(!p.showYear)
+            try expectEqual(p.yearColor, "#AAAAAA")
+            try expectEqual(p.trackCounterColor, "#AAAAAA")
+            try expectEqual(p.singerSource, .comments)
+            try expect(p.showLastTandaLabel)
+            try expectEqual(p.transitionStyle, .fade)
+        }
+        test("colour fallbacks reference base colours") {
+            let p = try decode(minimalJSON)
+            try expectEqual(p.cortinaLabelColor, "#EEEEEE")   // ← artistColor
+            try expectEqual(p.nextUpLabelColor, "#AAAAAA")    // ← genreColor
+            try expectEqual(p.idleMessageColor, "#EEEEEE")    // ← artistColor
+            try expectEqual(p.overrideTextColor, "#FFFFFF")   // ← titleColor
+            try expectEqual(p.cortinaLabelFontName, "System") // ← titleFontName
+        }
+    }
+
+    suite("AppearanceProfile — order-list migration") {
+        test("dance order gains lastTandaLabel and trackCounter") {
+            let p = try decode(minimalJSON)
+            try expect(p.danceItemOrder.contains(.lastTandaLabel))
+            try expect(p.danceItemOrder.contains(.trackCounter))
+        }
+        test("cortina order gains nextUpLabel (front), title, and lastTandaLabel") {
+            let p = try decode(minimalJSON)
+            try expectEqual(p.cortinaItemOrder,
+                            [.nextUpLabel, .genre, .artist, .year, .title, .singer, .lastTandaLabel])
+        }
+    }
+
+    suite("AppearanceProfile — legacy flag migration") {
+        test("legacy showYear maps to dance + cortina year visibility") {
+            let p = try decode(legacyFlagsJSON)
+            try expect(p.showYearDance)
+            try expect(p.showYearCortina)
+        }
+        test("legacy showSinger maps to showSingerDance") {
+            let p = try decode(legacyFlagsJSON)
+            try expect(p.showSingerDance)
+        }
+        test("legacy showAlbumArtwork maps to artwork dance + cortina") {
+            let p = try decode(legacyFlagsJSON)
+            try expect(p.showArtworkDance)
+            try expect(p.showArtworkCortina)
+        }
+    }
+
+    suite("AppearanceProfile — position offsets") {
+        test("offsets default to 0 when absent in legacy JSON") {
+            let p = try decode(minimalJSON)
+            try expectEqual(p.titleOffsetX, 0)
+            try expectEqual(p.titleOffsetY, 0)
+            try expectEqual(p.artistOffsetX, 0)
+            try expectEqual(p.singerOffsetY, 0)
+            try expectEqual(p.trackCounterOffsetX, 0)
+            try expectEqual(p.cortinaLabelOffsetX, 0)
+            try expectEqual(p.nextUpLabelOffsetY, 0)
+        }
+        test("set offsets survive an encode/decode round-trip") {
+            var p = AppearanceProfile(id: UUID(), name: "Offsets", isBuiltIn: false)
+            p.titleOffsetX = 120;  p.titleOffsetY = -40
+            p.artistOffsetX = -15; p.artistOffsetY = 8
+            p.cortinaLabelOffsetX = 33
+            p.nextUpLabelOffsetY = 77
+            let data = try JSONEncoder().encode(p)
+            let back = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(back.titleOffsetX, 120)
+            try expectEqual(back.titleOffsetY, -40)
+            try expectEqual(back.artistOffsetX, -15)
+            try expectEqual(back.artistOffsetY, 8)
+            try expectEqual(back.cortinaLabelOffsetX, 33)
+            try expectEqual(back.nextUpLabelOffsetY, 77)
+        }
+    }
+
+    suite("AppearanceProfile — decoder is idempotent") {
+        test("re-encoding a decoded profile and decoding again is stable") {
+            let once = try decode(minimalJSON)
+            let reencoded = try JSONEncoder().encode(once)
+            let twice = try JSONDecoder().decode(AppearanceProfile.self, from: reencoded)
+            try expectEqual(twice, once)
+        }
+        test("built-in profile survives an encode/decode round-trip") {
+            let data = try JSONEncoder().encode(AppearanceProfile.modern)
+            let back = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(back.id, AppearanceProfile.modern.id)
+            try expectEqual(back.backgroundColor, AppearanceProfile.modern.backgroundColor)
+        }
+    }
+}
+
+// MARK: - ProfileStore image-path & cleanup tests
+
+func runProfileStoreImageTests() {
+    func tmpProfilesDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TangoDisplayTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("profiles", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    suite("ProfileStore — image paths") {
+        test("imagesDirectoryURL is a sibling of the profiles dir") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try expectEqual(store.imagesDirectoryURL.lastPathComponent, "images")
+            try expectEqual(store.imagesDirectoryURL.deletingLastPathComponent().path,
+                            profilesURL.deletingLastPathComponent().path)
+        }
+        test("imageURL appends the filename") {
+            let store = ProfileStore(storeURL: tmpProfilesDir())
+            try expectEqual(store.imageURL(for: "x.jpg").lastPathComponent, "x.jpg")
+        }
+        test("createImagesDirectoryIfNeeded creates the directory") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try expect(!FileManager.default.fileExists(atPath: store.imagesDirectoryURL.path))
+            store.createImagesDirectoryIfNeeded()
+            try expect(FileManager.default.fileExists(atPath: store.imagesDirectoryURL.path))
+        }
+    }
+
+    suite("ProfileStore — delete removes associated images") {
+        test("background image and artist images are removed on delete") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            store.createImagesDirectoryIfNeeded()
+
+            let bgURL = store.imageURL(for: "bg.jpg")
+            let artURL = store.imageURL(for: "artist-1.jpg")
+            try Data([0x1]).write(to: bgURL)
+            try Data([0x2]).write(to: artURL)
+
+            var profile = AppearanceProfile(id: UUID(), name: "WithImages", isBuiltIn: false)
+            profile.backgroundImageFilename = "bg.jpg"
+            profile.artistBackgrounds = [ArtistBackground(artistName: "X", imageFilename: "artist-1.jpg")]
+            try store.save(profile)
+            try store.delete(profile)
+
+            try expect(!FileManager.default.fileExists(atPath: bgURL.path), "background image should be deleted")
+            try expect(!FileManager.default.fileExists(atPath: artURL.path), "artist image should be deleted")
+        }
+    }
+
+    suite("ProfileStore — load robustness") {
+        test("skips invalid JSON and sorts user profiles by name") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try store.save(AppearanceProfile(id: UUID(), name: "Bravo", isBuiltIn: false))
+            try store.save(AppearanceProfile(id: UUID(), name: "Alpha", isBuiltIn: false))
+            try Data("not valid json".utf8).write(to: profilesURL.appendingPathComponent("junk.json"))
+
+            let fresh = ProfileStore(storeURL: profilesURL)
+            fresh.load()
+            try expectEqual(fresh.userProfiles.count, 2)
+            try expectEqual(fresh.userProfiles.map(\.name), ["Alpha", "Bravo"])
+        }
+    }
+}
+
 // MARK: - Main entry point
 
 runCortinaDetectorTests()
@@ -1045,6 +1558,16 @@ runDisplayStateTests()
 runReplayGainTests()
 runAutoReplayGainTests()
 runAudioUnitPluginTests()
+runTandaPositionTests()
+runAudioUnitPresetTests()
+runAudioUnitPluginStatusShortTextTests()
+runReplayGainModeTests()
+runLoudnessAnalysisResultTests()
+runCodableModelTests()
+runEnumDisplayTests()
+runAppearanceProfileMatchingTests()
+runAppearanceProfileMigrationTests()
+runProfileStoreImageTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"

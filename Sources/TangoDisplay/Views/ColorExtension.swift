@@ -71,3 +71,16 @@ extension AppearanceProfile {
     var overrideTextSwiftUIColor: Color { Color(hex: overrideTextColor) }
     var overrideTextFont: Font { font(name: overrideTextFontName, size: overrideTextFontSize, bold: overrideTextFontBold, italic: overrideTextFontItalic) }
 }
+
+extension View {
+    /// Positions a presentation text element, mirroring the album-artwork offset behaviour.
+    /// A non-zero horizontal offset left-aligns the element so the offset measures its left edge;
+    /// a zero horizontal offset keeps the element centred (the historical default).
+    func positioned(offsetX: Double, offsetY: Double) -> some View {
+        let isShifted = offsetX != 0
+        return self
+            .multilineTextAlignment(isShifted ? .leading : .center)
+            .frame(maxWidth: .infinity, alignment: isShifted ? .leading : .center)
+            .offset(x: offsetX, y: offsetY)
+    }
+}

@@ -4,12 +4,13 @@ import TangoDisplayCore
 import UniformTypeIdentifiers
 
 private enum AppearanceTab: CaseIterable {
-    case visibility, text, colours, artworkTransition, cortina, lastTanda
+    case visibility, text, position, colours, artworkTransition, cortina, lastTanda
 
     var displayName: String {
         switch self {
         case .visibility:         return "Visibility"
         case .text:               return "Text"
+        case .position:           return "Position"
         case .colours:            return "Colours"
         case .artworkTransition:  return "Artwork & Motion"
         case .cortina:            return "Cortina"
@@ -130,6 +131,8 @@ struct AppearanceSettingsView: View {
                                     cortinaUpDragItem: $cortinaUpDragItem)
         case .text:
             AppearanceTextTab(working: $working)
+        case .position:
+            AppearancePositionTab(working: $working)
         case .colours:
             AppearanceColoursTab(working: $working)
         case .artworkTransition:
