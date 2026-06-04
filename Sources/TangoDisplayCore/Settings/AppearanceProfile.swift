@@ -212,6 +212,20 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     public var nextUpLabelOffsetX: Double
     public var nextUpLabelOffsetY: Double
 
+    // Per-element text-box width (points) for single-line auto-shrink when a horizontal offset is set.
+    // 0 = disabled (text uses the full width as before). See ColorExtension.positioned.
+    public var titleBoxWidth: Double
+    public var artistBoxWidth: Double
+    public var genreBoxWidth: Double
+    public var yearBoxWidth: Double
+    public var singerBoxWidth: Double
+    public var trackCounterBoxWidth: Double
+    public var lastTandaLabelBoxWidth: Double
+    public var cortinaLabelBoxWidth: Double
+    public var cortinaArtistBoxWidth: Double
+    public var cortinaTitleBoxWidth: Double
+    public var nextUpLabelBoxWidth: Double
+
     public init(id: UUID, name: String, isBuiltIn: Bool,
                 titleFontName: String = "System", titleFontSize: Double = 72,
                 titleFontBold: Bool = true, titleFontItalic: Bool = false,
@@ -314,7 +328,13 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 cortinaLabelOffsetX: Double = 0, cortinaLabelOffsetY: Double = 0,
                 cortinaArtistOffsetX: Double = 0, cortinaArtistOffsetY: Double = 0,
                 cortinaTitleOffsetX: Double = 0, cortinaTitleOffsetY: Double = 0,
-                nextUpLabelOffsetX: Double = 0, nextUpLabelOffsetY: Double = 0) {
+                nextUpLabelOffsetX: Double = 0, nextUpLabelOffsetY: Double = 0,
+                titleBoxWidth: Double = 0, artistBoxWidth: Double = 0,
+                genreBoxWidth: Double = 0, yearBoxWidth: Double = 0,
+                singerBoxWidth: Double = 0, trackCounterBoxWidth: Double = 0,
+                lastTandaLabelBoxWidth: Double = 0, cortinaLabelBoxWidth: Double = 0,
+                cortinaArtistBoxWidth: Double = 0, cortinaTitleBoxWidth: Double = 0,
+                nextUpLabelBoxWidth: Double = 0) {
         self.id = id
         self.name = name
         self.isBuiltIn = isBuiltIn
@@ -444,6 +464,12 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.cortinaArtistOffsetX = cortinaArtistOffsetX; self.cortinaArtistOffsetY = cortinaArtistOffsetY
         self.cortinaTitleOffsetX = cortinaTitleOffsetX; self.cortinaTitleOffsetY = cortinaTitleOffsetY
         self.nextUpLabelOffsetX = nextUpLabelOffsetX;  self.nextUpLabelOffsetY = nextUpLabelOffsetY
+        self.titleBoxWidth = titleBoxWidth;           self.artistBoxWidth = artistBoxWidth
+        self.genreBoxWidth = genreBoxWidth;           self.yearBoxWidth = yearBoxWidth
+        self.singerBoxWidth = singerBoxWidth;         self.trackCounterBoxWidth = trackCounterBoxWidth
+        self.lastTandaLabelBoxWidth = lastTandaLabelBoxWidth; self.cortinaLabelBoxWidth = cortinaLabelBoxWidth
+        self.cortinaArtistBoxWidth = cortinaArtistBoxWidth;   self.cortinaTitleBoxWidth = cortinaTitleBoxWidth
+        self.nextUpLabelBoxWidth = nextUpLabelBoxWidth
     }
 
     // Custom decoder so existing JSON lacking the image keys still loads cleanly.
@@ -502,7 +528,13 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         albumArtworkOffsetY     = try c.decodeIfPresent(Double.self,  forKey: .albumArtworkOffsetY)     ?? 0.0
         albumArtworkEdgeFade    = try c.decodeIfPresent(Double.self,  forKey: .albumArtworkEdgeFade)    ?? 0.0
         showSinger              = try c.decodeIfPresent(Bool.self,         forKey: .showSinger)              ?? false
-        singerSource            = try c.decodeIfPresent(SingerSource.self, forKey: .singerSource)            ?? .comments
+        // Tolerant decode: an older profile may carry a removed raw value (e.g. "artist") — map it to the
+        // default rather than failing the whole profile decode.
+        if let rawSinger = try c.decodeIfPresent(String.self, forKey: .singerSource) {
+            singerSource = SingerSource(rawValue: rawSinger) ?? .comments
+        } else {
+            singerSource = .comments
+        }
         showSingerDuringCortina = try c.decodeIfPresent(Bool.self,         forKey: .showSingerDuringCortina) ?? false
         singerFontName          = try c.decodeIfPresent(String.self,  forKey: .singerFontName)          ?? "System"
         singerFontSize          = try c.decodeIfPresent(Double.self,  forKey: .singerFontSize)          ?? 48
@@ -623,6 +655,19 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         cortinaTitleOffsetY   = try c.decodeIfPresent(Double.self, forKey: .cortinaTitleOffsetY)   ?? 0
         nextUpLabelOffsetX    = try c.decodeIfPresent(Double.self, forKey: .nextUpLabelOffsetX)    ?? 0
         nextUpLabelOffsetY    = try c.decodeIfPresent(Double.self, forKey: .nextUpLabelOffsetY)    ?? 0
+
+        // Per-element text-box widths (auto-shrink) — absent in older JSON, default to 0 (disabled).
+        titleBoxWidth          = try c.decodeIfPresent(Double.self, forKey: .titleBoxWidth)          ?? 0
+        artistBoxWidth         = try c.decodeIfPresent(Double.self, forKey: .artistBoxWidth)         ?? 0
+        genreBoxWidth          = try c.decodeIfPresent(Double.self, forKey: .genreBoxWidth)          ?? 0
+        yearBoxWidth           = try c.decodeIfPresent(Double.self, forKey: .yearBoxWidth)           ?? 0
+        singerBoxWidth         = try c.decodeIfPresent(Double.self, forKey: .singerBoxWidth)         ?? 0
+        trackCounterBoxWidth   = try c.decodeIfPresent(Double.self, forKey: .trackCounterBoxWidth)   ?? 0
+        lastTandaLabelBoxWidth = try c.decodeIfPresent(Double.self, forKey: .lastTandaLabelBoxWidth) ?? 0
+        cortinaLabelBoxWidth   = try c.decodeIfPresent(Double.self, forKey: .cortinaLabelBoxWidth)   ?? 0
+        cortinaArtistBoxWidth  = try c.decodeIfPresent(Double.self, forKey: .cortinaArtistBoxWidth)  ?? 0
+        cortinaTitleBoxWidth   = try c.decodeIfPresent(Double.self, forKey: .cortinaTitleBoxWidth)   ?? 0
+        nextUpLabelBoxWidth    = try c.decodeIfPresent(Double.self, forKey: .nextUpLabelBoxWidth)    ?? 0
 
         // Migration: append items to order lists if absent
         if !danceItemOrder.contains(.lastTandaLabel) {
@@ -749,6 +794,16 @@ public enum SingerSource: String, Codable, CaseIterable {
         case .comments:    "Comments"
         case .albumArtist: "Album Artist"
         case .grouping:    "Grouping"
+        }
+    }
+
+    /// The track-info field this singer source reads from — lets the singer line go through the same
+    /// display resolver as other fields (so an Advanced "copy from field" / regex rule applies).
+    public var trackInfoField: TrackInfoField {
+        switch self {
+        case .comments:    .comments
+        case .albumArtist: .albumArtist
+        case .grouping:    .grouping
         }
     }
 }

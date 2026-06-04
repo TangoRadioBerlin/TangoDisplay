@@ -1,4 +1,5 @@
 import SwiftUI
+import TangoDisplayCore
 
 struct AdvancedSettingsView: View {
     @EnvironmentObject var settings: AppSettings
@@ -215,6 +216,32 @@ private struct FieldEditorPanel: View {
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Copy from field")
+                        .frame(width: 120, alignment: .leading)
+                    Picker("", selection: Binding<TrackInfoField?>(
+                        get: { currentRule.sourceField },
+                        set: { newVal in
+                            var rule = currentRule
+                            rule.sourceField = newVal
+                            settings.trackTransforms[field.rawValue] = rule
+                            testInput = (newVal ?? field).sampleValue
+                        }
+                    )) {
+                        Text("None (use \(field.displayName))").tag(TrackInfoField?.none)
+                        ForEach(TrackInfoField.allCases.filter { $0 != field }) { f in
+                            Text(f.displayName).tag(TrackInfoField?.some(f))
+                        }
+                    }
+                    .labelsHidden()
+                    Spacer()
+                }
+                Text("Optionally fill this field from another field's value before the regex runs — e.g. show the Artist in the Album Artist line.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             HStack(alignment: .top, spacing: 20) {
                 // Left: inputs
                 VStack(alignment: .leading, spacing: 12) {
@@ -375,6 +402,6 @@ private struct FieldEditorPanel: View {
         let rule = currentRule
         patternText = rule.pattern
         replacementText = rule.replacement
-        testInput = rule.testInput.isEmpty ? field.sampleValue : rule.testInput
+        testInput = rule.testInput.isEmpty ? (rule.sourceField ?? field).sampleValue : rule.testInput
     }
 }

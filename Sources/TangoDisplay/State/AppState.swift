@@ -21,6 +21,9 @@ final class AppState: ObservableObject {
     @Published var draftProfile: AppearanceProfile? = nil
     /// Set by AppearanceSettingsView when the working copy differs from the last saved state.
     @Published var hasUnsavedAppearanceChanges: Bool = false
+    /// Transient: true only while the Position tab is open, so the preview draws element bounds/size.
+    /// Never persisted and never affects the real presentation display.
+    @Published var showElementBoundsInPreview: Bool = false
     /// Album artwork for the current dance track. Nil during cortinas and idle.
     @Published private(set) var currentArtwork: NSImage? = nil
     /// persistentID of the track whose artwork is currently displayed; drives transition identity.

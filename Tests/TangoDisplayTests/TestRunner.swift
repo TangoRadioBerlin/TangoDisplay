@@ -1442,6 +1442,11 @@ func runAppearanceProfileMigrationTests() {
             try expectEqual(p.cortinaLabelOffsetX, 0)
             try expectEqual(p.nextUpLabelOffsetY, 0)
         }
+        test("box widths default in legacy JSON") {
+            let p = try decode(minimalJSON)
+            try expectEqual(p.titleBoxWidth, 0)
+            try expectEqual(p.singerBoxWidth, 0)
+        }
         test("set offsets survive an encode/decode round-trip") {
             var p = AppearanceProfile(id: UUID(), name: "Offsets", isBuiltIn: false)
             p.titleOffsetX = 120;  p.titleOffsetY = -40
@@ -1549,6 +1554,138 @@ func runProfileStoreImageTests() {
     }
 }
 
+// MARK: - Regex transform tests
+
+func runRegexTransformTests() {
+    suite("applyRegexTransform") {
+        test("extracts trailing capture group ('con …')") {
+            try expectEqual(
+                applyRegexTransform("Carlos di Sarli con Roberto Ruffino", pattern: "^.*(con .+)$", replacement: "$1"),
+                "con Roberto Ruffino")
+        }
+        test("extracts the singer name only") {
+            try expectEqual(
+                applyRegexTransform("Carlos di Sarli con Roberto Ruffino", pattern: ".* con (.+)$", replacement: "$1"),
+                "Roberto Ruffino")
+        }
+        test("no match returns the original") {
+            try expectEqual(applyRegexTransform("Osvaldo Pugliese", pattern: "(con .+)$", replacement: "$1"),
+                            "Osvaldo Pugliese")
+        }
+        test("empty pattern returns the original") {
+            try expectEqual(applyRegexTransform("X", pattern: "", replacement: "$1"), "X")
+        }
+        test("invalid pattern returns the original") {
+            try expectEqual(applyRegexTransform("X", pattern: "(", replacement: "$1"), "X")
+        }
+        test("whitespace-only result returns the original") {
+            try expectEqual(applyRegexTransform("Hello", pattern: ".*", replacement: "   "), "Hello")
+        }
+        test("\\n escape produces a line break") {
+            try expectEqual(applyRegexTransform("A B", pattern: " ", replacement: "\\n"), "A\nB")
+        }
+    }
+}
+
+// MARK: - Singer source / resolvedSinger tests
+
+func runSingerTests() {
+    func track(artist: String = "Carlos di Sarli con Roberto Ruffino",
+               comment: String? = nil, albumArtist: String? = nil, grouping: String? = nil) -> Track {
+        Track(title: "T", artist: artist, genre: "Tango", persistentID: "1",
+              comment: comment, albumArtist: albumArtist, grouping: grouping)
+    }
+    func profile(_ mutate: (inout AppearanceProfile) -> Void) -> AppearanceProfile {
+        var p = AppearanceProfile(id: UUID(), name: "P", isBuiltIn: false)
+        mutate(&p); return p
+    }
+
+    suite("SingerSource — sources & migration") {
+        test("exactly three sources, no Artist case") {
+            try expectEqual(SingerSource.allCases.count, 3)
+            try expect(!SingerSource.allCases.contains(where: { $0.rawValue == "artist" }))
+        }
+        test("trackInfoField maps each source to its field") {
+            try expectEqual(SingerSource.comments.trackInfoField, .comments)
+            try expectEqual(SingerSource.albumArtist.trackInfoField, .albumArtist)
+            try expectEqual(SingerSource.grouping.trackInfoField, .grouping)
+        }
+        test("legacy singerSource 'artist' decodes to .comments without failing the profile") {
+            let p = profile { $0.singerSource = .comments }
+            var dict = try JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(p)) as! [String: Any]
+            dict["singerSource"] = "artist"
+            let data = try JSONSerialization.data(withJSONObject: dict)
+            let back = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(back.singerSource, .comments)
+        }
+    }
+}
+
+// MARK: - Track-info field remap + transform resolver (Core)
+
+func runTrackInfoTransformTests() {
+    let full = Track(title: "Arrabalero", artist: "Carlos di Sarli con Roberto Ruffino",
+                     genre: "Tango", persistentID: "1", year: 1939,
+                     comment: "instrumental", albumArtist: "Di Sarli", grouping: "Vals")
+    let sparse = Track(title: "T", artist: "A", genre: "G", persistentID: "2")
+
+    suite("TrackInfoField — rawValue(from:)") {
+        test("each field reads its track value") {
+            try expectEqual(TrackInfoField.artist.rawValue(from: full), "Carlos di Sarli con Roberto Ruffino")
+            try expectEqual(TrackInfoField.title.rawValue(from: full), "Arrabalero")
+            try expectEqual(TrackInfoField.year.rawValue(from: full), "1939")
+            try expectEqual(TrackInfoField.albumArtist.rawValue(from: full), "Di Sarli")
+            try expectEqual(TrackInfoField.comments.rawValue(from: full), "instrumental")
+            try expectEqual(TrackInfoField.grouping.rawValue(from: full), "Vals")
+        }
+        test("absent optionals and year yield empty string") {
+            try expectEqual(TrackInfoField.year.rawValue(from: sparse), "")
+            try expectEqual(TrackInfoField.albumArtist.rawValue(from: sparse), "")
+            try expectEqual(TrackInfoField.comments.rawValue(from: sparse), "")
+            try expectEqual(TrackInfoField.grouping.rawValue(from: sparse), "")
+        }
+    }
+
+    suite("resolveTrackField") {
+        test("no rule returns the field's own raw value") {
+            try expectEqual(resolveTrackField(.artist, from: full, rules: [:]),
+                            "Carlos di Sarli con Roberto Ruffino")
+        }
+        test("sourceField copies another field's value (Album Artist from Artist)") {
+            let rules = ["albumArtist": TransformRule(sourceField: .artist)]
+            try expectEqual(resolveTrackField(.albumArtist, from: full, rules: rules),
+                            "Carlos di Sarli con Roberto Ruffino")
+        }
+        test("sourceField then regex (remap applied before transform)") {
+            let rules = ["albumArtist": TransformRule(enabled: true, pattern: "^.*(con .+)$",
+                                                      replacement: "$1", sourceField: .artist)]
+            try expectEqual(resolveTrackField(.albumArtist, from: full, rules: rules),
+                            "con Roberto Ruffino")
+        }
+        test("disabled rule returns raw value even with a pattern") {
+            let rules = ["artist": TransformRule(enabled: false, pattern: "x", replacement: "y")]
+            try expectEqual(resolveTrackField(.artist, from: full, rules: rules),
+                            "Carlos di Sarli con Roberto Ruffino")
+        }
+    }
+
+    suite("TransformRule — backward-compatible decoding") {
+        test("decodes older JSON without sourceField") {
+            let json = "{\"enabled\":true,\"pattern\":\"a\",\"replacement\":\"b\",\"testInput\":\"\"}"
+            let r = try JSONDecoder().decode(TransformRule.self, from: json.data(using: .utf8)!)
+            try expectNil(r.sourceField)
+            try expectEqual(r.enabled, true)
+            try expectEqual(r.pattern, "a")
+        }
+        test("round-trips with sourceField set") {
+            let r = TransformRule(enabled: true, pattern: "p", replacement: "r", sourceField: .artist)
+            let back = try JSONDecoder().decode(TransformRule.self, from: JSONEncoder().encode(r))
+            try expectEqual(back.sourceField, .artist)
+        }
+    }
+}
+
 // MARK: - Main entry point
 
 runCortinaDetectorTests()
@@ -1568,6 +1705,9 @@ runEnumDisplayTests()
 runAppearanceProfileMatchingTests()
 runAppearanceProfileMigrationTests()
 runProfileStoreImageTests()
+runRegexTransformTests()
+runSingerTests()
+runTrackInfoTransformTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"

@@ -190,20 +190,23 @@ struct PresentationView: View {
 
     @ViewBuilder
     private var contentView: some View {
+        let showBounds = isPreview && appState.showElementBoundsInPreview
         switch appState.displayState.mode {
         case .playing:
             PlayingView(
                 state: appState.displayState,
                 profile: activeProfile,
                 isLastTandaActive: appState.isLastTandaActive,
-                settings: appState.settings
+                settings: appState.settings,
+                showBounds: showBounds
             )
         case .cortina:
             CortinaView(
                 state: appState.displayState,
                 profile: activeProfile,
                 isLastTandaActive: appState.isLastTandaActive,
-                settings: appState.settings
+                settings: appState.settings,
+                showBounds: showBounds
             )
         case .idle, .paused:
             IdleView(

@@ -461,14 +461,14 @@ final class AppSettings: ObservableObject {
     }
 
     func transform(_ value: String, for field: TrackInfoField) -> String {
-        guard let rule = trackTransforms[field.rawValue],
-              rule.enabled, !rule.pattern.isEmpty else { return value }
-        guard let regex = try? NSRegularExpression(pattern: rule.pattern) else { return value }
-        let range = NSRange(value.startIndex..., in: value)
-        let prepared = Self.encodeReplacementEscapes(rule.replacement)
-        let result = regex.stringByReplacingMatches(in: value, range: range, withTemplate: prepared)
-        let decoded = Self.restoreReplacementSentinels(result)
-        return decoded.trimmingCharacters(in: .whitespaces).isEmpty ? value : decoded
+        guard let rule = trackTransforms[field.rawValue], rule.enabled else { return value }
+        return applyRegexTransform(value, pattern: rule.pattern, replacement: rule.replacement)
+    }
+
+    /// The display value for a field on a track: applies any "copy from field" remap and regex rule
+    /// configured under Advanced (see TangoDisplayCore.resolveTrackField).
+    func effectiveValue(of field: TrackInfoField, from track: Track) -> String {
+        resolveTrackField(field, from: track, rules: trackTransforms)
     }
 
     // Substitute user-typed escapes with sentinel chars BEFORE the NSRegularExpression

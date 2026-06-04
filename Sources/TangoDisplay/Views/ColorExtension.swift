@@ -74,13 +74,64 @@ extension AppearanceProfile {
 
 extension View {
     /// Positions a presentation text element, mirroring the album-artwork offset behaviour.
-    /// A non-zero horizontal offset left-aligns the element so the offset measures its left edge;
-    /// a zero horizontal offset keeps the element centred (the historical default).
-    func positioned(offsetX: Double, offsetY: Double) -> some View {
-        let isShifted = offsetX != 0
-        return self
-            .multilineTextAlignment(isShifted ? .leading : .center)
-            .frame(maxWidth: .infinity, alignment: isShifted ? .leading : .center)
-            .offset(x: offsetX, y: offsetY)
+    ///
+    /// - A non-zero horizontal offset left-aligns the element so the offset measures its left edge;
+    ///   a zero horizontal offset keeps the element centred (the historical default).
+    /// - When `boxWidth > 0` and a horizontal offset is set, the text is constrained to that width and
+    ///   auto-shrinks on a single line to fit between the left edge and the box end.
+    /// - Otherwise `lineLimit`/`autoShrink` reproduce the element's normal multi-line behaviour.
+    @ViewBuilder
+    func positioned(offsetX: Double, offsetY: Double,
+                    boxWidth: Double = 0, lineLimit: Int? = nil, autoShrink: Bool = false,
+                    showBounds: Bool = false) -> some View {
+        let shifted = offsetX != 0
+        // Only positioned elements get a bounds outline (those with an offset or an explicit box).
+        let drawBounds = showBounds && (offsetX != 0 || boxWidth > 0)
+        if shifted && boxWidth > 0 {
+            self
+                .multilineTextAlignment(.leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.1)
+                .frame(width: boxWidth, alignment: .leading)
+                .elementBoundsOverlay(drawBounds)
+                .offset(x: offsetX, y: offsetY)
+        } else {
+            self
+                .multilineTextAlignment(shifted ? .leading : .center)
+                .lineLimit(lineLimit)
+                .minimumScaleFactor(autoShrink ? 0.5 : 1)
+                .frame(maxWidth: .infinity, alignment: shifted ? .leading : .center)
+                .elementBoundsOverlay(drawBounds)
+                .offset(x: offsetX, y: offsetY)
+        }
+    }
+
+    /// Draws a dashed outline plus a point-size label around the element's layout frame. Used only in
+    /// the configuration preview (never the real presentation display) so the DJ can see how big each
+    /// positioned element / box actually is. Sizes are reported in presentation points (the preview's
+    /// 1920×1080 space, before the pane's down-scaling).
+    @ViewBuilder
+    func elementBoundsOverlay(_ draw: Bool) -> some View {
+        if draw {
+            self.overlay {
+                GeometryReader { geo in
+                    ZStack(alignment: .topLeading) {
+                        Rectangle()
+                            .strokeBorder(Color.accentColor.opacity(0.9),
+                                          style: StrokeStyle(lineWidth: 3, dash: [10, 6]))
+                        Text("\(Int(geo.size.width.rounded()))×\(Int(geo.size.height.rounded())) pt")
+                            .font(.system(size: 26, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.9))
+                            .padding(3)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+        } else {
+            self
+        }
     }
 }
