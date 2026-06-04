@@ -41,10 +41,17 @@ struct PluginChainPopoverView: View {
                             Text(slot.selection.name)
                                 .font(.system(size: 12))
                                 .lineLimit(1)
-                            Text(slot.selection.manufacturerName)
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
+                            if player.isSlotAutoBypassed(slot) {
+                                Label("Auto-bypassed", systemImage: "wand.and.stars")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.orange)
+                                    .lineLimit(1)
+                            } else {
+                                Text(slot.selection.manufacturerName)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
                         }
                         Spacer()
                         Toggle("", isOn: Binding(

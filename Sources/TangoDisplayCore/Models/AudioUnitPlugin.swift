@@ -55,17 +55,22 @@ public struct AudioUnitChainSlot: Codable, Equatable, Identifiable {
     public var selection: AudioUnitPluginSelection
     public var isEnabled: Bool
     public var lastUsedPresetName: String?
+    /// Optional rule that auto-activates/bypasses this slot based on the current track's genre/year.
+    /// nil = no automatic behaviour. Absent in older persisted data → decodes to nil.
+    public var autoBypassRule: AutoBypassRule?
 
     public init(
         id: UUID = UUID(),
         selection: AudioUnitPluginSelection,
         isEnabled: Bool = true,
-        lastUsedPresetName: String? = nil
+        lastUsedPresetName: String? = nil,
+        autoBypassRule: AutoBypassRule? = nil
     ) {
         self.id = id
         self.selection = selection
         self.isEnabled = isEnabled
         self.lastUsedPresetName = lastUsedPresetName
+        self.autoBypassRule = autoBypassRule
     }
 }
 

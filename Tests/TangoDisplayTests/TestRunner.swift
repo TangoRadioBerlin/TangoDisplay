@@ -1686,6 +1686,96 @@ func runTrackInfoTransformTests() {
     }
 }
 
+// MARK: - Auto-bypass rule (genre/year → plugin active/bypass)
+
+func runAutoBypassRuleTests() {
+    suite("AutoBypassRule — genreMatches") {
+        test("empty genre list matches any genre") {
+            let r = AutoBypassRule(matchGenres: [])
+            try expect(r.genreMatches("Tango"))
+            try expect(r.genreMatches(""))
+        }
+        test("exact case-insensitive match") {
+            let r = AutoBypassRule(matchGenres: ["Vals", "Milonga"])
+            try expect(r.genreMatches("vals"))
+            try expect(r.genreMatches("  MILONGA "))
+            try expect(!r.genreMatches("Tango"))
+        }
+        test("word-boundary partial match") {
+            let r = AutoBypassRule(matchGenres: ["Tango"])
+            try expect(r.genreMatches("Tango Vals"))
+            try expect(r.genreMatches("Argentine Tango"))
+            try expect(!r.genreMatches("Tangoland"))
+        }
+    }
+
+    suite("AutoBypassRule — yearMatches") {
+        test("no threshold matches any year") {
+            let r = AutoBypassRule()
+            try expect(r.yearMatches(1935))
+            try expect(r.yearMatches(nil))
+        }
+        test("olderThan: strictly before threshold; missing year is younger → no match") {
+            let r = AutoBypassRule(yearThreshold: 1950, yearMode: .olderThan)
+            try expect(r.yearMatches(1949))
+            try expect(!r.yearMatches(1950))
+            try expect(!r.yearMatches(1980))
+            try expect(!r.yearMatches(nil))
+        }
+        test("fromYearOnwards: at/after threshold; missing year is younger → match") {
+            let r = AutoBypassRule(yearThreshold: 1950, yearMode: .fromYearOnwards)
+            try expect(r.yearMatches(1950))
+            try expect(r.yearMatches(1980))
+            try expect(!r.yearMatches(1949))
+            try expect(r.yearMatches(nil))
+        }
+    }
+
+    suite("AutoBypassRule — shouldBeActive") {
+        test("activate: active only when matched") {
+            let r = AutoBypassRule(matchGenres: ["Tango"], yearThreshold: 1950,
+                                   yearMode: .olderThan, action: .activate)
+            try expect(r.shouldBeActive(genre: "Tango", year: 1945))    // genre+year match → active
+            try expect(!r.shouldBeActive(genre: "Tango", year: 1960))   // year fails → bypass
+            try expect(!r.shouldBeActive(genre: "Vals", year: 1945))    // genre fails → bypass
+        }
+        test("bypass: bypassed only when matched") {
+            let r = AutoBypassRule(matchGenres: ["Vals", "Milonga"], action: .bypass)
+            try expect(!r.shouldBeActive(genre: "Vals", year: nil))     // match → bypass (not active)
+            try expect(r.shouldBeActive(genre: "Tango", year: nil))     // no match → active
+        }
+        test("genre-only and year-only rules") {
+            let genreOnly = AutoBypassRule(matchGenres: ["Tango"], action: .activate)
+            try expect(genreOnly.shouldBeActive(genre: "Tango", year: 2000))
+            let yearOnly = AutoBypassRule(yearThreshold: 1950, yearMode: .olderThan, action: .activate)
+            try expect(yearOnly.shouldBeActive(genre: "anything", year: 1940))
+            try expect(!yearOnly.shouldBeActive(genre: "anything", year: nil))
+        }
+    }
+
+    suite("AudioUnitChainSlot — autoBypassRule coding") {
+        let selection = AudioUnitPluginSelection(name: "EQ", manufacturerName: "X",
+                                                 componentType: 1, componentSubType: 2, componentManufacturer: 3)
+        test("legacy slot without the key decodes to nil rule") {
+            let slot = AudioUnitChainSlot(selection: selection)
+            let data = try JSONEncoder().encode(slot)
+            // encodeIfPresent omits the key for a nil optional → mimics older persisted data
+            let json = String(data: data, encoding: .utf8) ?? ""
+            try expect(!json.contains("autoBypassRule"))
+            let back = try JSONDecoder().decode(AudioUnitChainSlot.self, from: data)
+            try expectNil(back.autoBypassRule)
+        }
+        test("round-trips with a rule set") {
+            let rule = AutoBypassRule(matchGenres: ["Tango"], yearThreshold: 1950,
+                                      yearMode: .fromYearOnwards, action: .bypass)
+            let slot = AudioUnitChainSlot(selection: selection, autoBypassRule: rule)
+            let back = try JSONDecoder().decode(AudioUnitChainSlot.self,
+                                                from: JSONEncoder().encode(slot))
+            try expectEqual(back.autoBypassRule, rule)
+        }
+    }
+}
+
 // MARK: - Main entry point
 
 runCortinaDetectorTests()
@@ -1708,6 +1798,7 @@ runProfileStoreImageTests()
 runRegexTransformTests()
 runSingerTests()
 runTrackInfoTransformTests()
+runAutoBypassRuleTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"

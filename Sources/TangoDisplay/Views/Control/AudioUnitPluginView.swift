@@ -291,11 +291,20 @@ private struct AudioUnitChainSlotRow: View {
                 }
 
                 Spacer()
-                Text(status.shortDisplayText.isEmpty ? "" : status.shortDisplayText)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
+                if player.isSlotAutoBypassed(slot) {
+                    Label("Auto-bypassed", systemImage: "wand.and.stars")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .lineLimit(1)
+                } else {
+                    Text(status.shortDisplayText.isEmpty ? "" : status.shortDisplayText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
             }
+
+            AutoBypassRuleEditor(player: player, slot: slot)
         }
         .padding(.vertical, 4)
         .alert("Save Preset for \(slot.selection.name)", isPresented: $showSavePresetAlert) {
@@ -307,6 +316,105 @@ private struct AudioUnitChainSlotRow: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+    }
+}
+
+// MARK: - Auto-bypass rule editor (per slot)
+
+private struct AutoBypassRuleEditor: View {
+    @ObservedObject var player: LocalPlayerSource
+    let slot: AudioUnitChainSlot
+
+    @State private var didLoad = false
+    @State private var enabled = false
+    @State private var action: SlotRuleAction = .activate
+    @State private var genresText = ""
+    @State private var yearEnabled = false
+    @State private var yearText = ""
+    @State private var yearMode: YearComparison = .olderThan
+
+    var body: some View {
+        DisclosureGroup("Auto-bypass (genre / year)") {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Automatic rule", isOn: $enabled)
+                    .onChange(of: enabled) { _ in commit() }
+
+                if enabled {
+                    Picker("When it matches", selection: $action) {
+                        Text("Activate plugin").tag(SlotRuleAction.activate)
+                        Text("Bypass plugin").tag(SlotRuleAction.bypass)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: action) { _ in commit() }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        TextField("Genres (comma-separated; empty = any)", text: $genresText)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { commit() }
+                            .onChange(of: genresText) { _ in commit() }
+                        Text("Case-insensitive, matches exactly or at a word boundary (e.g. “Tango” matches “Tango Vals”).")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Toggle("Use a year threshold", isOn: $yearEnabled)
+                        .onChange(of: yearEnabled) { _ in commit() }
+                    if yearEnabled {
+                        HStack {
+                            Picker("", selection: $yearMode) {
+                                Text("older than").tag(YearComparison.olderThan)
+                                Text("from year").tag(YearComparison.fromYearOnwards)
+                            }
+                            .labelsHidden()
+                            .frame(width: 130)
+                            .onChange(of: yearMode) { _ in commit() }
+                            TextField("Year", text: $yearText)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 80)
+                                .onChange(of: yearText) { _ in commit() }
+                        }
+                        Text("A track without a year counts as “younger”.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding(.top, 4)
+        }
+        .font(.caption)
+        .onAppear(perform: loadIfNeeded)
+    }
+
+    private func loadIfNeeded() {
+        guard !didLoad else { return }
+        didLoad = true
+        if let rule = slot.autoBypassRule {
+            enabled = true
+            action = rule.action
+            genresText = rule.matchGenres.joined(separator: ", ")
+            if let t = rule.yearThreshold {
+                yearEnabled = true
+                yearText = String(t)
+                yearMode = rule.yearMode
+            }
+        }
+    }
+
+    private func commit() {
+        guard enabled else {
+            player.updateSlotAutoBypassRule(id: slot.id, rule: nil)
+            return
+        }
+        let genres = genresText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let threshold: Int? = yearEnabled ? Int(yearText.trimmingCharacters(in: .whitespaces)) : nil
+        let rule = AutoBypassRule(matchGenres: genres,
+                                  yearThreshold: threshold,
+                                  yearMode: yearMode,
+                                  action: action)
+        player.updateSlotAutoBypassRule(id: slot.id, rule: rule)
     }
 }
 

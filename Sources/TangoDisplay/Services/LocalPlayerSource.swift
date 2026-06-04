@@ -104,6 +104,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     @Published private(set) var slotStatuses: [UUID: AudioUnitPluginStatus] = [:]
     @Published private(set) var slotPresets: [UUID: [AudioUnitPreset]] = [:]
     @Published private(set) var slotActivePresetIDs: [UUID: UUID] = [:]
+    /// The track currently loaded for auto-bypass-rule evaluation (nil when nothing is playing).
+    /// Published so the chain UI can reflect each slot's live rule-driven bypass state.
+    @Published private(set) var currentRuleTrack: Track?
 
     // MARK: - Private — auto-gap
 
@@ -527,6 +530,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             runtime.pluginWindowVC = nil
         }
         currentEntryID = nil
+        currentRuleTrack = nil
         isCurrentEntryMarkedAsPlayed = false
         isActivePlaying = false
         replayGainStatus = ""
@@ -631,6 +635,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         }
         scheduleGeneration += 1
         currentEntryID = nil
+        currentRuleTrack = nil
         isCurrentEntryMarkedAsPlayed = false
         isActivePlaying = false
         replayGainStatus = ""
@@ -762,6 +767,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     private func loadEntry(_ entry: SetlistEntry, bypassAutoGap: Bool = false) {
         earlyMarkedEntryIDs.remove(entry.id)
         isCurrentEntryMarkedAsPlayed = false
+        // Set before the graph is (re)built below so auto-bypass rules evaluate against this track.
+        currentRuleTrack = entry.track
         playerNode.stop()
         scheduleGeneration += 1
         let gen = scheduleGeneration
@@ -912,6 +919,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         guard settings.audioUnitPluginEnabled, !settings.audioUnitPluginBypassed else { return [] }
         return settings.audioUnitPluginChain.compactMap { slot in
             guard slot.isEnabled,
+                  !isSlotAutoBypassed(slot),
                   let runtime = slotRuntimes[slot.id],
                   let unit = runtime.avUnit else { return nil }
             return (slot, unit)
@@ -970,6 +978,15 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak runtime] in
             runtime?.isApplyingPreset = false
         }
+    }
+
+    /// Whether a slot is currently bypassed by its genre/year auto-rule for the loaded track.
+    /// Only meaningful for enabled slots with a rule while a track is loaded; otherwise false.
+    func isSlotAutoBypassed(_ slot: AudioUnitChainSlot) -> Bool {
+        guard slot.isEnabled, let rule = slot.autoBypassRule, let track = currentRuleTrack else {
+            return false
+        }
+        return !rule.shouldBeActive(genre: track.genre, year: track.year)
     }
 
     private func connectAudioGraph(format: AVAudioFormat?) {
@@ -1124,6 +1141,15 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     func setSlotEnabled(id: UUID, enabled: Bool) {
         guard let index = settings.audioUnitPluginChain.firstIndex(where: { $0.id == id }) else { return }
         settings.audioUnitPluginChain[index].isEnabled = enabled
+        rewireGraphSafely()
+        recomputeChainStatus()
+    }
+
+    /// Sets (or clears, with nil) a slot's genre/year auto-bypass rule and re-evaluates the graph
+    /// immediately against the current track.
+    func updateSlotAutoBypassRule(id: UUID, rule: AutoBypassRule?) {
+        guard let index = settings.audioUnitPluginChain.firstIndex(where: { $0.id == id }) else { return }
+        settings.audioUnitPluginChain[index].autoBypassRule = rule
         rewireGraphSafely()
         recomputeChainStatus()
     }
