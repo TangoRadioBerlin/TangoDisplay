@@ -454,6 +454,7 @@ struct SetlistView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var reportStore: SetlistReportStore
+    @EnvironmentObject var configStore: PluginConfigurationStore
     @State private var isDragTargeted = false
     @State private var activeEntryID: UUID? = nil
     @State private var isPlayerActive: Bool = false
@@ -687,6 +688,7 @@ struct SetlistView: View {
             wouldSkipAutoGap: wouldSkipAutoGap,
             autoFadeCortinasEnabled: settings.autoFadeCortinasEnabled,
             isLastTanda: entry.isLastTanda,
+            configurationName: entry.pluginConfigurationID.flatMap { configStore.configuration(id: $0)?.name },
             genreColorsEnabled: settings.genreColorsEnabled,
             genreColorRules: settings.genreColorRules,
             genreColorTitleEnabled: settings.genreColorTitleEnabled,
@@ -973,6 +975,20 @@ struct SetlistView: View {
                     showLastTandaWarning = true
                 } else {
                     appState.setLastTanda(id: id, value: !e.isLastTanda)
+                }
+            }
+        }
+        if !configStore.configurations.isEmpty {
+            Divider()
+            Menu("Apply Configuration") {
+                Button("None") {
+                    setlist.setPluginConfiguration(nil, for: targets)
+                }
+                Divider()
+                ForEach(configStore.configurations) { config in
+                    Button(config.name) {
+                        setlist.setPluginConfiguration(config.id, for: targets)
+                    }
                 }
             }
         }
@@ -1326,6 +1342,7 @@ struct SetlistRowView: View {
     var wouldSkipAutoGap: Bool = false
     var autoFadeCortinasEnabled: Bool = false
     var isLastTanda: Bool = false
+    var configurationName: String? = nil
     var genreColorsEnabled: Bool = false
     var genreColorRules: [GenreColorRule] = []
     var genreColorTitleEnabled: Bool = false
@@ -1408,6 +1425,15 @@ struct SetlistRowView: View {
                     Image(systemName: "flag.fill")
                         .font(.system(size: 11))
                         .foregroundColor(.red)
+                }
+                if let name = configurationName {
+                    Text(name)
+                        .font(.system(size: 9))
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.12))
+                        .clipShape(Capsule())
                 }
             }
             .padding(.top, 3)

@@ -18,11 +18,12 @@ struct SetlistEntry: Identifiable, Codable {
     var ignoresAutoGap: Bool = false
     var ignoresAutoFade: Bool = false
     var isLastTanda: Bool = false      // marks this cortina as the last-tanda trigger
+    var pluginConfigurationID: UUID? = nil
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
     var autoGapSkipped: Bool = false   // transient: true when the first-track setting automatically skips the gap
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda
+        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda, pluginConfigurationID
         // autoGapApplied and autoGapSkipped are intentionally excluded — reset each playback session
     }
 
@@ -43,6 +44,7 @@ struct SetlistEntry: Identifiable, Codable {
         ignoresAutoGap = try c.decodeIfPresent(Bool.self, forKey: .ignoresAutoGap) ?? false
         ignoresAutoFade = try c.decodeIfPresent(Bool.self, forKey: .ignoresAutoFade) ?? false
         isLastTanda = try c.decodeIfPresent(Bool.self, forKey: .isLastTanda) ?? false
+        pluginConfigurationID = try c.decodeIfPresent(UUID.self, forKey: .pluginConfigurationID) ?? nil
         autoGapApplied = false
         autoGapSkipped = false
     }
@@ -196,6 +198,14 @@ final class SetlistManager: ObservableObject {
         for i in entries.indices { entries[i].isLastTanda = false }
         if value, let i = entries.firstIndex(where: { $0.id == id }) {
             entries[i].isLastTanda = true
+        }
+        save()
+    }
+
+    func setPluginConfiguration(_ configID: UUID?, for ids: Set<UUID>) {
+        for id in ids {
+            guard let i = entries.firstIndex(where: { $0.id == id }) else { continue }
+            entries[i].pluginConfigurationID = configID
         }
         save()
     }

@@ -69,6 +69,32 @@ public struct AudioUnitChainSlot: Codable, Equatable, Identifiable {
     }
 }
 
+public struct PluginSlotState: Codable, Equatable {
+    public let slotID: UUID
+    public let componentSubType: UInt32
+    public let auState: String           // base64-encoded binary plist of fullState
+    public var isEnabled: Bool
+
+    public init(slotID: UUID, componentSubType: UInt32, auState: String, isEnabled: Bool) {
+        self.slotID = slotID
+        self.componentSubType = componentSubType
+        self.auState = auState
+        self.isEnabled = isEnabled
+    }
+}
+
+public struct PluginChainConfiguration: Codable, Equatable, Identifiable {
+    public let id: UUID
+    public var name: String
+    public var slotStates: [PluginSlotState]
+
+    public init(id: UUID = UUID(), name: String, slotStates: [PluginSlotState]) {
+        self.id = id
+        self.name = name
+        self.slotStates = slotStates
+    }
+}
+
 public enum AudioUnitPluginStatus: Equatable {
     case disabled
     case noPluginSelected

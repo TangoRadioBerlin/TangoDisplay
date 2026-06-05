@@ -4,6 +4,58 @@
         <title>TangoDisplay</title>
         <link>https://github.com/richardsladetdj-creator/TangoDisplay</link>
         <item>
+            <title>Version 3.24.2</title>
+            <pubDate>Thu, 05 Jun 2026 12:00:00 +0000</pubDate>
+            <sparkle:version>87</sparkle:version>
+            <sparkle:shortVersionString>3.24.2</sparkle:shortVersionString>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Plugin Configurations</strong>: save and recall named AU plugin chain settings; assign a configuration to individual setlist tracks; tracks with an assigned configuration display a badge in the setlist.</li>
+                    <li><strong>Fixed crash when playing a mono (or otherwise format-incompatible) audio file</strong> while a stereo-only AU plugin (e.g. FabFilter Transient Gizmo) is active; the incompatible plugin is now gracefully disabled instead.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/richardsladetdj-creator/TangoDisplay/releases/download/v3.24.2/TangoDisplay-v3.24.2-universal.zip"
+                sparkle:edSignature="mpLfiWECnp1oX3ooWXLNU4G74OIc8HZNBMhaEO9f0HegcwzDf8eIIwNVpSdCWoqRzo48CLatR2vRyLJTPU1eAg=="
+                length="6062824"
+                type="application/zip"/>
+        </item>
+        <item>
+            <title>Version 3.24.1</title>
+            <pubDate>Thu, 04 Jun 2026 19:42:18 +0000</pubDate>
+            <sparkle:version>86</sparkle:version>
+            <sparkle:shortVersionString>3.24.1</sparkle:shortVersionString>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>More third-party plugins now appear</strong>: the plugin browser also lists Music Effect Audio Units (kAudioUnitType_MusicEffect), not just plain effects &mdash; so plugins such as FabFilter Pro-Q 4 that register as music effects now show up and can be added to the chain.</li>
+                    <li><strong>Fixed a crash when opening some third-party plugin editors</strong> (e.g. FabFilter Pro-Q 4). Plugins now load out-of-process by default so a plugin's editor or processing crash is isolated from TangoDisplay. A small in-process allowlist (currently Klanghelm MJUC) keeps plugin-driven window auto-resize working where it's needed.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/richardsladetdj-creator/TangoDisplay/releases/download/v3.24.1/TangoDisplay-v3.24.1-universal.zip"
+                sparkle:edSignature="l7YTsT0ivB0PoyI0ZjqfWguJ0n/hHXeHQpKxJM5CePRLAefOZpJRKYqrnFZK6Zqc7Vymk+KPHqo64YOZQIWzDA=="
+                length="5962104"
+                type="application/zip"/>
+        </item>
+        <item>
+            <title>Version 3.24.0</title>
+            <pubDate>Thu, 04 Jun 2026 07:06:19 +0000</pubDate>
+            <sparkle:version>85</sparkle:version>
+            <sparkle:shortVersionString>3.24.0</sparkle:shortVersionString>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Audio Unit Plugin Chain</strong> (new): the Setlist player can now host up to 4 Audio Units in series instead of a single Apple-bundled plugin. Configure the chain in Player Settings &rsaquo; Audio Unit Plugins: add plugins, reorder with the up/down arrows, replace or remove individual slots, open each plugin's editor window, and save/recall presets per slot. A toolbar popover in the Setlist view gives quick chain access for live use &mdash; bypass the whole chain, toggle individual slots on or off, and open editor windows.</li>
+                    <li><strong>Third-party plugins supported</strong>: the browser now lists every Audio Unit effect installed on the system (e.g. FabFilter Pro-Q4, Klanghelm MJUC), not just the curated Apple effects. AUv3 plugins load out-of-process via XPC so a plugin crash is isolated from TangoDisplay; AUv2 plugins load in-process. Third-party Audio Units run at your own risk &mdash; an unstable plugin may still interrupt playback.</li>
+                    <li>The legacy single-plugin setting from previous versions is migrated automatically into slot 1 of the new chain on first launch.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/richardsladetdj-creator/TangoDisplay/releases/download/v3.24.0/TangoDisplay-v3.24.0-universal.zip"
+                sparkle:edSignature="/MKInscXxdBvI7f0YpcfIxbEhyFDDPOnUDFBnjUndFbU46YTjEx0JdcK4H9vlYPDS+A+c2AoomRwKuDbrV1wAQ=="
+                length="5955164"
+                type="application/zip"/>
+        </item>
+        <item>
             <title>Version 3.23.0</title>
             <pubDate>Wed, 03 Jun 2026 06:38:57 +0000</pubDate>
             <sparkle:version>82</sparkle:version>

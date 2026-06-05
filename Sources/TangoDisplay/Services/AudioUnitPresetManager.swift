@@ -58,11 +58,10 @@ final class AudioUnitPresetManager {
         guard let fullState = avUnit.auAudioUnit.fullState else {
             throw AudioUnitPresetError.noState
         }
-        let stateData = try PropertyListSerialization.data(
-            fromPropertyList: fullState, format: .binary, options: 0)
+        let auState = try AUStateCodec.encode(fullState)
+        let stateData = Data(base64Encoded: auState)!
         let id = UUID()
-        let envelope = PresetEnvelope(id: id.uuidString, name: name,
-                                      auState: stateData.base64EncodedString())
+        let envelope = PresetEnvelope(id: id.uuidString, name: name, auState: auState)
         let fileData = try JSONEncoder().encode(envelope)
         let fileURL = storeURL.appendingPathComponent("\(id.uuidString).aupreset")
         try fileData.write(to: fileURL, options: .atomic)
@@ -87,7 +86,7 @@ final class AudioUnitPresetManager {
 
         case .user(let stateData):
             guard let fullState = try PropertyListSerialization
-                .propertyList(from: stateData, format: nil) as? [String: Any] else {
+                    .propertyList(from: stateData, format: nil) as? [String: Any] else {
                 throw AudioUnitPresetError.invalidState
             }
             avUnit.auAudioUnit.fullState = fullState

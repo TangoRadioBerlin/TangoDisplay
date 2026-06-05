@@ -21,15 +21,24 @@ enum AudioUnitPluginError: Error, LocalizedError {
 final class AudioUnitPluginManager {
 
     func availableEffects() -> [AudioUnitPluginSelection] {
-        let desc = AudioComponentDescription(
-            componentType: kAudioUnitType_Effect,
-            componentSubType: 0,
-            componentManufacturer: 0,
-            componentFlags: 0,
-            componentFlagsMask: 0
-        )
-        return AVAudioUnitComponentManager.shared()
-            .components(matching: desc)
+        // Enumerate both plain effects (aufx) and music effects (aumf). Many
+        // modern plugins (e.g. FabFilter Pro-Q 4) register as aumf so they can
+        // accept MIDI input; they still process audio like any other effect in
+        // an AVAudioEngine chain (MIDI is optional), so they belong here.
+        // Instruments (aumu) are deliberately excluded — they are synths.
+        let manager = AVAudioUnitComponentManager.shared()
+        let effectTypes: [OSType] = [kAudioUnitType_Effect, kAudioUnitType_MusicEffect]
+        let components = effectTypes.flatMap { type -> [AVAudioUnitComponent] in
+            let desc = AudioComponentDescription(
+                componentType: type,
+                componentSubType: 0,
+                componentManufacturer: 0,
+                componentFlags: 0,
+                componentFlagsMask: 0
+            )
+            return manager.components(matching: desc)
+        }
+        return components
             .map { component in
                 AudioUnitPluginSelection(
                     id: UUID(),
@@ -67,20 +76,25 @@ final class AudioUnitPluginManager {
             throw AudioUnitPluginError.componentNotFound
         }
 
-        // V3 AUs are designed for out-of-process hosting and crash-isolate
-        // cleanly in their XPC service — prefer OOP for them. V2 AUs (the
-        // older Cocoa-view kind, e.g. Klanghelm MJUC) only relay UI
-        // resize events to the host when loaded *in-process*; under
-        // Apple's OOP V2-to-V3 bridge their view is wrapped in
-        // NSRemoteView, which doesn't surface remote-side frame changes
-        // to the host process. Loading those in-process is required for
-        // plugin-driven window resizing (e.g. MJUC's expander) to work.
-        // kAudioComponentFlag_IsV3AudioComponent = 1 << 2 (per AudioToolbox/AudioComponent.h).
-        // Not exposed in Swift's imported AudioToolbox in older SDKs, so use literal.
-        let isV3 = (component.audioComponentDescription.componentFlags & (1 << 2)) != 0
+        // Hosting mode: default to out-of-process (OOP). OOP is Apple's
+        // standard hosting path — it isolates plugin crashes inside the AU's
+        // own process and is what 3rd-party plugins are tested against. Some
+        // V2 plugins (e.g. FabFilter Pro-Q 4) crash the *host* outright when
+        // their editor is created in-process via the V2→V3 bridge, so loading
+        // them in-process is unsafe.
+        //
+        // Exception: the in-process allowlist below. A few V2 plugins only
+        // relay UI resize events to the host when loaded *in-process*; under
+        // the OOP V2→V3 bridge their view is wrapped in NSRemoteView, which
+        // doesn't surface remote-side frame changes, so plugin-driven window
+        // resizing (e.g. MJUC's expander) silently breaks. For those we load
+        // in-process and accept the lack of crash isolation.
+        let key = ComponentKey(manufacturer: selection.componentManufacturer,
+                               subType: selection.componentSubType)
+        let loadInProcess = Self.inProcessAllowlist.contains(key)
 
-        let primary: AudioComponentInstantiationOptions = isV3 ? .loadOutOfProcess : []
-        let fallback: AudioComponentInstantiationOptions = isV3 ? [] : .loadOutOfProcess
+        let primary: AudioComponentInstantiationOptions = loadInProcess ? [] : .loadOutOfProcess
+        let fallback: AudioComponentInstantiationOptions = loadInProcess ? .loadOutOfProcess : []
 
         if let unit = await Self.tryInstantiate(desc: desc, options: primary) {
             return unit
@@ -89,6 +103,29 @@ final class AudioUnitPluginManager {
             return unit
         }
         throw AudioUnitPluginError.instantiationFailed("instantiation returned nil")
+    }
+
+    // MARK: - In-process hosting allowlist
+
+    private struct ComponentKey: Hashable {
+        let manufacturer: UInt32
+        let subType: UInt32
+    }
+
+    /// V2 plugins that must load in-process for plugin-driven window resize
+    /// to work. Loaded out-of-process their editor is wrapped in NSRemoteView,
+    /// which swallows the frame-change events the host needs to grow the
+    /// window. Keyed on (manufacturer, subType) four-char codes. Keep this
+    /// list as small as possible — in-process plugins are not crash-isolated.
+    private static let inProcessAllowlist: Set<ComponentKey> = [
+        // Klanghelm MJUC — its expander panel grows the editor at runtime.
+        ComponentKey(manufacturer: fourCharCode("KlHm"), subType: fourCharCode("MJUC")),
+    ]
+
+    /// Convert a four-character code string (e.g. "KlHm") to the OSType/
+    /// FourCharCode value AudioComponentDescription uses.
+    private static func fourCharCode(_ string: String) -> UInt32 {
+        string.utf8.prefix(4).reduce(0) { ($0 << 8) | UInt32($1) }
     }
 
     private static func tryInstantiate(

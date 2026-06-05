@@ -7,9 +7,14 @@ import TangoDisplayCore
 struct AudioUnitPluginSettingsSection: View {
     @ObservedObject var player: LocalPlayerSource
     @EnvironmentObject var settings: AppSettings
+    @EnvironmentObject var configStore: PluginConfigurationStore
     @State private var showPickerForSlot: UUID? = nil
     @State private var showPickerForNewSlot = false
     @State private var showReplacePickerForSlot: UUID? = nil
+    @State private var showSaveConfigAlert = false
+    @State private var newConfigName = ""
+    @State private var renamingConfigID: UUID? = nil
+    @State private var renameConfigText = ""
 
     var body: some View {
         Group {
@@ -59,6 +64,69 @@ struct AudioUnitPluginSettingsSection: View {
                 }
             }
 
+            Divider()
+
+            Text("Plugin Configurations")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+            Text("Play a track and tune the plugins, then save as a configuration to recall that sound automatically.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if !configStore.configurations.isEmpty {
+                ForEach(configStore.configurations, id: \.id) { config in
+                    let isDefault = configStore.defaultConfigurationID == config.id
+                    HStack(spacing: 6) {
+                        if isDefault {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.accentColor)
+                                .help("Default — applied to all unassigned tracks")
+                        } else {
+                            Image(systemName: "circle")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .help("Set as default for unassigned tracks")
+                                .onTapGesture { configStore.setDefault(id: config.id) }
+                        }
+                        Text(config.name)
+                            .font(.system(size: 12))
+                        Spacer()
+                        if isDefault {
+                            Button("Remove default") { configStore.setDefault(id: nil) }
+                                .buttonStyle(.borderless)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Button("Set as default") { configStore.setDefault(id: config.id) }
+                                .buttonStyle(.borderless)
+                                .font(.caption)
+                        }
+                        Button("Rename") {
+                            renameConfigText = config.name
+                            renamingConfigID = config.id
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                        Button(role: .destructive) {
+                            configStore.delete(id: config.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Delete configuration \"\(config.name)\"")
+                    }
+                }
+            }
+
+            Button {
+                newConfigName = ""
+                showSaveConfigAlert = true
+            } label: {
+                Label("Save current settings as configuration…", systemImage: "plus.circle")
+            }
+            .disabled(settings.audioUnitPluginChain.isEmpty)
+
             LabeledContent("Status") {
                 Text(player.audioUnitPluginStatus.displayText)
                     .foregroundColor(.secondary)
@@ -67,6 +135,30 @@ struct AudioUnitPluginSettingsSection: View {
             Text("Third-party Audio Units run inside TangoDisplay at your own risk. An unstable plugin may interrupt playback.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+        }
+        .alert("Save Configuration", isPresented: $showSaveConfigAlert) {
+            TextField("Configuration name", text: $newConfigName)
+            Button("Save") {
+                let name = newConfigName.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return }
+                configStore.add(name: name, slotStates: player.captureChainConfiguration())
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enter a name for this plugin configuration.")
+        }
+        .alert("Rename Configuration", isPresented: Binding(
+            get: { renamingConfigID != nil },
+            set: { if !$0 { renamingConfigID = nil } }
+        )) {
+            TextField("Configuration name", text: $renameConfigText)
+            Button("Rename") {
+                let name = renameConfigText.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty, let id = renamingConfigID else { return }
+                configStore.rename(id: id, to: name)
+                renamingConfigID = nil
+            }
+            Button("Cancel", role: .cancel) { renamingConfigID = nil }
         }
         .sheet(isPresented: $showPickerForNewSlot) {
             AudioUnitPluginPickerSheet { selection in

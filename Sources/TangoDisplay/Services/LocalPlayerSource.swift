@@ -61,6 +61,17 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
     let setlist: SetlistManager
     private let settings: AppSettings
+    private let configStore: PluginConfigurationStore
+
+    // Snapshot of chain state captured just before the first per-track config is applied.
+    // Restored when the next unassigned track (with no default config) plays.
+    private var preConfigSnapshot: PreConfigSnapshot? = nil
+
+    private struct PreConfigSnapshot {
+        let chainEnabled: Bool
+        let chainBypassed: Bool
+        let slotStates: [PluginSlotState]
+    }
     private var timeObserverTimer: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
     private var earlyMarkedEntryIDs: Set<UUID> = []
@@ -109,9 +120,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
     // MARK: - Init
 
-    init(setlist: SetlistManager, settings: AppSettings, volume: Float = 1.0) {
+    init(setlist: SetlistManager, settings: AppSettings, configStore: PluginConfigurationStore, volume: Float = 1.0) {
         self.setlist = setlist
         self.settings = settings
+        self.configStore = configStore
         super.init()
         setupAudioEngine()
         levelMeter = AudioLevelMeter(mixerNode: audioEngine.mainMixerNode)
@@ -847,6 +859,21 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         }
         currentEntryID = entry.id
         setlist.markPlaying(id: entry.id)
+        let resolvedConfigID = entry.pluginConfigurationID ?? configStore.defaultConfigurationID
+        if let configID = resolvedConfigID, let config = configStore.configuration(id: configID) {
+            if preConfigSnapshot == nil {
+                preConfigSnapshot = PreConfigSnapshot(
+                    chainEnabled: settings.audioUnitPluginEnabled,
+                    chainBypassed: settings.audioUnitPluginBypassed,
+                    slotStates: captureChainConfiguration()
+                )
+            }
+            if !settings.audioUnitPluginEnabled { enableAudioUnitPlugin() }
+            applyChainConfiguration(config)
+        } else if let snapshot = preConfigSnapshot {
+            restorePreConfigSnapshot(snapshot)
+            preConfigSnapshot = nil
+        }
         reportCurrentState()
         reportPlaylist()
         onNextTrackUpdate?(setlist.entry(after: entry.id)?.track)
@@ -891,6 +918,60 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         }
     }
 
+    // MARK: - Plugin chain configuration capture / apply
+
+    func captureChainConfiguration() -> [PluginSlotState] {
+        settings.audioUnitPluginChain.compactMap { slot in
+            guard let runtime = slotRuntimes[slot.id],
+                  let unit = runtime.avUnit,
+                  let fullState = unit.auAudioUnit.fullState,
+                  let encoded = try? AUStateCodec.encode(fullState)
+            else { return nil }
+            return PluginSlotState(
+                slotID: slot.id,
+                componentSubType: slot.selection.componentSubType,
+                auState: encoded,
+                isEnabled: slot.isEnabled
+            )
+        }
+    }
+
+    func applyChainConfiguration(_ config: PluginChainConfiguration) {
+        for slotState in config.slotStates {
+            guard let runtime = slotRuntimes[slotState.slotID],
+                  let unit = runtime.avUnit else { continue }
+            applySlotState(slotState, to: unit, runtime: runtime)
+            setSlotEnabled(id: slotState.slotID, enabled: slotState.isEnabled)
+        }
+    }
+
+    private func restorePreConfigSnapshot(_ snapshot: PreConfigSnapshot) {
+        for slotState in snapshot.slotStates {
+            guard let runtime = slotRuntimes[slotState.slotID],
+                  let unit = runtime.avUnit else { continue }
+            applySlotState(slotState, to: unit, runtime: runtime)
+            setSlotEnabled(id: slotState.slotID, enabled: slotState.isEnabled)
+        }
+        if snapshot.chainBypassed != settings.audioUnitPluginBypassed {
+            bypassAudioUnitPlugin(snapshot.chainBypassed)
+        }
+        if snapshot.chainEnabled != settings.audioUnitPluginEnabled {
+            if snapshot.chainEnabled { enableAudioUnitPlugin() } else { disableAudioUnitPlugin() }
+        }
+    }
+
+    private func applySlotState(_ slotState: PluginSlotState, to unit: AVAudioUnit, runtime: SlotRuntime) {
+        guard let fullState = try? AUStateCodec.decode(slotState.auState) else { return }
+        runtime.isApplyingPreset = true
+        unit.auAudioUnit.fullState = fullState
+        runtime.activePresetID = nil
+        slotActivePresetIDs.removeValue(forKey: slotState.slotID)
+        updateSlotPresetName(slotId: slotState.slotID, name: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak runtime] in
+            runtime?.isApplyingPreset = false
+        }
+    }
+
     private func connectAudioGraph(format: AVAudioFormat?) {
         audioEngine.disconnectNodeOutput(playerNode)
         audioEngine.disconnectNodeOutput(eq)
@@ -906,9 +987,23 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         audioEngine.connect(eq, to: replayGainMixer, format: format)
 
         var prev: AVAudioNode = replayGainMixer
-        for (_, unit) in liveChainUnits() {
+        var failedSlots: [(id: UUID, reason: String)] = []
+        for (slot, unit) in liveChainUnits() {
+            if let fmt = format {
+                do {
+                    try unit.auAudioUnit.inputBusses[0].setFormat(fmt)
+                } catch {
+                    os_log(.error, "TangoDisplay: plugin '%{public}@' rejected format; disabling: %{public}@",
+                           slot.selection.name, error.localizedDescription)
+                    failedSlots.append((id: slot.id, reason: error.localizedDescription))
+                    continue
+                }
+            }
             audioEngine.connect(prev, to: unit, format: format)
             prev = unit
+        }
+        for (id, reason) in failedSlots {
+            markSlotFailed(id: id, reason: reason)
         }
         audioEngine.connect(prev, to: balanceMixer, format: format)
         audioEngine.connect(balanceMixer, to: audioEngine.mainMixerNode, format: format)
@@ -1231,16 +1326,31 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
                     self.installSlotObservers(slotId: slotId, runtime: runtime, avUnit: avUnit)
 
-                    // Restore last-used preset for this slot.
-                    let savedName = self.settings.audioUnitPluginChain
-                        .first(where: { $0.id == slotId })?.lastUsedPresetName
-                    if let savedName, let match = all.first(where: { $0.name == savedName }) {
-                        runtime.isApplyingPreset = true
-                        try? manager.applyPreset(match, to: avUnit, originator: runtime.paramObserverToken)
-                        runtime.activePresetID = match.id
-                        self.slotActivePresetIDs[slotId] = match.id
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak runtime] in
-                            runtime?.isApplyingPreset = false
+                    // Apply the track's assigned configuration (or default), falling back to last-used preset.
+                    var appliedConfig = false
+                    if let entryID = self.currentEntryID,
+                       let entry = self.setlist.entries.first(where: { $0.id == entryID }) {
+                        let resolvedID = entry.pluginConfigurationID ?? self.configStore.defaultConfigurationID
+                        if let configID = resolvedID,
+                           let config = self.configStore.configuration(id: configID),
+                           let slotState = config.slotStates.first(where: { $0.slotID == slotId }) {
+                            self.applySlotState(slotState, to: avUnit, runtime: runtime)
+                            appliedConfig = true
+                        }
+                    }
+
+                    if !appliedConfig {
+                        // Restore last-used preset for this slot.
+                        let savedName = self.settings.audioUnitPluginChain
+                            .first(where: { $0.id == slotId })?.lastUsedPresetName
+                        if let savedName, let match = all.first(where: { $0.name == savedName }) {
+                            runtime.isApplyingPreset = true
+                            try? manager.applyPreset(match, to: avUnit, originator: runtime.paramObserverToken)
+                            runtime.activePresetID = match.id
+                            self.slotActivePresetIDs[slotId] = match.id
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak runtime] in
+                                runtime?.isApplyingPreset = false
+                            }
                         }
                     }
 

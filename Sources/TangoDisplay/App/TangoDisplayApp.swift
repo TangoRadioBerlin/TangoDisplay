@@ -18,6 +18,7 @@ struct TangoDisplayApp: App {
             ControlView()
                 .environmentObject(appState)
                 .environmentObject(appState.settings)
+                .environmentObject(appState.configStore)
                 .environmentObject(sparkleUpdater)
                 .onAppear {
                     // Pass appState to the delegate (cannot be done in init because
@@ -50,6 +51,7 @@ struct TangoDisplayApp: App {
             PresentationView()
                 .environmentObject(appState)
                 .environmentObject(appState.settings)
+                .environmentObject(appState.configStore)
         }
         .defaultSize(width: 1280, height: 720)
 

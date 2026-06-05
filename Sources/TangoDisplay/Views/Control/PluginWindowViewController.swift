@@ -11,11 +11,14 @@ import os.log
 // NSViewFrameDidChangeNotification on the AU view, keeping the titlebar
 // fixed by adjusting origin.y.
 //
-// Note: this requires V2 AUs to be loaded *in-process* (see
-// AudioUnitPluginManager.instantiate). When V2 AUs are loaded via the
-// out-of-process bridge, their view comes back wrapped in NSRemoteView and
-// frame changes from the plugin process don't surface to the host —
-// plugin-driven UI resize (e.g. MJUC's expander) silently breaks.
+// Note: plugin-driven resize only works for plugins loaded *in-process*.
+// Plugins now default to out-of-process hosting (for crash isolation); only
+// those on AudioUnitPluginManager.inProcessAllowlist (e.g. MJUC) load
+// in-process and can drive window resize this way. When a V2 AU is loaded via
+// the out-of-process bridge, its view comes back wrapped in NSRemoteView and
+// frame changes from the plugin process don't surface to the host — so the
+// frame-observer path below is a no-op for OOP plugins (they resize, if at
+// all, via the preferredContentSize observer instead).
 
 final class PluginWindowViewController: NSViewController {
     private let pluginVC: NSViewController
