@@ -1829,6 +1829,17 @@ func runRelativePositionTests() {
             try expectEqual(p.genreHAlign, .leading)
             try expectEqual(p.titleHAlign, .center)
         }
+        test("absolute artwork offset migrates to percent of 1920×1080") {
+            let data = try legacyDict {
+                $0.removeValue(forKey: "relativeArtworkPosition")
+                $0["albumArtworkOffsetX"] = 192.0   // 10% of 1920
+                $0["albumArtworkOffsetY"] = 540.0   // 50% of 1080
+            }
+            let p = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expect(p.relativeArtworkPosition)
+            try expect(abs(p.albumArtworkOffsetX - 10.0) < 0.001)
+            try expect(abs(p.albumArtworkOffsetY - 50.0) < 0.001)
+        }
         test("already-relative profile is not re-converted (idempotent)") {
             var p = baseProfile()
             p.titleOffsetX = 10.0
@@ -1997,6 +2008,32 @@ func runGenrePositionOverrideTests() {
             var p = base()
             p.albumArtworkScale = 1.7
             try expect(abs((p.currentPlacements().artwork?.scale ?? 0) - 1.7) < 0.001)
+        }
+        test("save→load round-trips text + artwork placements losslessly") {
+            var src = base()
+            src.titleOffsetX = 12.5; src.titleHAlign = .trailing; src.artistBoxWidth = 40
+            src.singerOffsetY = -7
+            src.albumArtworkOffsetX = 25; src.albumArtworkOffsetY = -15; src.albumArtworkScale = 1.4
+            let set = src.currentPlacements()                  // "Save to genre"
+            let loaded = base().applyingPositionOverride(set)  // "Load from genre" onto defaults
+            try expect(abs(loaded.titleOffsetX - 12.5) < 0.001)
+            try expectEqual(loaded.titleHAlign, .trailing)
+            try expect(abs(loaded.artistBoxWidth - 40) < 0.001)
+            try expect(abs(loaded.singerOffsetY - (-7)) < 0.001)
+            try expect(abs(loaded.albumArtworkOffsetX - 25) < 0.001)
+            try expect(abs(loaded.albumArtworkOffsetY - (-15)) < 0.001)
+            try expect(abs(loaded.albumArtworkScale - 1.4) < 0.001)
+        }
+        test("save to a genre then read back via positionOverride") {
+            var p = base()
+            p.genreBackgroundsEnabled = true
+            p.titleOffsetX = 9; p.albumArtworkScale = 2.0
+            var g = GenreBackground(genreKey: "Tango")
+            g.positions = p.currentPlacements()
+            p.genreBackgrounds = [g]
+            let set = p.positionOverride(forGenre: "Tango", using: detector)
+            try expect(abs((set?.placements["title"]?.offsetX ?? 0) - 9) < 0.001)
+            try expect(abs((set?.artwork?.scale ?? 0) - 2.0) < 0.001)
         }
     }
 

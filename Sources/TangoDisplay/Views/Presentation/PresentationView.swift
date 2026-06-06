@@ -22,6 +22,8 @@ struct PresentationView: View {
     }
 
     private var shouldShowArtwork: Bool {
+        // While editing positions in the preview, show a placeholder so artwork position/size is visible.
+        if isPreview, appState.showElementBoundsInPreview { return activeProfile.showArtworkDance }
         switch appState.displayState.mode {
         case .playing: return activeProfile.showArtworkDance
         case .cortina: return activeProfile.showArtworkCortina
@@ -42,16 +44,40 @@ struct PresentationView: View {
                     style: activeProfile.transitionStyle,
                     duration: activeProfile.transitionDuration
                 ) {
-                    if let art = appState.currentArtwork {
-                        Image(nsImage: art)
-                            .resizable()
-                            .scaledToFit()
-                            .mask(fadeMask(fade: renderProfile.albumArtworkEdgeFade,
-                                           style: renderProfile.albumArtworkFadeStyle))
-                            .scaleEffect(renderProfile.albumArtworkScale)
-                            .offset(x: renderProfile.albumArtworkOffsetX,
-                                    y: renderProfile.albumArtworkOffsetY)
-                            .opacity(renderProfile.albumArtworkOpacity)
+                    GeometryReader { geo in
+                        // Artwork offsets are percentages of the resolution → resolve to points here.
+                        let ax = renderProfile.albumArtworkOffsetX / 100 * geo.size.width
+                        let ay = renderProfile.albumArtworkOffsetY / 100 * geo.size.height
+                        Group {
+                            if let art = appState.currentArtwork {
+                                Image(nsImage: art)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .mask(fadeMask(fade: renderProfile.albumArtworkEdgeFade,
+                                                   style: renderProfile.albumArtworkFadeStyle))
+                                    .scaleEffect(renderProfile.albumArtworkScale)
+                                    .offset(x: ax, y: ay)
+                                    .opacity(renderProfile.albumArtworkOpacity)
+                            } else if isPreview, appState.showElementBoundsInPreview {
+                                // Artwork positioning placeholder (no real artwork in the preview).
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.white.opacity(0.12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(Color.accentColor.opacity(0.8),
+                                                          style: StrokeStyle(lineWidth: 3, dash: [10, 6]))
+                                    )
+                                    .overlay(Image(systemName: "music.note")
+                                        .font(.system(size: 120))
+                                        .foregroundColor(.white.opacity(0.5)))
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .padding(60)
+                                    .scaleEffect(renderProfile.albumArtworkScale)
+                                    .offset(x: ax, y: ay)
+                                    .opacity(renderProfile.albumArtworkOpacity)
+                            }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
                     }
                 }
             }
@@ -227,9 +253,12 @@ struct PresentationView: View {
     }
 
     /// Profile with any per-genre-background override (text positions + artwork placement) applied for
-    /// the current track. Used for both the artwork layer and the text views.
+    /// the current track. Used for both the artwork layer and the text views. In the configuration
+    /// preview we deliberately show the profile defaults (WYSIWYG while editing positions); per-genre
+    /// overrides apply only on the real presentation display.
     private var renderProfile: AppearanceProfile {
-        activeProfile.applyingPositionOverride(
+        guard !isPreview else { return activeProfile }
+        return activeProfile.applyingPositionOverride(
             activeProfile.positionOverride(forGenre: effectiveDisplayState.currentTrack?.genre ?? "",
                                            using: appState.settings.makeDetector()))
     }

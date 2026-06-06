@@ -269,6 +269,9 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     /// When true, the *FontSize values are levels (1–15 = percent of the presentation height) rather
     /// than absolute points. Older profiles (flag absent) are migrated from points on decode.
     public var relativeFontSizes: Bool
+    /// When true, albumArtworkOffsetX/Y are percentages of the resolution (X = % width, Y = % height)
+    /// rather than absolute points. Older profiles (flag absent) are migrated from points on decode.
+    public var relativeArtworkPosition: Bool
 
     public init(id: UUID, name: String, isBuiltIn: Bool,
                 titleFontName: String = "System", titleFontSize: Double = 7,
@@ -395,7 +398,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 nextUpLabelHAlign: TextHAlignment = .center,
                 lastPlayedHAlign: TextHAlignment = .center,
                 relativePositions: Bool = true,
-                relativeFontSizes: Bool = true) {
+                relativeFontSizes: Bool = true,
+                relativeArtworkPosition: Bool = true) {
         self.id = id
         self.name = name
         self.isBuiltIn = isBuiltIn
@@ -551,6 +555,7 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.lastPlayedHAlign = lastPlayedHAlign
         self.relativePositions = relativePositions
         self.relativeFontSizes = relativeFontSizes
+        self.relativeArtworkPosition = relativeArtworkPosition
     }
 
     // Custom decoder so existing JSON lacking the image keys still loads cleanly.
@@ -833,6 +838,15 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
             idleMessageFontSize = lvl(idleMessageFontSize);     lastTandaLabelFontSize = lvl(lastTandaLabelFontSize)
             overrideTextFontSize = lvl(overrideTextFontSize);   lastPlayedFontSize = lvl(lastPlayedFontSize)
             relativeFontSizes = true
+        }
+
+        // Album-artwork offset migration: older profiles stored points and had no
+        // `relativeArtworkPosition` key. Convert to percent of a 1920×1080 baseline. Idempotent.
+        relativeArtworkPosition = try c.decodeIfPresent(Bool.self, forKey: .relativeArtworkPosition) ?? false
+        if !relativeArtworkPosition {
+            albumArtworkOffsetX = albumArtworkOffsetX / 1920.0 * 100.0
+            albumArtworkOffsetY = albumArtworkOffsetY / 1080.0 * 100.0
+            relativeArtworkPosition = true
         }
 
         // Migration: append items to order lists if absent
