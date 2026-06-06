@@ -19,12 +19,6 @@ struct AppearanceArtworkTab: View {
 
     @FocusState private var focusedEntryId: UUID?
     @State private var prevArtistCount: Int = 0
-    @State private var positionsGenreID: UUID? = nil
-
-    private func genreBinding(_ id: UUID) -> Binding<GenreBackground>? {
-        guard let idx = working.genreBackgrounds.firstIndex(where: { $0.id == id }) else { return nil }
-        return $working.genreBackgrounds[idx]
-    }
 
     private var orderedGenreBackgrounds: [GenreBackground] {
         let dance = working.genreBackgrounds.filter { !$0.isCortinaEntry }
@@ -92,15 +86,15 @@ struct AppearanceArtworkTab: View {
                     }
                     HStack {
                         Text("Horizontal Position")
-                        Slider(value: $working.albumArtworkOffsetX, in: -2000...2000)
-                        Text(String(format: "%+.0f", working.albumArtworkOffsetX))
+                        Slider(value: $working.albumArtworkOffsetX, in: -100...100)
+                        Text(String(format: "%+.0f%%", working.albumArtworkOffsetX))
                             .monospacedDigit()
                             .frame(width: 48)
                     }
                     HStack {
                         Text("Vertical Position")
-                        Slider(value: $working.albumArtworkOffsetY, in: -2000...2000)
-                        Text(String(format: "%+.0f", working.albumArtworkOffsetY))
+                        Slider(value: $working.albumArtworkOffsetY, in: -100...100)
+                        Text(String(format: "%+.0f%%", working.albumArtworkOffsetY))
                             .monospacedDigit()
                             .frame(width: 48)
                     }
@@ -312,20 +306,6 @@ struct AppearanceArtworkTab: View {
             }
             prevArtistCount = newCount
         }
-        .sheet(isPresented: Binding(
-            get: { positionsGenreID != nil },
-            set: { if !$0 { positionsGenreID = nil } }
-        )) {
-            if let id = positionsGenreID, let binding = genreBinding(id) {
-                GenrePositionsSheet(
-                    genre: binding,
-                    genreLabel: binding.wrappedValue.isCortinaEntry
-                        ? "\(cortinaRowLabel) (non-dance)" : binding.wrappedValue.genreKey,
-                    defaults: working.currentPlacements(),
-                    onClose: { positionsGenreID = nil }
-                )
-            }
-        }
     }
 
     @ViewBuilder
@@ -438,11 +418,11 @@ struct AppearanceArtworkTab: View {
                     .foregroundColor(.red)
             }
 
-            Button(entry.positions == nil ? "Positions…" : "Positions ✓") {
-                positionsGenreID = entry.id
+            if entry.positions != nil {
+                Image(systemName: "scope")
+                    .foregroundColor(.secondary)
+                    .help("Has saved genre-specific positions (edit them in the Position tab)")
             }
-            .buttonStyle(.bordered)
-            .help("Set text positions used while this genre plays")
         }
     }
 }

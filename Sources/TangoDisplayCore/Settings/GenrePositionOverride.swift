@@ -17,7 +17,7 @@ public struct ElementPlacement: Codable, Equatable {
 }
 
 /// Album-artwork placement (offset/size/opacity in the same units as the profile's artwork fields:
-/// offsets in points, scale as a multiplier, opacity 0…1).
+/// offsets as percent of the resolution, scale as a multiplier, opacity 0…1).
 public struct ArtworkPlacement: Codable, Equatable {
     public var offsetX: Double
     public var offsetY: Double
