@@ -28,6 +28,9 @@ final class AppState: ObservableObject {
     @Published private(set) var currentArtwork: NSImage? = nil
     /// persistentID of the track whose artwork is currently displayed; drives transition identity.
     @Published private(set) var displayedArtworkTrackID: String? = nil
+    /// The dance track that was playing before the current one — shown by the optional "Last Played"
+    /// element. Updated when a new distinct track starts; cleared on stop/idle.
+    @Published private(set) var lastPlayedTrack: Track? = nil
 
     // MARK: - Window actions (set by ControlView; used by MenuBarController)
 
@@ -330,6 +333,10 @@ final class AppState: ObservableObject {
         if pid != lastSeenPersistentID {
             if fadeMode != .none { cancelFade() }
             cancelAutoFade()
+            // Remember the outgoing dance track as "last played" before it's replaced.
+            if displayState.mode == .playing, let outgoing = displayState.currentTrack {
+                lastPlayedTrack = outgoing
+            }
         }
 
         lastSeenPersistentID = pid
@@ -350,6 +357,7 @@ final class AppState: ObservableObject {
         if playerState == .stopped || track == nil {
             cancelAutoFade()
             trackHistory.removeAll()
+            lastPlayedTrack = nil
             displayState = DisplayState()   // mode = .idle
             isPausedByUser = false
             pendingStateBeforePause = nil

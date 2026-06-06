@@ -104,7 +104,7 @@ struct AdvancedSettingsView: View {
         HStack(spacing: 6) {
             Image(systemName: "questionmark.circle")
                 .foregroundColor(.secondary)
-            Text("If a pattern does not match, the original value will be shown.")
+            Text("If a pattern matches, the match is the result. On no match, the field is kept or cleared — per the toggle on each field.")
                 .foregroundColor(.secondary)
             Spacer()
             Button("Reset All") {
@@ -183,14 +183,9 @@ private struct FieldEditorPanel: View {
     }
 
     private var resultString: String {
-        guard regexStatus == .matched,
-              let regex = try? NSRegularExpression(pattern: patternText) else { return testInput }
-        let r = NSRange(testInput.startIndex..., in: testInput)
-        let prepared = AppSettings.encodeReplacementEscapes(replacementText)
-        let s = regex.stringByReplacingMatches(in: testInput, range: r, withTemplate: prepared)
-        let decoded = AppSettings.restoreReplacementSentinels(s)
-        let trimmed = decoded.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty ? testInput : trimmed
+        // Mirror the runtime exactly, including the per-field "clear when no match" behaviour.
+        applyRegexTransform(testInput, pattern: patternText, replacement: replacementText,
+                            clearWhenNoMatch: currentRule.clearWhenNoMatch)
     }
 
     var body: some View {
@@ -247,6 +242,15 @@ private struct FieldEditorPanel: View {
                 VStack(alignment: .leading, spacing: 12) {
                     patternField
                     replacementField
+                    Toggle("Clear field when the pattern doesn't match", isOn: Binding(
+                        get: { currentRule.clearWhenNoMatch },
+                        set: { newVal in
+                            var rule = currentRule
+                            rule.clearWhenNoMatch = newVal
+                            settings.trackTransforms[field.rawValue] = rule
+                        }
+                    ))
+                    .help("On: a non-matching pattern empties the field. Off: the original value is kept.")
                     Button("Reset to default") {
                         settings.trackTransforms[field.rawValue] = TransformRule()
                         patternText = ""
@@ -387,7 +391,9 @@ private struct FieldEditorPanel: View {
                 Text("Pattern matched.").foregroundColor(.green)
             case .noMatch:
                 Image(systemName: "exclamationmark.triangle").foregroundColor(.secondary)
-                Text("No match — original value will be shown.").foregroundColor(.secondary)
+                Text(currentRule.clearWhenNoMatch
+                     ? "No match — the field will be empty."
+                     : "No match — the original value is kept.").foregroundColor(.secondary)
             case .invalid:
                 Image(systemName: "xmark.circle.fill").foregroundColor(.red)
                 Text("Invalid regex.").foregroundColor(.red)

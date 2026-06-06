@@ -56,14 +56,30 @@ public struct TransformRule: Codable, Equatable {
     /// When set, the field's value is taken from this source field BEFORE the regex is applied
     /// (e.g. fill "Album Artist" with the content of "Artist").
     public var sourceField: TrackInfoField?
+    /// When true, a non-matching pattern clears the field (empty result) instead of keeping the
+    /// original value. Per-field; default false = legacy "keep original on no match".
+    public var clearWhenNoMatch: Bool
 
     public init(enabled: Bool = false, pattern: String = "", replacement: String = "",
-                testInput: String = "", sourceField: TrackInfoField? = nil) {
+                testInput: String = "", sourceField: TrackInfoField? = nil,
+                clearWhenNoMatch: Bool = false) {
         self.enabled = enabled
         self.pattern = pattern
         self.replacement = replacement
         self.testInput = testInput
         self.sourceField = sourceField
+        self.clearWhenNoMatch = clearWhenNoMatch
+    }
+
+    // Tolerant decoding so older persisted rules (without the newer keys) still load.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled          = try c.decodeIfPresent(Bool.self, forKey: .enabled)          ?? false
+        pattern          = try c.decodeIfPresent(String.self, forKey: .pattern)        ?? ""
+        replacement      = try c.decodeIfPresent(String.self, forKey: .replacement)    ?? ""
+        testInput        = try c.decodeIfPresent(String.self, forKey: .testInput)      ?? ""
+        sourceField      = try c.decodeIfPresent(TrackInfoField.self, forKey: .sourceField)
+        clearWhenNoMatch = try c.decodeIfPresent(Bool.self, forKey: .clearWhenNoMatch) ?? false
     }
 }
 
@@ -77,5 +93,6 @@ public func resolveTrackField(_ field: TrackInfoField,
     let rule = rules[field.rawValue]
     let base = (rule?.sourceField ?? field).rawValue(from: track)
     guard let rule, rule.enabled, !rule.pattern.isEmpty else { return base }
-    return applyRegexTransform(base, pattern: rule.pattern, replacement: rule.replacement)
+    return applyRegexTransform(base, pattern: rule.pattern, replacement: rule.replacement,
+                               clearWhenNoMatch: rule.clearWhenNoMatch)
 }

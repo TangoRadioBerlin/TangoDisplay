@@ -5,13 +5,14 @@ struct IdleView: View {
     let mode: DisplayMode
     @ObservedObject var settings: AppSettings
     let profile: AppearanceProfile
+    var containerSize: CGSize = .zero
 
     var body: some View {
         ZStack {
             // Idle message
             if !settings.idleMessage.isEmpty {
                 Text(settings.idleMessage)
-                    .font(profile.idleMessageFont)
+                    .font(profile.idleMessageFont(containerSize.height))
                     .foregroundColor(profile.idleMessageSwiftUIColor)
                     .multilineTextAlignment(.center)
                     .padding()

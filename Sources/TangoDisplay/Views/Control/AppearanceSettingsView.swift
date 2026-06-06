@@ -52,7 +52,7 @@ struct AppearanceSettingsView: View {
             Divider()
             tabBar
             Divider()
-            tabContent
+            contentArea
             Divider()
             saveFooter
         }
@@ -117,6 +117,38 @@ struct AppearanceSettingsView: View {
             Spacer()
         }
         .padding(.horizontal, 4)
+    }
+
+    // MARK: - Content area (tab + live preview)
+
+    /// On the Position tab, show a live preview beside the editor so the element boxes/outlines are
+    /// visible while positioning (the outlines only render in a visible preview).
+    @ViewBuilder
+    private var contentArea: some View {
+        if selectedTab == .position {
+            HSplitView {
+                tabContent
+                    .frame(minWidth: 360)
+                previewColumn
+            }
+        } else {
+            tabContent
+        }
+    }
+
+    private var previewColumn: some View {
+        VStack(spacing: 6) {
+            Text("Preview")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            PreviewPane()
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            Spacer(minLength: 0)
+        }
+        .frame(minWidth: 280)
+        .padding(8)
     }
 
     // MARK: - Tab content

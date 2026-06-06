@@ -6,7 +6,9 @@ struct CortinaView: View {
     let profile: AppearanceProfile
     let isLastTandaActive: Bool
     @ObservedObject var settings: AppSettings
+    var lastPlayedTrack: Track? = nil
     var showBounds: Bool = false
+    var containerSize: CGSize = .zero
 
     var body: some View {
         VStack(spacing: 32) {
@@ -18,11 +20,12 @@ struct CortinaView: View {
                     switch item {
                     case .cortinaLabel:
                         Text(settings.cortinaLabel)
-                            .font(profile.cortinaLabelFont)
+                            .font(profile.cortinaLabelFont(containerSize.height))
                             .tracking(12)
                             .foregroundColor(profile.cortinaLabelSwiftUIColor)
                             .positioned(offsetX: profile.cortinaLabelOffsetX, offsetY: profile.cortinaLabelOffsetY,
-                                        boxWidth: profile.cortinaLabelBoxWidth, showBounds: showBounds)
+                                        boxWidth: profile.cortinaLabelBoxWidth, hAlign: profile.cortinaLabelHAlign,
+                                        showBounds: showBounds, containerSize: containerSize)
                     case .cortinaArtist:
                         if profile.showCortinaTrackDuringCortina,
                            profile.showCortinaTrackArtist,
@@ -30,11 +33,12 @@ struct CortinaView: View {
                             let displayArtist = settings.effectiveValue(of: .artist, from: track)
                             if !displayArtist.isEmpty {
                                 Text(displayArtist)
-                                    .font(profile.cortinaArtistFont)
+                                    .font(profile.cortinaArtistFont(containerSize.height))
                                     .foregroundColor(profile.cortinaArtistSwiftUIColor)
                                     .positioned(offsetX: profile.cortinaArtistOffsetX, offsetY: profile.cortinaArtistOffsetY,
-                                                boxWidth: profile.cortinaArtistBoxWidth, lineLimit: 2, autoShrink: true,
-                                                showBounds: showBounds)
+                                                boxWidth: profile.cortinaArtistBoxWidth, hAlign: profile.cortinaArtistHAlign,
+                                                lineLimit: 2, autoShrink: true,
+                                                showBounds: showBounds, containerSize: containerSize)
                             }
                         }
                     case .cortinaTitle:
@@ -44,11 +48,12 @@ struct CortinaView: View {
                             let displayTitle = settings.effectiveValue(of: .title, from: track)
                             if !displayTitle.isEmpty {
                                 Text(displayTitle)
-                                    .font(profile.cortinaTitleFont)
+                                    .font(profile.cortinaTitleFont(containerSize.height))
                                     .foregroundColor(profile.cortinaTitleSwiftUIColor)
                                     .positioned(offsetX: profile.cortinaTitleOffsetX, offsetY: profile.cortinaTitleOffsetY,
-                                                boxWidth: profile.cortinaTitleBoxWidth, lineLimit: 2, autoShrink: true,
-                                                showBounds: showBounds)
+                                                boxWidth: profile.cortinaTitleBoxWidth, hAlign: profile.cortinaTitleHAlign,
+                                                lineLimit: 2, autoShrink: true,
+                                                showBounds: showBounds, containerSize: containerSize)
                             }
                         }
                     default:
@@ -59,7 +64,8 @@ struct CortinaView: View {
 
             let showComingUp = profile.showNextTrackDuringCortina && state.nextTrack != nil
             let showLastTanda = isLastTandaActive && profile.showLastTandaLabel && !settings.lastTandaLabel.isEmpty
-            if showComingUp || showLastTanda {
+            let showLastPlayedC = profile.showLastPlayedCortina && lastPlayedTrack != nil
+            if showComingUp || showLastTanda || showLastPlayedC {
                 // Divider between cortina section and coming-up section
                 Rectangle()
                     .fill(profile.genreSwiftUIColor.opacity(0.3))
@@ -73,31 +79,34 @@ struct CortinaView: View {
                         case .nextUpLabel:
                             if showComingUp {
                                 Text(settings.nextUpLabel)
-                                    .font(profile.nextUpLabelFont)
+                                    .font(profile.nextUpLabelFont(containerSize.height))
                                     .tracking(4)
                                     .foregroundColor(profile.nextUpLabelSwiftUIColor)
                                     .positioned(offsetX: profile.nextUpLabelOffsetX, offsetY: profile.nextUpLabelOffsetY,
-                                                boxWidth: profile.nextUpLabelBoxWidth, showBounds: showBounds)
+                                                boxWidth: profile.nextUpLabelBoxWidth, hAlign: profile.nextUpLabelHAlign,
+                                                showBounds: showBounds, containerSize: containerSize)
                             }
                         case .genre:
                             if showComingUp, let next = state.nextTrack,
                                profile.showGenreCortina, !next.genre.isEmpty {
-                                Text(settings.displayLabel(for: next.genre))
-                                    .font(profile.genreFont)
+                                Text(profile.genreTextCase.apply(settings.displayLabel(for: next.genre)))
+                                    .font(profile.genreFont(containerSize.height))
                                     .foregroundColor(profile.genreSwiftUIColor)
                                     .positioned(offsetX: profile.genreOffsetX, offsetY: profile.genreOffsetY,
-                                                boxWidth: profile.genreBoxWidth, showBounds: showBounds)
+                                                boxWidth: profile.genreBoxWidth, hAlign: profile.genreHAlign,
+                                                showBounds: showBounds, containerSize: containerSize)
                             }
                         case .artist:
                             if showComingUp, let next = state.nextTrack, profile.showArtistCortina {
                                 let displayArtist = settings.effectiveValue(of: .artist, from: next)
                                 if !displayArtist.isEmpty {
                                     Text(displayArtist)
-                                        .font(profile.artistFont)
+                                        .font(profile.artistFont(containerSize.height))
                                         .foregroundColor(profile.artistSwiftUIColor)
                                         .positioned(offsetX: profile.artistOffsetX, offsetY: profile.artistOffsetY,
-                                                    boxWidth: profile.artistBoxWidth, lineLimit: 2, autoShrink: true,
-                                                    showBounds: showBounds)
+                                                    boxWidth: profile.artistBoxWidth, hAlign: profile.artistHAlign,
+                                                    lineLimit: 2, autoShrink: true,
+                                                    showBounds: showBounds, containerSize: containerSize)
                                 }
                             }
                         case .year:
@@ -105,10 +114,11 @@ struct CortinaView: View {
                                 let displayYear = settings.effectiveValue(of: .year, from: next)
                                 if !displayYear.isEmpty {
                                     Text(displayYear)
-                                        .font(profile.yearFont)
+                                        .font(profile.yearFont(containerSize.height))
                                         .foregroundColor(profile.yearSwiftUIColor)
                                         .positioned(offsetX: profile.yearOffsetX, offsetY: profile.yearOffsetY,
-                                                    boxWidth: profile.yearBoxWidth, showBounds: showBounds)
+                                                    boxWidth: profile.yearBoxWidth, hAlign: profile.yearHAlign,
+                                                    showBounds: showBounds, containerSize: containerSize)
                                 }
                             }
                         case .title:
@@ -116,11 +126,12 @@ struct CortinaView: View {
                                 let displayTitle = settings.effectiveValue(of: .title, from: next)
                                 if !displayTitle.isEmpty {
                                     Text(displayTitle)
-                                        .font(profile.titleFont)
+                                        .font(profile.titleFont(containerSize.height))
                                         .foregroundColor(profile.titleSwiftUIColor)
                                         .positioned(offsetX: profile.titleOffsetX, offsetY: profile.titleOffsetY,
-                                                    boxWidth: profile.titleBoxWidth, lineLimit: 2, autoShrink: true,
-                                                    showBounds: showBounds)
+                                                    boxWidth: profile.titleBoxWidth, hAlign: profile.titleHAlign,
+                                                    lineLimit: 2, autoShrink: true,
+                                                    showBounds: showBounds, containerSize: containerSize)
                                 }
                             }
                         case .singer:
@@ -128,20 +139,34 @@ struct CortinaView: View {
                                 let singer = settings.effectiveValue(of: profile.singerSource.trackInfoField, from: next)
                                 if !singer.isEmpty {
                                     Text(singer)
-                                        .font(profile.singerFont)
+                                        .font(profile.singerFont(containerSize.height))
                                         .foregroundColor(profile.singerSwiftUIColor)
                                         .positioned(offsetX: profile.singerOffsetX, offsetY: profile.singerOffsetY,
-                                                    boxWidth: profile.singerBoxWidth, lineLimit: 2, autoShrink: true,
-                                                    showBounds: showBounds)
+                                                    boxWidth: profile.singerBoxWidth, hAlign: profile.singerHAlign,
+                                                    lineLimit: 2, autoShrink: true,
+                                                    showBounds: showBounds, containerSize: containerSize)
                                 }
                             }
                         case .lastTandaLabel:
                             if showLastTanda {
                                 Text(settings.lastTandaLabel.uppercased())
-                                    .font(profile.lastTandaLabelFont)
+                                    .font(profile.lastTandaLabelFont(containerSize.height))
                                     .foregroundColor(profile.lastTandaLabelSwiftUIColor)
                                     .positioned(offsetX: profile.lastTandaLabelOffsetX, offsetY: profile.lastTandaLabelOffsetY,
-                                                boxWidth: profile.lastTandaLabelBoxWidth, showBounds: showBounds)
+                                                boxWidth: profile.lastTandaLabelBoxWidth, hAlign: profile.lastTandaLabelHAlign,
+                                                showBounds: showBounds, containerSize: containerSize)
+                            }
+                        case .lastPlayed:
+                            if profile.showLastPlayedCortina, let lp = lastPlayedTrack {
+                                let lpText = settings.effectiveValue(of: .artist, from: lp)
+                                    + " — " + settings.effectiveValue(of: .title, from: lp)
+                                Text(lpText)
+                                    .font(profile.lastPlayedFont(containerSize.height))
+                                    .foregroundColor(profile.lastPlayedSwiftUIColor)
+                                    .positioned(offsetX: profile.lastPlayedOffsetX, offsetY: profile.lastPlayedOffsetY,
+                                                boxWidth: profile.lastPlayedBoxWidth, hAlign: profile.lastPlayedHAlign,
+                                                lineLimit: 2, autoShrink: true,
+                                                showBounds: showBounds, containerSize: containerSize)
                             }
                         default:
                             EmptyView()

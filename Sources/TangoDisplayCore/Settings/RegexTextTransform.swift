@@ -2,18 +2,27 @@ import Foundation
 
 /// Applies a regular-expression find/replace to `input`.
 ///
-/// Returns `input` unchanged when the pattern is empty or invalid, or when the result would be
-/// whitespace-only. The replacement template supports capture-group references ($1, $2, …) and the
-/// user escapes `\n`, `\r`, `\t`, `\\` (encoded around the NSRegularExpression template engine so it
-/// doesn't consume the leading backslash). Pure logic — no UI, fully unit-testable.
-public func applyRegexTransform(_ input: String, pattern: String, replacement: String) -> String {
+/// On a **match**, the replaced text is the result (e.g. extract a capture group). On **no match** the
+/// behaviour depends on `clearWhenNoMatch`: false (default) keeps `input` unchanged (legacy); true
+/// returns the empty string — so a "copy a field then extract" rule clears the target when the pattern
+/// isn't present. An empty or invalid pattern always leaves `input` unchanged (no transform).
+/// The replacement template supports capture-group references ($1, $2, …) and the user escapes
+/// `\n`, `\r`, `\t`, `\\` (encoded around the NSRegularExpression template engine so it doesn't consume
+/// the leading backslash). Pure logic — no UI, fully unit-testable.
+public func applyRegexTransform(_ input: String, pattern: String, replacement: String,
+                                clearWhenNoMatch: Bool = false) -> String {
     guard !pattern.isEmpty,
           let regex = try? NSRegularExpression(pattern: pattern) else { return input }
     let range = NSRange(input.startIndex..., in: input)
+    guard regex.firstMatch(in: input, range: range) != nil else {
+        return clearWhenNoMatch ? "" : input
+    }
     let prepared = encodeReplacementEscapes(replacement)
     let result = regex.stringByReplacingMatches(in: input, range: range, withTemplate: prepared)
-    let decoded = restoreReplacementSentinels(result)
-    return decoded.trimmingCharacters(in: .whitespaces).isEmpty ? input : decoded
+    let decoded = restoreReplacementSentinels(result).trimmingCharacters(in: .whitespaces)
+    // Matched: use the result. When not clearing, an empty result falls back to the original (legacy).
+    if clearWhenNoMatch { return decoded }
+    return decoded.isEmpty ? input : decoded
 }
 
 // Substitute user-typed escapes with sentinel chars BEFORE the NSRegularExpression

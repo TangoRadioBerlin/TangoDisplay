@@ -462,7 +462,8 @@ final class AppSettings: ObservableObject {
 
     func transform(_ value: String, for field: TrackInfoField) -> String {
         guard let rule = trackTransforms[field.rawValue], rule.enabled else { return value }
-        return applyRegexTransform(value, pattern: rule.pattern, replacement: rule.replacement)
+        return applyRegexTransform(value, pattern: rule.pattern, replacement: rule.replacement,
+                                   clearWhenNoMatch: rule.clearWhenNoMatch)
     }
 
     /// The display value for a field on a track: applies any "copy from field" remap and regex rule

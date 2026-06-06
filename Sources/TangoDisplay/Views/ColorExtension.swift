@@ -48,12 +48,13 @@ extension AppearanceProfile {
         return italic ? f.italic() : f
     }
 
-    var titleFont: Font  { font(name: titleFontName,  size: titleFontSize,  bold: titleFontBold,  italic: titleFontItalic) }
-    var artistFont: Font { font(name: artistFontName, size: artistFontSize, bold: artistFontBold, italic: artistFontItalic) }
-    var genreFont: Font  { font(name: genreFontName,  size: genreFontSize,  bold: genreFontBold,  italic: genreFontItalic) }
-    var yearFont: Font   { font(name: yearFontName,   size: yearFontSize,   bold: yearFontBold,   italic: yearFontItalic) }
-    var singerFont: Font        { font(name: singerFontName,       size: singerFontSize,       bold: singerFontBold,       italic: singerFontItalic) }
-    var trackCounterFont: Font  { font(name: trackCounterFontName, size: trackCounterFontSize, bold: trackCounterFontBold, italic: trackCounterFontItalic) }
+    // Font sizes are levels (percent of the presentation height); resolve to points with `h`.
+    func titleFont(_ h: CGFloat) -> Font  { font(name: titleFontName,  size: titleFontSize  / 100 * Double(h), bold: titleFontBold,  italic: titleFontItalic) }
+    func artistFont(_ h: CGFloat) -> Font { font(name: artistFontName, size: artistFontSize / 100 * Double(h), bold: artistFontBold, italic: artistFontItalic) }
+    func genreFont(_ h: CGFloat) -> Font  { font(name: genreFontName,  size: genreFontSize  / 100 * Double(h), bold: genreFontBold,  italic: genreFontItalic) }
+    func yearFont(_ h: CGFloat) -> Font   { font(name: yearFontName,   size: yearFontSize   / 100 * Double(h), bold: yearFontBold,   italic: yearFontItalic) }
+    func singerFont(_ h: CGFloat) -> Font       { font(name: singerFontName,       size: singerFontSize       / 100 * Double(h), bold: singerFontBold,       italic: singerFontItalic) }
+    func trackCounterFont(_ h: CGFloat) -> Font { font(name: trackCounterFontName, size: trackCounterFontSize / 100 * Double(h), bold: trackCounterFontBold, italic: trackCounterFontItalic) }
 
     var cortinaLabelSwiftUIColor:  Color { Color(hex: cortinaLabelColor) }
     var cortinaArtistSwiftUIColor: Color { Color(hex: cortinaArtistColor) }
@@ -61,54 +62,59 @@ extension AppearanceProfile {
     var nextUpLabelSwiftUIColor:    Color { Color(hex: nextUpLabelColor) }
     var idleMessageSwiftUIColor:    Color { Color(hex: idleMessageColor) }
     var lastTandaLabelSwiftUIColor: Color { Color(hex: lastTandaLabelColor) }
+    var lastPlayedSwiftUIColor:     Color { Color(hex: lastPlayedColor) }
 
-    var cortinaLabelFont:   Font { font(name: cortinaLabelFontName,   size: cortinaLabelFontSize,   bold: cortinaLabelFontBold,   italic: cortinaLabelFontItalic) }
-    var cortinaArtistFont:  Font { font(name: cortinaArtistFontName,  size: cortinaArtistFontSize,  bold: cortinaArtistFontBold,  italic: cortinaArtistFontItalic) }
-    var cortinaTitleFont:   Font { font(name: cortinaTitleFontName,   size: cortinaTitleFontSize,   bold: cortinaTitleFontBold,   italic: cortinaTitleFontItalic) }
-    var nextUpLabelFont:    Font { font(name: nextUpLabelFontName,    size: nextUpLabelFontSize,    bold: nextUpLabelFontBold,    italic: nextUpLabelFontItalic) }
-    var idleMessageFont:    Font { font(name: idleMessageFontName,    size: idleMessageFontSize,    bold: idleMessageFontBold,    italic: idleMessageFontItalic) }
-    var lastTandaLabelFont: Font { font(name: lastTandaLabelFontName, size: lastTandaLabelFontSize, bold: lastTandaLabelFontBold, italic: lastTandaLabelFontItalic) }
+    func cortinaLabelFont(_ h: CGFloat) -> Font   { font(name: cortinaLabelFontName,   size: cortinaLabelFontSize   / 100 * Double(h), bold: cortinaLabelFontBold,   italic: cortinaLabelFontItalic) }
+    func cortinaArtistFont(_ h: CGFloat) -> Font  { font(name: cortinaArtistFontName,  size: cortinaArtistFontSize  / 100 * Double(h), bold: cortinaArtistFontBold,  italic: cortinaArtistFontItalic) }
+    func cortinaTitleFont(_ h: CGFloat) -> Font   { font(name: cortinaTitleFontName,   size: cortinaTitleFontSize   / 100 * Double(h), bold: cortinaTitleFontBold,   italic: cortinaTitleFontItalic) }
+    func nextUpLabelFont(_ h: CGFloat) -> Font    { font(name: nextUpLabelFontName,    size: nextUpLabelFontSize    / 100 * Double(h), bold: nextUpLabelFontBold,    italic: nextUpLabelFontItalic) }
+    func idleMessageFont(_ h: CGFloat) -> Font    { font(name: idleMessageFontName,    size: idleMessageFontSize    / 100 * Double(h), bold: idleMessageFontBold,    italic: idleMessageFontItalic) }
+    func lastTandaLabelFont(_ h: CGFloat) -> Font { font(name: lastTandaLabelFontName, size: lastTandaLabelFontSize / 100 * Double(h), bold: lastTandaLabelFontBold, italic: lastTandaLabelFontItalic) }
+    func lastPlayedFont(_ h: CGFloat) -> Font     { font(name: lastPlayedFontName,     size: lastPlayedFontSize     / 100 * Double(h), bold: lastPlayedFontBold,     italic: lastPlayedFontItalic) }
     var overrideTextSwiftUIColor: Color { Color(hex: overrideTextColor) }
-    var overrideTextFont: Font { font(name: overrideTextFontName, size: overrideTextFontSize, bold: overrideTextFontBold, italic: overrideTextFontItalic) }
+    func overrideTextFont(_ h: CGFloat) -> Font { font(name: overrideTextFontName, size: overrideTextFontSize / 100 * Double(h), bold: overrideTextFontBold, italic: overrideTextFontItalic) }
 }
 
 extension View {
-    /// Positions a presentation text element, mirroring the album-artwork offset behaviour.
+    /// Positions a presentation text element using resolution-relative coordinates.
     ///
-    /// - A non-zero horizontal offset left-aligns the element so the offset measures its left edge;
-    ///   a zero horizontal offset keeps the element centred (the historical default).
-    /// - When `boxWidth > 0` and a horizontal offset is set, the text is constrained to that width and
-    ///   auto-shrinks on a single line to fit between the left edge and the box end.
-    /// - Otherwise `lineLimit`/`autoShrink` reproduce the element's normal multi-line behaviour.
+    /// - `offsetX`/`offsetY` are percentages (−100…100) of the container's width/height: a relative
+    ///   shift from the element's natural stacked position (0 = unchanged).
+    /// - `boxWidth` is a percentage (0…100) of the container width. 0 = full width (no box).
+    /// - `hAlign` controls the text's alignment within its box (or the full width when no box).
+    /// - When a box is set, the text is constrained to that width and auto-shrinks on a single line.
     @ViewBuilder
     func positioned(offsetX: Double, offsetY: Double,
-                    boxWidth: Double = 0, lineLimit: Int? = nil, autoShrink: Bool = false,
-                    showBounds: Bool = false) -> some View {
-        let shifted = offsetX != 0
-        // Only positioned elements get a bounds outline (those with an offset or an explicit box).
-        let drawBounds = showBounds && (offsetX != 0 || boxWidth > 0)
-        if shifted && boxWidth > 0 {
+                    boxWidth: Double = 0, hAlign: TextHAlignment = .center,
+                    lineLimit: Int? = nil, autoShrink: Bool = false,
+                    showBounds: Bool = false, containerSize: CGSize) -> some View {
+        let offX = offsetX / 100.0 * containerSize.width
+        let offY = offsetY / 100.0 * containerSize.height
+        let boxPts = boxWidth / 100.0 * containerSize.width
+        let frameAlign: Alignment = hAlign == .leading ? .leading : (hAlign == .trailing ? .trailing : .center)
+        let textAlign: TextAlignment = hAlign == .leading ? .leading : (hAlign == .trailing ? .trailing : .center)
+        if boxPts > 0 {
             self
-                .multilineTextAlignment(.leading)
+                .multilineTextAlignment(textAlign)
                 .lineLimit(1)
                 .minimumScaleFactor(0.1)
-                .frame(width: boxWidth, alignment: .leading)
-                .elementBoundsOverlay(drawBounds)
-                .offset(x: offsetX, y: offsetY)
+                .frame(width: boxPts, alignment: frameAlign)
+                .elementBoundsOverlay(showBounds)
+                .offset(x: offX, y: offY)
         } else {
             self
-                .multilineTextAlignment(shifted ? .leading : .center)
+                .multilineTextAlignment(textAlign)
                 .lineLimit(lineLimit)
                 .minimumScaleFactor(autoShrink ? 0.5 : 1)
-                .frame(maxWidth: .infinity, alignment: shifted ? .leading : .center)
-                .elementBoundsOverlay(drawBounds)
-                .offset(x: offsetX, y: offsetY)
+                .frame(maxWidth: .infinity, alignment: frameAlign)
+                .elementBoundsOverlay(showBounds)
+                .offset(x: offX, y: offY)
         }
     }
 
     /// Draws a dashed outline plus a point-size label around the element's layout frame. Used only in
     /// the configuration preview (never the real presentation display) so the DJ can see how big each
-    /// positioned element / box actually is. Sizes are reported in presentation points (the preview's
+    /// element / box actually is. Sizes are reported in presentation points (the preview's
     /// 1920×1080 space, before the pane's down-scaling).
     @ViewBuilder
     func elementBoundsOverlay(_ draw: Bool) -> some View {

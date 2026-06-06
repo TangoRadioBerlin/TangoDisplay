@@ -46,11 +46,12 @@ struct PresentationView: View {
                         Image(nsImage: art)
                             .resizable()
                             .scaledToFit()
-                            .mask(edgeFadeMask(fade: activeProfile.albumArtworkEdgeFade))
-                            .scaleEffect(activeProfile.albumArtworkScale)
-                            .offset(x: activeProfile.albumArtworkOffsetX,
-                                    y: activeProfile.albumArtworkOffsetY)
-                            .opacity(activeProfile.albumArtworkOpacity)
+                            .mask(fadeMask(fade: renderProfile.albumArtworkEdgeFade,
+                                           style: renderProfile.albumArtworkFadeStyle))
+                            .scaleEffect(renderProfile.albumArtworkScale)
+                            .offset(x: renderProfile.albumArtworkOffsetX,
+                                    y: renderProfile.albumArtworkOffsetY)
+                            .opacity(renderProfile.albumArtworkOpacity)
                     }
                 }
             }
@@ -60,7 +61,9 @@ struct PresentationView: View {
                 style: activeProfile.transitionStyle,
                 duration: activeProfile.transitionDuration
             ) {
-                contentView
+                GeometryReader { geo in
+                    contentView(containerSize: geo.size)
+                }
             }
 
             // Window registration (real display only)
@@ -111,18 +114,23 @@ struct PresentationView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: settings.trackCounterPosition.overlayAlignment) {
-            if settings.showTrackCounter,
-               settings.trackCounterPosition != .centre,
-               appState.displayState.mode == .playing,
-               let pos = appState.displayState.tandaPosition {
-                Text(pos.label)
-                    .font(activeProfile.trackCounterFont)
-                    .foregroundColor(activeProfile.trackCounterSwiftUIColor)
-                    .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
-                    .padding(24)
-                    .offset(x: activeProfile.trackCounterOffsetX, y: activeProfile.trackCounterOffsetY)
-                    .allowsHitTesting(false)
+        .overlay {
+            GeometryReader { geo in
+                if settings.showTrackCounter,
+                   settings.trackCounterPosition != .centre,
+                   appState.displayState.mode == .playing,
+                   let pos = appState.displayState.tandaPosition {
+                    Text(pos.label)
+                        .font(activeProfile.trackCounterFont(geo.size.height))
+                        .foregroundColor(activeProfile.trackCounterSwiftUIColor)
+                        .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
+                        .padding(24)
+                        .offset(x: activeProfile.trackCounterOffsetX / 100 * geo.size.width,
+                                y: activeProfile.trackCounterOffsetY / 100 * geo.size.height)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity,
+                               alignment: settings.trackCounterPosition.overlayAlignment)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .onAppear {
@@ -188,35 +196,102 @@ struct PresentationView: View {
         genreBgImage = NSImage(contentsOf: appState.profileStore.imageURL(for: filename))
     }
 
+    /// Sample content shown in the configuration preview (when bounds are active and nothing is
+    /// playing) so every text element — and its positioning box — is visible while the DJ tunes layout.
+    private static let previewSampleState = DisplayState(
+        mode: .playing,
+        currentTrack: Track(title: "Sample Title", artist: "Sample Artist", genre: "Tango",
+                            persistentID: "preview-sample", year: 1947,
+                            comment: "Sample Singer", albumArtist: "Sample Singer",
+                            grouping: "Sample Singer"),
+        tandaPosition: TandaPosition(current: 2, total: 4)
+    )
+
+    /// While the Position tab is open and nothing real is playing, inject the sample so positioning
+    /// (and the bounds outlines) are visible in the preview.
+    private var effectiveDisplayState: DisplayState {
+        if isPreview, appState.showElementBoundsInPreview, appState.displayState.currentTrack == nil {
+            return Self.previewSampleState
+        }
+        return appState.displayState
+    }
+
+    private static let previewSampleLastPlayed = Track(
+        title: "Previous Title", artist: "Previous Artist", genre: "Tango", persistentID: "preview-last")
+
+    private var effectiveLastPlayed: Track? {
+        if isPreview, appState.showElementBoundsInPreview, appState.displayState.currentTrack == nil {
+            return Self.previewSampleLastPlayed
+        }
+        return appState.lastPlayedTrack
+    }
+
+    /// Profile with any per-genre-background override (text positions + artwork placement) applied for
+    /// the current track. Used for both the artwork layer and the text views.
+    private var renderProfile: AppearanceProfile {
+        activeProfile.applyingPositionOverride(
+            activeProfile.positionOverride(forGenre: effectiveDisplayState.currentTrack?.genre ?? "",
+                                           using: appState.settings.makeDetector()))
+    }
+
     @ViewBuilder
-    private var contentView: some View {
+    private func contentView(containerSize: CGSize) -> some View {
         let showBounds = isPreview && appState.showElementBoundsInPreview
-        switch appState.displayState.mode {
+        let state = effectiveDisplayState
+        // renderProfile carries any per-genre-background override (text positions + artwork).
+        switch state.mode {
         case .playing:
             PlayingView(
-                state: appState.displayState,
-                profile: activeProfile,
+                state: state,
+                profile: renderProfile,
                 isLastTandaActive: appState.isLastTandaActive,
                 settings: appState.settings,
-                showBounds: showBounds
+                lastPlayedTrack: effectiveLastPlayed,
+                showBounds: showBounds,
+                containerSize: containerSize
             )
         case .cortina:
             CortinaView(
-                state: appState.displayState,
-                profile: activeProfile,
+                state: state,
+                profile: renderProfile,
                 isLastTandaActive: appState.isLastTandaActive,
                 settings: appState.settings,
-                showBounds: showBounds
+                lastPlayedTrack: effectiveLastPlayed,
+                showBounds: showBounds,
+                containerSize: containerSize
             )
         case .idle, .paused:
             IdleView(
-                mode: appState.displayState.mode,
+                mode: state.mode,
                 settings: appState.settings,
-                profile: activeProfile
+                profile: activeProfile,
+                containerSize: containerSize
             )
         case .override:
-            overrideView
+            overrideView(containerSize: containerSize)
         }
+    }
+
+    @ViewBuilder
+    private func fadeMask(fade: Double, style: AlbumArtFadeStyle) -> some View {
+        switch style {
+        case .radial: edgeFadeMask(fade: fade)
+        case .edges:  linearEdgeFadeMask(fade: fade)
+        }
+    }
+
+    /// Rectangular edge fade: opaque centre fading to transparent toward all four straight edges
+    /// (intersection of a horizontal and a vertical linear gradient).
+    private func linearEdgeFadeMask(fade: Double) -> some View {
+        let inset = max(0.0, min(0.5, fade * 0.5))
+        let stops: [Gradient.Stop] = [
+            .init(color: .white.opacity(0), location: 0),
+            .init(color: .white, location: inset),
+            .init(color: .white, location: 1 - inset),
+            .init(color: .white.opacity(0), location: 1)
+        ]
+        return LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing)
+            .mask(LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom))
     }
 
     private func edgeFadeMask(fade: Double) -> some View {
@@ -239,9 +314,9 @@ struct PresentationView: View {
         }
     }
 
-    private var overrideView: some View {
+    private func overrideView(containerSize: CGSize) -> some View {
         Text(appState.displayState.overrideText ?? "")
-            .font(activeProfile.overrideTextFont)
+            .font(activeProfile.overrideTextFont(containerSize.height))
             .foregroundColor(activeProfile.overrideTextSwiftUIColor)
             .multilineTextAlignment(.center)
             .padding(60)

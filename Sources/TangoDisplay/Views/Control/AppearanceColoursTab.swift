@@ -25,6 +25,7 @@ struct AppearanceColoursTab: View {
                 colorRow("Cortina Artist",   hex: $working.cortinaArtistColor)
                 colorRow("Cortina Title",    hex: $working.cortinaTitleColor)
                 colorRow("Idle Message",     hex: $working.idleMessageColor)
+                colorRow("Last Played",      hex: $working.lastPlayedColor)
             } header: {
                 Text("Labels & Messages")
                     .foregroundColor(ControlTheme.accent)

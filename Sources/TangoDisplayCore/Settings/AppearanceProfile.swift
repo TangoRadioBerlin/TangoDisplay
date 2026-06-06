@@ -16,11 +16,15 @@ public struct GenreBackground: Codable, Identifiable, Equatable {
     public var id: UUID
     public var genreKey: String        // denylist entry verbatim; empty string is the cortina sentinel
     public var imageFilename: String?  // "genre-{uuid}.{ext}" stored in images dir
+    /// Optional per-element position overrides applied while this genre is playing. nil = profile defaults.
+    public var positions: PositionSet?
 
-    public init(id: UUID = UUID(), genreKey: String, imageFilename: String? = nil) {
+    public init(id: UUID = UUID(), genreKey: String, imageFilename: String? = nil,
+                positions: PositionSet? = nil) {
         self.id = id
         self.genreKey = genreKey
         self.imageFilename = imageFilename
+        self.positions = positions
     }
 
     public var isCortinaEntry: Bool { genreKey.isEmpty }
@@ -173,6 +177,21 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     public var lastTandaLabelColor:      String
     public var showLastTandaLabel:       Bool
 
+    // Last Played (previously played track) font/colour + per-mode visibility
+    public var lastPlayedFontName:   String
+    public var lastPlayedFontSize:   Double
+    public var lastPlayedFontBold:   Bool
+    public var lastPlayedFontItalic: Bool
+    public var lastPlayedColor:      String
+    public var showLastPlayedDance:   Bool
+    public var showLastPlayedCortina: Bool
+
+    // Genre text casing on the display (uppercase / original / title case)
+    public var genreTextCase: GenreTextCase
+
+    // Album-artwork edge-fade style (radial vs. edges)
+    public var albumArtworkFadeStyle: AlbumArtFadeStyle
+
     // Track Counter font
     public var trackCounterFontName:   String
     public var trackCounterFontSize:   Double
@@ -211,6 +230,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     public var cortinaTitleOffsetY: Double
     public var nextUpLabelOffsetX: Double
     public var nextUpLabelOffsetY: Double
+    public var lastPlayedOffsetX: Double
+    public var lastPlayedOffsetY: Double
 
     // Per-element text-box width (points) for single-line auto-shrink when a horizontal offset is set.
     // 0 = disabled (text uses the full width as before). See ColorExtension.positioned.
@@ -225,16 +246,39 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     public var cortinaArtistBoxWidth: Double
     public var cortinaTitleBoxWidth: Double
     public var nextUpLabelBoxWidth: Double
+    public var lastPlayedBoxWidth: Double
+
+    // Horizontal alignment of each element within its box (or the full width when no box is set).
+    public var titleHAlign: TextHAlignment
+    public var artistHAlign: TextHAlignment
+    public var genreHAlign: TextHAlignment
+    public var yearHAlign: TextHAlignment
+    public var singerHAlign: TextHAlignment
+    public var trackCounterHAlign: TextHAlignment
+    public var lastTandaLabelHAlign: TextHAlignment
+    public var cortinaLabelHAlign: TextHAlignment
+    public var cortinaArtistHAlign: TextHAlignment
+    public var cortinaTitleHAlign: TextHAlignment
+    public var nextUpLabelHAlign: TextHAlignment
+    public var lastPlayedHAlign: TextHAlignment
+
+    // When true, the *Offset and *BoxWidth values above are percentages (0–100) of the presentation
+    // resolution (X/box → % of width, Y → % of height) instead of absolute points. Older profiles
+    // (flag absent) are migrated from points to percent on decode against a 1920×1080 baseline.
+    public var relativePositions: Bool
+    /// When true, the *FontSize values are levels (1–15 = percent of the presentation height) rather
+    /// than absolute points. Older profiles (flag absent) are migrated from points on decode.
+    public var relativeFontSizes: Bool
 
     public init(id: UUID, name: String, isBuiltIn: Bool,
-                titleFontName: String = "System", titleFontSize: Double = 72,
+                titleFontName: String = "System", titleFontSize: Double = 7,
                 titleFontBold: Bool = true, titleFontItalic: Bool = false,
-                artistFontName: String = "System", artistFontSize: Double = 96,
+                artistFontName: String = "System", artistFontSize: Double = 9,
                 artistFontBold: Bool = false, artistFontItalic: Bool = false,
-                genreFontName: String = "System", genreFontSize: Double = 36,
+                genreFontName: String = "System", genreFontSize: Double = 3,
                 genreFontBold: Bool = false, genreFontItalic: Bool = false,
                 showYear: Bool = false,
-                yearFontName: String = "System", yearFontSize: Double = 36,
+                yearFontName: String = "System", yearFontSize: Double = 3,
                 yearFontBold: Bool = false, yearFontItalic: Bool = false,
                 backgroundColor: String = "#000000",
                 titleColor: String = "#FFFFFF",
@@ -267,13 +311,19 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 albumArtworkOffsetX: Double = 0.0,
                 albumArtworkOffsetY: Double = 0.0,
                 albumArtworkEdgeFade: Double = 0.0,
-                danceItemOrder: [DisplayTextItem] = [.genre, .artist, .year, .title, .singer, .lastTandaLabel, .trackCounter],
-                cortinaItemOrder: [DisplayTextItem] = [.genre, .artist, .year, .singer, .lastTandaLabel],
+                albumArtworkFadeStyle: AlbumArtFadeStyle = .radial,
+                genreTextCase: GenreTextCase = .uppercase,
+                lastPlayedFontName: String = "System", lastPlayedFontSize: Double = 3,
+                lastPlayedFontBold: Bool = false, lastPlayedFontItalic: Bool = false,
+                lastPlayedColor: String = "#AAAAAA",
+                showLastPlayedDance: Bool = false, showLastPlayedCortina: Bool = false,
+                danceItemOrder: [DisplayTextItem] = [.genre, .artist, .year, .title, .singer, .lastTandaLabel, .trackCounter, .lastPlayed],
+                cortinaItemOrder: [DisplayTextItem] = [.genre, .artist, .year, .singer, .lastTandaLabel, .lastPlayed],
                 showSinger: Bool = false,
                 singerSource: SingerSource = .comments,
                 showSingerDuringCortina: Bool = false,
                 singerFontName: String = "System",
-                singerFontSize: Double = 48,
+                singerFontSize: Double = 4,
                 singerFontBold: Bool = false,
                 singerFontItalic: Bool = false,
                 singerColor: String = "#AAAAAA",
@@ -293,29 +343,29 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 showCortinaTrackDuringCortina: Bool = false,
                 showCortinaTrackArtist: Bool = true,
                 showCortinaTrackTitle: Bool = true,
-                cortinaLabelFontName: String = "System", cortinaLabelFontSize: Double = 72,
+                cortinaLabelFontName: String = "System", cortinaLabelFontSize: Double = 7,
                 cortinaLabelFontBold: Bool = false, cortinaLabelFontItalic: Bool = false,
                 cortinaLabelColor: String = "#FFFFFF",
-                cortinaArtistFontName: String = "System", cortinaArtistFontSize: Double = 96,
+                cortinaArtistFontName: String = "System", cortinaArtistFontSize: Double = 9,
                 cortinaArtistFontBold: Bool = false, cortinaArtistFontItalic: Bool = false,
                 cortinaArtistColor: String = "#FFFFFF",
-                cortinaTitleFontName: String = "System", cortinaTitleFontSize: Double = 72,
+                cortinaTitleFontName: String = "System", cortinaTitleFontSize: Double = 7,
                 cortinaTitleFontBold: Bool = false, cortinaTitleFontItalic: Bool = false,
                 cortinaTitleColor: String = "#FFFFFF",
-                nextUpLabelFontName: String = "System", nextUpLabelFontSize: Double = 36,
+                nextUpLabelFontName: String = "System", nextUpLabelFontSize: Double = 3,
                 nextUpLabelFontBold: Bool = false, nextUpLabelFontItalic: Bool = false,
                 nextUpLabelColor: String = "#AAAAAA",
-                idleMessageFontName: String = "System", idleMessageFontSize: Double = 48,
+                idleMessageFontName: String = "System", idleMessageFontSize: Double = 4,
                 idleMessageFontBold: Bool = false, idleMessageFontItalic: Bool = false,
                 idleMessageColor: String = "#FFFFFF",
                 cortinaTrackItemOrder: [DisplayTextItem] = [.cortinaLabel, .cortinaArtist, .cortinaTitle],
-                lastTandaLabelFontName: String = "System", lastTandaLabelFontSize: Double = 36,
+                lastTandaLabelFontName: String = "System", lastTandaLabelFontSize: Double = 3,
                 lastTandaLabelFontBold: Bool = false, lastTandaLabelFontItalic: Bool = false,
                 lastTandaLabelColor: String = "#FF4444",
                 showLastTandaLabel: Bool = true,
-                trackCounterFontName: String = "System", trackCounterFontSize: Double = 36,
+                trackCounterFontName: String = "System", trackCounterFontSize: Double = 3,
                 trackCounterFontBold: Bool = false, trackCounterFontItalic: Bool = false,
-                overrideTextFontName: String = "System", overrideTextFontSize: Double = 72,
+                overrideTextFontName: String = "System", overrideTextFontSize: Double = 7,
                 overrideTextFontBold: Bool = false, overrideTextFontItalic: Bool = false,
                 overrideTextColor: String = "#FFFFFF",
                 titleOffsetX: Double = 0, titleOffsetY: Double = 0,
@@ -329,12 +379,23 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 cortinaArtistOffsetX: Double = 0, cortinaArtistOffsetY: Double = 0,
                 cortinaTitleOffsetX: Double = 0, cortinaTitleOffsetY: Double = 0,
                 nextUpLabelOffsetX: Double = 0, nextUpLabelOffsetY: Double = 0,
+                lastPlayedOffsetX: Double = 0, lastPlayedOffsetY: Double = 0,
                 titleBoxWidth: Double = 0, artistBoxWidth: Double = 0,
                 genreBoxWidth: Double = 0, yearBoxWidth: Double = 0,
                 singerBoxWidth: Double = 0, trackCounterBoxWidth: Double = 0,
                 lastTandaLabelBoxWidth: Double = 0, cortinaLabelBoxWidth: Double = 0,
                 cortinaArtistBoxWidth: Double = 0, cortinaTitleBoxWidth: Double = 0,
-                nextUpLabelBoxWidth: Double = 0) {
+                nextUpLabelBoxWidth: Double = 0,
+                lastPlayedBoxWidth: Double = 0,
+                titleHAlign: TextHAlignment = .center, artistHAlign: TextHAlignment = .center,
+                genreHAlign: TextHAlignment = .center, yearHAlign: TextHAlignment = .center,
+                singerHAlign: TextHAlignment = .center, trackCounterHAlign: TextHAlignment = .center,
+                lastTandaLabelHAlign: TextHAlignment = .center, cortinaLabelHAlign: TextHAlignment = .center,
+                cortinaArtistHAlign: TextHAlignment = .center, cortinaTitleHAlign: TextHAlignment = .center,
+                nextUpLabelHAlign: TextHAlignment = .center,
+                lastPlayedHAlign: TextHAlignment = .center,
+                relativePositions: Bool = true,
+                relativeFontSizes: Bool = true) {
         self.id = id
         self.name = name
         self.isBuiltIn = isBuiltIn
@@ -386,6 +447,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.albumArtworkOffsetX = albumArtworkOffsetX
         self.albumArtworkOffsetY = albumArtworkOffsetY
         self.albumArtworkEdgeFade = albumArtworkEdgeFade
+        self.albumArtworkFadeStyle = albumArtworkFadeStyle
+        self.genreTextCase = genreTextCase
         self.danceItemOrder = danceItemOrder
         self.cortinaItemOrder = cortinaItemOrder
         self.showSinger = showSinger
@@ -444,6 +507,13 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.lastTandaLabelFontItalic = lastTandaLabelFontItalic
         self.lastTandaLabelColor      = lastTandaLabelColor
         self.showLastTandaLabel       = showLastTandaLabel
+        self.lastPlayedFontName   = lastPlayedFontName
+        self.lastPlayedFontSize   = lastPlayedFontSize
+        self.lastPlayedFontBold   = lastPlayedFontBold
+        self.lastPlayedFontItalic = lastPlayedFontItalic
+        self.lastPlayedColor      = lastPlayedColor
+        self.showLastPlayedDance   = showLastPlayedDance
+        self.showLastPlayedCortina = showLastPlayedCortina
         self.trackCounterFontName     = trackCounterFontName
         self.trackCounterFontSize     = trackCounterFontSize
         self.trackCounterFontBold     = trackCounterFontBold
@@ -464,12 +534,23 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.cortinaArtistOffsetX = cortinaArtistOffsetX; self.cortinaArtistOffsetY = cortinaArtistOffsetY
         self.cortinaTitleOffsetX = cortinaTitleOffsetX; self.cortinaTitleOffsetY = cortinaTitleOffsetY
         self.nextUpLabelOffsetX = nextUpLabelOffsetX;  self.nextUpLabelOffsetY = nextUpLabelOffsetY
+        self.lastPlayedOffsetX = lastPlayedOffsetX;    self.lastPlayedOffsetY = lastPlayedOffsetY
         self.titleBoxWidth = titleBoxWidth;           self.artistBoxWidth = artistBoxWidth
         self.genreBoxWidth = genreBoxWidth;           self.yearBoxWidth = yearBoxWidth
         self.singerBoxWidth = singerBoxWidth;         self.trackCounterBoxWidth = trackCounterBoxWidth
         self.lastTandaLabelBoxWidth = lastTandaLabelBoxWidth; self.cortinaLabelBoxWidth = cortinaLabelBoxWidth
         self.cortinaArtistBoxWidth = cortinaArtistBoxWidth;   self.cortinaTitleBoxWidth = cortinaTitleBoxWidth
         self.nextUpLabelBoxWidth = nextUpLabelBoxWidth
+        self.lastPlayedBoxWidth = lastPlayedBoxWidth
+        self.titleHAlign = titleHAlign;             self.artistHAlign = artistHAlign
+        self.genreHAlign = genreHAlign;             self.yearHAlign = yearHAlign
+        self.singerHAlign = singerHAlign;           self.trackCounterHAlign = trackCounterHAlign
+        self.lastTandaLabelHAlign = lastTandaLabelHAlign; self.cortinaLabelHAlign = cortinaLabelHAlign
+        self.cortinaArtistHAlign = cortinaArtistHAlign;   self.cortinaTitleHAlign = cortinaTitleHAlign
+        self.nextUpLabelHAlign = nextUpLabelHAlign
+        self.lastPlayedHAlign = lastPlayedHAlign
+        self.relativePositions = relativePositions
+        self.relativeFontSizes = relativeFontSizes
     }
 
     // Custom decoder so existing JSON lacking the image keys still loads cleanly.
@@ -527,6 +608,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         albumArtworkOffsetX     = try c.decodeIfPresent(Double.self,  forKey: .albumArtworkOffsetX)     ?? 0.0
         albumArtworkOffsetY     = try c.decodeIfPresent(Double.self,  forKey: .albumArtworkOffsetY)     ?? 0.0
         albumArtworkEdgeFade    = try c.decodeIfPresent(Double.self,  forKey: .albumArtworkEdgeFade)    ?? 0.0
+        albumArtworkFadeStyle   = try c.decodeIfPresent(AlbumArtFadeStyle.self, forKey: .albumArtworkFadeStyle) ?? .radial
+        genreTextCase           = try c.decodeIfPresent(GenreTextCase.self,     forKey: .genreTextCase)           ?? .uppercase
         showSinger              = try c.decodeIfPresent(Bool.self,         forKey: .showSinger)              ?? false
         // Tolerant decode: an older profile may carry a removed raw value (e.g. "artist") — map it to the
         // default rather than failing the whole profile decode.
@@ -620,6 +703,13 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         lastTandaLabelFontItalic = try c.decodeIfPresent(Bool.self,   forKey: .lastTandaLabelFontItalic) ?? false
         lastTandaLabelColor      = try c.decodeIfPresent(String.self, forKey: .lastTandaLabelColor)      ?? "#FF4444"
         showLastTandaLabel       = try c.decodeIfPresent(Bool.self,   forKey: .showLastTandaLabel)       ?? true
+        lastPlayedFontName    = try c.decodeIfPresent(String.self, forKey: .lastPlayedFontName)    ?? "System"
+        lastPlayedFontSize    = try c.decodeIfPresent(Double.self, forKey: .lastPlayedFontSize)    ?? 36
+        lastPlayedFontBold    = try c.decodeIfPresent(Bool.self,   forKey: .lastPlayedFontBold)    ?? false
+        lastPlayedFontItalic  = try c.decodeIfPresent(Bool.self,   forKey: .lastPlayedFontItalic)  ?? false
+        lastPlayedColor       = try c.decodeIfPresent(String.self, forKey: .lastPlayedColor)       ?? "#AAAAAA"
+        showLastPlayedDance   = try c.decodeIfPresent(Bool.self,   forKey: .showLastPlayedDance)   ?? false
+        showLastPlayedCortina = try c.decodeIfPresent(Bool.self,   forKey: .showLastPlayedCortina) ?? false
 
         trackCounterFontName   = try c.decodeIfPresent(String.self, forKey: .trackCounterFontName)   ?? "System"
         trackCounterFontSize   = try c.decodeIfPresent(Double.self, forKey: .trackCounterFontSize)   ?? 36
@@ -655,6 +745,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         cortinaTitleOffsetY   = try c.decodeIfPresent(Double.self, forKey: .cortinaTitleOffsetY)   ?? 0
         nextUpLabelOffsetX    = try c.decodeIfPresent(Double.self, forKey: .nextUpLabelOffsetX)    ?? 0
         nextUpLabelOffsetY    = try c.decodeIfPresent(Double.self, forKey: .nextUpLabelOffsetY)    ?? 0
+        lastPlayedOffsetX     = try c.decodeIfPresent(Double.self, forKey: .lastPlayedOffsetX)     ?? 0
+        lastPlayedOffsetY     = try c.decodeIfPresent(Double.self, forKey: .lastPlayedOffsetY)     ?? 0
 
         // Per-element text-box widths (auto-shrink) — absent in older JSON, default to 0 (disabled).
         titleBoxWidth          = try c.decodeIfPresent(Double.self, forKey: .titleBoxWidth)          ?? 0
@@ -668,6 +760,80 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         cortinaArtistBoxWidth  = try c.decodeIfPresent(Double.self, forKey: .cortinaArtistBoxWidth)  ?? 0
         cortinaTitleBoxWidth   = try c.decodeIfPresent(Double.self, forKey: .cortinaTitleBoxWidth)   ?? 0
         nextUpLabelBoxWidth    = try c.decodeIfPresent(Double.self, forKey: .nextUpLabelBoxWidth)    ?? 0
+        lastPlayedBoxWidth     = try c.decodeIfPresent(Double.self, forKey: .lastPlayedBoxWidth)     ?? 0
+
+        // Per-element horizontal alignment — absent in older JSON, default to centre.
+        titleHAlign          = try c.decodeIfPresent(TextHAlignment.self, forKey: .titleHAlign)          ?? .center
+        artistHAlign         = try c.decodeIfPresent(TextHAlignment.self, forKey: .artistHAlign)         ?? .center
+        genreHAlign          = try c.decodeIfPresent(TextHAlignment.self, forKey: .genreHAlign)          ?? .center
+        yearHAlign           = try c.decodeIfPresent(TextHAlignment.self, forKey: .yearHAlign)           ?? .center
+        singerHAlign         = try c.decodeIfPresent(TextHAlignment.self, forKey: .singerHAlign)         ?? .center
+        trackCounterHAlign   = try c.decodeIfPresent(TextHAlignment.self, forKey: .trackCounterHAlign)   ?? .center
+        lastTandaLabelHAlign = try c.decodeIfPresent(TextHAlignment.self, forKey: .lastTandaLabelHAlign) ?? .center
+        cortinaLabelHAlign   = try c.decodeIfPresent(TextHAlignment.self, forKey: .cortinaLabelHAlign)   ?? .center
+        cortinaArtistHAlign  = try c.decodeIfPresent(TextHAlignment.self, forKey: .cortinaArtistHAlign)  ?? .center
+        cortinaTitleHAlign   = try c.decodeIfPresent(TextHAlignment.self, forKey: .cortinaTitleHAlign)   ?? .center
+        nextUpLabelHAlign    = try c.decodeIfPresent(TextHAlignment.self, forKey: .nextUpLabelHAlign)    ?? .center
+        lastPlayedHAlign     = try c.decodeIfPresent(TextHAlignment.self, forKey: .lastPlayedHAlign)     ?? .center
+
+        // Coordinate-system migration. Older profiles stored offsets/box widths as absolute points and
+        // had no `relativePositions` key. Convert them to percent of a 1920×1080 baseline and, to keep
+        // the old look, left-align any element that had a non-zero horizontal offset (the previous
+        // "offset → left-aligned" behaviour). Profiles already in percent are left untouched (idempotent).
+        relativePositions = try c.decodeIfPresent(Bool.self, forKey: .relativePositions) ?? false
+        if !relativePositions {
+            if titleOffsetX          != 0 { titleHAlign = .leading }
+            if artistOffsetX         != 0 { artistHAlign = .leading }
+            if genreOffsetX          != 0 { genreHAlign = .leading }
+            if yearOffsetX           != 0 { yearHAlign = .leading }
+            if singerOffsetX         != 0 { singerHAlign = .leading }
+            if trackCounterOffsetX   != 0 { trackCounterHAlign = .leading }
+            if lastTandaLabelOffsetX != 0 { lastTandaLabelHAlign = .leading }
+            if cortinaLabelOffsetX   != 0 { cortinaLabelHAlign = .leading }
+            if cortinaArtistOffsetX  != 0 { cortinaArtistHAlign = .leading }
+            if cortinaTitleOffsetX   != 0 { cortinaTitleHAlign = .leading }
+            if nextUpLabelOffsetX    != 0 { nextUpLabelHAlign = .leading }
+            if lastPlayedOffsetX     != 0 { lastPlayedHAlign = .leading }
+
+            func relX(_ v: Double) -> Double { v / 1920.0 * 100.0 }
+            func relY(_ v: Double) -> Double { v / 1080.0 * 100.0 }
+            titleOffsetX = relX(titleOffsetX);                 titleOffsetY = relY(titleOffsetY)
+            artistOffsetX = relX(artistOffsetX);               artistOffsetY = relY(artistOffsetY)
+            genreOffsetX = relX(genreOffsetX);                 genreOffsetY = relY(genreOffsetY)
+            yearOffsetX = relX(yearOffsetX);                   yearOffsetY = relY(yearOffsetY)
+            singerOffsetX = relX(singerOffsetX);               singerOffsetY = relY(singerOffsetY)
+            trackCounterOffsetX = relX(trackCounterOffsetX);   trackCounterOffsetY = relY(trackCounterOffsetY)
+            lastTandaLabelOffsetX = relX(lastTandaLabelOffsetX); lastTandaLabelOffsetY = relY(lastTandaLabelOffsetY)
+            cortinaLabelOffsetX = relX(cortinaLabelOffsetX);   cortinaLabelOffsetY = relY(cortinaLabelOffsetY)
+            cortinaArtistOffsetX = relX(cortinaArtistOffsetX); cortinaArtistOffsetY = relY(cortinaArtistOffsetY)
+            cortinaTitleOffsetX = relX(cortinaTitleOffsetX);   cortinaTitleOffsetY = relY(cortinaTitleOffsetY)
+            nextUpLabelOffsetX = relX(nextUpLabelOffsetX);     nextUpLabelOffsetY = relY(nextUpLabelOffsetY)
+            lastPlayedOffsetX = relX(lastPlayedOffsetX);       lastPlayedOffsetY = relY(lastPlayedOffsetY)
+            titleBoxWidth = relX(titleBoxWidth);               artistBoxWidth = relX(artistBoxWidth)
+            genreBoxWidth = relX(genreBoxWidth);               yearBoxWidth = relX(yearBoxWidth)
+            singerBoxWidth = relX(singerBoxWidth);             trackCounterBoxWidth = relX(trackCounterBoxWidth)
+            lastTandaLabelBoxWidth = relX(lastTandaLabelBoxWidth); cortinaLabelBoxWidth = relX(cortinaLabelBoxWidth)
+            cortinaArtistBoxWidth = relX(cortinaArtistBoxWidth);   cortinaTitleBoxWidth = relX(cortinaTitleBoxWidth)
+            nextUpLabelBoxWidth = relX(nextUpLabelBoxWidth)
+            lastPlayedBoxWidth = relX(lastPlayedBoxWidth)
+            relativePositions = true
+        }
+
+        // Font-size coordinate-system migration: older profiles stored absolute points and had no
+        // `relativeFontSizes` key. Convert to a level (1–15 = percent of a 1080-tall baseline) and mark
+        // relative. Idempotent: profiles already in levels are left untouched.
+        relativeFontSizes = try c.decodeIfPresent(Bool.self, forKey: .relativeFontSizes) ?? false
+        if !relativeFontSizes {
+            func lvl(_ pts: Double) -> Double { min(15, max(1, (pts / 1080.0 * 100.0).rounded())) }
+            titleFontSize = lvl(titleFontSize);                 artistFontSize = lvl(artistFontSize)
+            genreFontSize = lvl(genreFontSize);                 yearFontSize = lvl(yearFontSize)
+            singerFontSize = lvl(singerFontSize);               trackCounterFontSize = lvl(trackCounterFontSize)
+            cortinaLabelFontSize = lvl(cortinaLabelFontSize);   cortinaArtistFontSize = lvl(cortinaArtistFontSize)
+            cortinaTitleFontSize = lvl(cortinaTitleFontSize);   nextUpLabelFontSize = lvl(nextUpLabelFontSize)
+            idleMessageFontSize = lvl(idleMessageFontSize);     lastTandaLabelFontSize = lvl(lastTandaLabelFontSize)
+            overrideTextFontSize = lvl(overrideTextFontSize);   lastPlayedFontSize = lvl(lastPlayedFontSize)
+            relativeFontSizes = true
+        }
 
         // Migration: append items to order lists if absent
         if !danceItemOrder.contains(.lastTandaLabel) {
@@ -678,6 +844,12 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         }
         if !cortinaItemOrder.contains(.lastTandaLabel) {
             cortinaItemOrder.append(.lastTandaLabel)
+        }
+        if !danceItemOrder.contains(.lastPlayed) {
+            danceItemOrder.append(.lastPlayed)
+        }
+        if !cortinaItemOrder.contains(.lastPlayed) {
+            cortinaItemOrder.append(.lastPlayed)
         }
     }
 
@@ -766,6 +938,7 @@ public enum DisplayTextItem: String, Codable, CaseIterable {
     case nextUpLabel     // "COMING UP" heading text
     case lastTandaLabel  // "LAST TANDA" announcement label
     case trackCounter    // rendered inline when position == .centre
+    case lastPlayed      // previously played track ("Artist — Title")
 
     public var displayName: String {
         switch self {
@@ -780,6 +953,56 @@ public enum DisplayTextItem: String, Codable, CaseIterable {
         case .nextUpLabel:     "Next Up Label"
         case .lastTandaLabel:  "Last Tanda Label"
         case .trackCounter:    "Track Counter"
+        case .lastPlayed:      "Last Played"
+        }
+    }
+}
+
+public enum GenreTextCase: String, Codable, CaseIterable {
+    case uppercase
+    case original
+    case titleCase
+
+    public var displayName: String {
+        switch self {
+        case .uppercase: "UPPERCASE"
+        case .original:  "Original"
+        case .titleCase: "Title Case"
+        }
+    }
+
+    /// Applies the chosen casing to a genre label.
+    public func apply(_ label: String) -> String {
+        switch self {
+        case .uppercase: return label.uppercased()
+        case .original:  return label
+        case .titleCase: return label.capitalized
+        }
+    }
+}
+
+public enum AlbumArtFadeStyle: String, Codable, CaseIterable {
+    case radial   // circular fade toward the corners (historical default)
+    case edges    // linear fade inset from all four edges
+
+    public var displayName: String {
+        switch self {
+        case .radial: "Radial"
+        case .edges:  "Edges"
+        }
+    }
+}
+
+public enum TextHAlignment: String, Codable, CaseIterable {
+    case leading
+    case center
+    case trailing
+
+    public var displayName: String {
+        switch self {
+        case .leading:  "Left"
+        case .center:   "Centre"
+        case .trailing: "Right"
         }
     }
 }

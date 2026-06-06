@@ -28,6 +28,11 @@ struct AppearanceVisibilityTab: View {
                 visibilityRow("Title",   dance: $working.showTitleDance,   cortina: $working.showTitleCortina)
                 visibilityRow("Singer",  dance: $working.showSingerDance,  cortina: $working.showSingerCortina)
                 visibilityRow("Artwork", dance: $working.showArtworkDance, cortina: $working.showArtworkCortina)
+                HStack {
+                    Text("Last Played").frame(maxWidth: .infinity, alignment: .leading)
+                    Toggle("", isOn: $working.showLastPlayedDance).labelsHidden().frame(width: 70, alignment: .center)
+                    Toggle("", isOn: $working.showLastPlayedCortina).labelsHidden().frame(width: 70, alignment: .center)
+                }
                 Divider()
                 Toggle("Show next track during cortina", isOn: $working.showNextTrackDuringCortina)
             } header: {

@@ -16,6 +16,17 @@ struct AppearanceTextTab: View {
                         bold: $working.titleFontBold,        italic: $working.titleFontItalic)
                 fontRow("Genre",         name: $working.genreFontName,        size: $working.genreFontSize,
                         bold: $working.genreFontBold,        italic: $working.genreFontItalic)
+                HStack {
+                    Text("Genre Case")
+                        .frame(width: 100, alignment: .leading)
+                    Picker("", selection: $working.genreTextCase) {
+                        ForEach(GenreTextCase.allCases, id: \.self) { c in
+                            Text(c.displayName).tag(c)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                }
                 fontRow("Year",          name: $working.yearFontName,         size: $working.yearFontSize,
                         bold: $working.yearFontBold,         italic: $working.yearFontItalic)
                 HStack {
@@ -33,6 +44,8 @@ struct AppearanceTextTab: View {
                         bold: $working.singerFontBold,       italic: $working.singerFontItalic)
                 fontRow("Track Counter", name: $working.trackCounterFontName, size: $working.trackCounterFontSize,
                         bold: $working.trackCounterFontBold, italic: $working.trackCounterFontItalic)
+                fontRow("Last Played",   name: $working.lastPlayedFontName,   size: $working.lastPlayedFontSize,
+                        bold: $working.lastPlayedFontBold,   italic: $working.lastPlayedFontItalic)
             } header: {
                 Text("Fonts")
                     .foregroundColor(ControlTheme.accent)
@@ -86,11 +99,12 @@ struct AppearanceTextTab: View {
             .labelsHidden()
             .frame(width: 180, alignment: .leading)
             Spacer()
-            Stepper(value: size, in: 8...200, step: 2) {
-                Text(String(format: "%.0fpt", size.wrappedValue))
+            Stepper(value: size, in: 1...15, step: 1) {
+                Text(String(format: "%.0f", size.wrappedValue))
                     .monospacedDigit()
                     .frame(width: 44)
             }
+            .help("Text size as a level (1–15) relative to the screen height.")
             Toggle("B", isOn: bold)
                 .toggleStyle(.button)
                 .font(.system(size: 12, weight: .bold))

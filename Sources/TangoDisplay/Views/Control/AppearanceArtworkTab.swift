@@ -19,6 +19,12 @@ struct AppearanceArtworkTab: View {
 
     @FocusState private var focusedEntryId: UUID?
     @State private var prevArtistCount: Int = 0
+    @State private var positionsGenreID: UUID? = nil
+
+    private func genreBinding(_ id: UUID) -> Binding<GenreBackground>? {
+        guard let idx = working.genreBackgrounds.firstIndex(where: { $0.id == id }) else { return nil }
+        return $working.genreBackgrounds[idx]
+    }
 
     private var orderedGenreBackgrounds: [GenreBackground] {
         let dance = working.genreBackgrounds.filter { !$0.isCortinaEntry }
@@ -66,6 +72,16 @@ struct AppearanceArtworkTab: View {
                         Text(String(format: "%.0f%%", working.albumArtworkEdgeFade * 100))
                             .monospacedDigit()
                             .frame(width: 44)
+                    }
+                    HStack {
+                        Text("Fade Style")
+                        Picker("", selection: $working.albumArtworkFadeStyle) {
+                            ForEach(AlbumArtFadeStyle.allCases, id: \.self) { s in
+                                Text(s.displayName).tag(s)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
                     }
                     HStack {
                         Text("Scale")
@@ -296,6 +312,20 @@ struct AppearanceArtworkTab: View {
             }
             prevArtistCount = newCount
         }
+        .sheet(isPresented: Binding(
+            get: { positionsGenreID != nil },
+            set: { if !$0 { positionsGenreID = nil } }
+        )) {
+            if let id = positionsGenreID, let binding = genreBinding(id) {
+                GenrePositionsSheet(
+                    genre: binding,
+                    genreLabel: binding.wrappedValue.isCortinaEntry
+                        ? "\(cortinaRowLabel) (non-dance)" : binding.wrappedValue.genreKey,
+                    defaults: working.currentPlacements(),
+                    onClose: { positionsGenreID = nil }
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -407,6 +437,12 @@ struct AppearanceArtworkTab: View {
                     .buttonStyle(.bordered)
                     .foregroundColor(.red)
             }
+
+            Button(entry.positions == nil ? "Positions…" : "Positions ✓") {
+                positionsGenreID = entry.id
+            }
+            .buttonStyle(.bordered)
+            .help("Set text positions used while this genre plays")
         }
     }
 }

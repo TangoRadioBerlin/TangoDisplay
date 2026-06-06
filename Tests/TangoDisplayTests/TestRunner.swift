@@ -1410,7 +1410,7 @@ func runAppearanceProfileMigrationTests() {
         test("cortina order gains nextUpLabel (front), title, and lastTandaLabel") {
             let p = try decode(minimalJSON)
             try expectEqual(p.cortinaItemOrder,
-                            [.nextUpLabel, .genre, .artist, .year, .title, .singer, .lastTandaLabel])
+                            [.nextUpLabel, .genre, .artist, .year, .title, .singer, .lastTandaLabel, .lastPlayed])
         }
     }
 
@@ -1568,18 +1568,28 @@ func runRegexTransformTests() {
                 applyRegexTransform("Carlos di Sarli con Roberto Ruffino", pattern: ".* con (.+)$", replacement: "$1"),
                 "Roberto Ruffino")
         }
-        test("no match returns the original") {
+        test("no match keeps the original by default") {
             try expectEqual(applyRegexTransform("Osvaldo Pugliese", pattern: "(con .+)$", replacement: "$1"),
                             "Osvaldo Pugliese")
         }
-        test("empty pattern returns the original") {
-            try expectEqual(applyRegexTransform("X", pattern: "", replacement: "$1"), "X")
+        test("no match clears the field when clearWhenNoMatch is set") {
+            try expectEqual(applyRegexTransform("Osvaldo Pugliese", pattern: "(con .+)$", replacement: "$1",
+                                                clearWhenNoMatch: true), "")
         }
-        test("invalid pattern returns the original") {
-            try expectEqual(applyRegexTransform("X", pattern: "(", replacement: "$1"), "X")
+        test("match returns the extracted value regardless of the flag") {
+            let input = "Carlos di Sarli con Roberto Ruffino"
+            try expectEqual(applyRegexTransform(input, pattern: "^.*(con .+)$", replacement: "$1",
+                                                clearWhenNoMatch: true), "con Roberto Ruffino")
         }
-        test("whitespace-only result returns the original") {
+        test("empty pattern returns the original (no transform)") {
+            try expectEqual(applyRegexTransform("X", pattern: "", replacement: "$1", clearWhenNoMatch: true), "X")
+        }
+        test("invalid pattern returns the original (no transform)") {
+            try expectEqual(applyRegexTransform("X", pattern: "(", replacement: "$1", clearWhenNoMatch: true), "X")
+        }
+        test("whitespace-only result keeps original by default; empty when clearing") {
             try expectEqual(applyRegexTransform("Hello", pattern: ".*", replacement: "   "), "Hello")
+            try expectEqual(applyRegexTransform("Hello", pattern: ".*", replacement: "   ", clearWhenNoMatch: true), "")
         }
         test("\\n escape produces a line break") {
             try expectEqual(applyRegexTransform("A B", pattern: " ", replacement: "\\n"), "A\nB")
@@ -1668,6 +1678,16 @@ func runTrackInfoTransformTests() {
             try expectEqual(resolveTrackField(.artist, from: full, rules: rules),
                             "Carlos di Sarli con Roberto Ruffino")
         }
+        test("non-matching pattern: keeps source by default, clears when flag set") {
+            let keep = ["albumArtist": TransformRule(enabled: true, pattern: "(con .+)$",
+                                                     replacement: "$1", sourceField: .artist)]
+            // sparse has artist "A" → no "con" match
+            try expectEqual(resolveTrackField(.albumArtist, from: sparse, rules: keep), "A")
+            let clear = ["albumArtist": TransformRule(enabled: true, pattern: "(con .+)$",
+                                                      replacement: "$1", sourceField: .artist,
+                                                      clearWhenNoMatch: true)]
+            try expectEqual(resolveTrackField(.albumArtist, from: sparse, rules: clear), "")
+        }
     }
 
     suite("TransformRule — backward-compatible decoding") {
@@ -1677,11 +1697,14 @@ func runTrackInfoTransformTests() {
             try expectNil(r.sourceField)
             try expectEqual(r.enabled, true)
             try expectEqual(r.pattern, "a")
+            try expect(!r.clearWhenNoMatch)   // absent → legacy default
         }
-        test("round-trips with sourceField set") {
-            let r = TransformRule(enabled: true, pattern: "p", replacement: "r", sourceField: .artist)
+        test("round-trips with sourceField + clearWhenNoMatch set") {
+            let r = TransformRule(enabled: true, pattern: "p", replacement: "r",
+                                  sourceField: .artist, clearWhenNoMatch: true)
             let back = try JSONDecoder().decode(TransformRule.self, from: JSONEncoder().encode(r))
             try expectEqual(back.sourceField, .artist)
+            try expect(back.clearWhenNoMatch)
         }
     }
 }
@@ -1776,6 +1799,226 @@ func runAutoBypassRuleTests() {
     }
 }
 
+// MARK: - Relative text positioning + alignment
+
+func runRelativePositionTests() {
+    func baseProfile() -> AppearanceProfile { AppearanceProfile(id: UUID(), name: "P", isBuiltIn: false) }
+    func legacyDict(_ mutate: (inout [String: Any]) -> Void) throws -> Data {
+        var dict = try JSONSerialization.jsonObject(with: JSONEncoder().encode(baseProfile())) as! [String: Any]
+        dict.removeValue(forKey: "relativePositions")  // simulate older profile
+        mutate(&dict)
+        return try JSONSerialization.data(withJSONObject: dict)
+    }
+
+    suite("AppearanceProfile — relative-position migration") {
+        test("absolute px offsets/box migrate to percent of 1920×1080") {
+            let data = try legacyDict {
+                $0["titleOffsetX"] = 192.0    // 10% of 1920
+                $0["titleOffsetY"] = 108.0    // 10% of 1080
+                $0["artistBoxWidth"] = 384.0  // 20% of 1920
+            }
+            let p = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expect(p.relativePositions)
+            try expect(abs(p.titleOffsetX - 10.0) < 0.001)
+            try expect(abs(p.titleOffsetY - 10.0) < 0.001)
+            try expect(abs(p.artistBoxWidth - 20.0) < 0.001)
+        }
+        test("non-zero legacy X offset becomes left-aligned; others stay centred") {
+            let data = try legacyDict { $0["genreOffsetX"] = 300.0 }
+            let p = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(p.genreHAlign, .leading)
+            try expectEqual(p.titleHAlign, .center)
+        }
+        test("already-relative profile is not re-converted (idempotent)") {
+            var p = baseProfile()
+            p.titleOffsetX = 10.0
+            let back = try JSONDecoder().decode(AppearanceProfile.self, from: JSONEncoder().encode(p))
+            try expect(back.relativePositions)
+            try expect(abs(back.titleOffsetX - 10.0) < 0.001)  // unchanged, not divided by 1920
+        }
+    }
+
+    suite("TextHAlignment") {
+        test("default alignment is centre") {
+            try expectEqual(baseProfile().titleHAlign, .center)
+        }
+        test("codable round-trip for all cases") {
+            for a in TextHAlignment.allCases {
+                let back = try JSONDecoder().decode([TextHAlignment].self, from: JSONEncoder().encode([a]))
+                try expectEqual(back, [a])
+            }
+        }
+        test("profile round-trips percent offsets + alignment") {
+            var p = baseProfile()
+            p.titleOffsetX = -25.5; p.titleHAlign = .trailing; p.artistBoxWidth = 33.0
+            let back = try JSONDecoder().decode(AppearanceProfile.self, from: JSONEncoder().encode(p))
+            try expect(abs(back.titleOffsetX - (-25.5)) < 0.001)
+            try expectEqual(back.titleHAlign, .trailing)
+            try expect(abs(back.artistBoxWidth - 33.0) < 0.001)
+        }
+    }
+
+    suite("AppearanceProfile — relative font-size migration") {
+        test("absolute point sizes migrate to levels (percent of 1080)") {
+            let data = try legacyDict {
+                $0.removeValue(forKey: "relativeFontSizes")
+                $0["titleFontSize"] = 72.0    // → 7
+                $0["artistFontSize"] = 96.0   // → 9
+                $0["genreFontSize"] = 36.0    // → 3
+            }
+            let p = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expect(p.relativeFontSizes)
+            try expect(abs(p.titleFontSize - 7) < 0.001)
+            try expect(abs(p.artistFontSize - 9) < 0.001)
+            try expect(abs(p.genreFontSize - 3) < 0.001)
+        }
+        test("already-relative font sizes are not re-converted") {
+            var p = baseProfile()
+            p.titleFontSize = 8
+            let back = try JSONDecoder().decode(AppearanceProfile.self, from: JSONEncoder().encode(p))
+            try expect(back.relativeFontSizes)
+            try expect(abs(back.titleFontSize - 8) < 0.001)
+        }
+        test("built-in defaults are levels in 1...15") {
+            let p = baseProfile()
+            for size in [p.titleFontSize, p.artistFontSize, p.genreFontSize, p.lastPlayedFontSize] {
+                try expect(size >= 1 && size <= 15)
+            }
+        }
+    }
+}
+
+// MARK: - Presentation options (genre case, fade style, last played)
+
+func runPresentationOptionTests() {
+    func base() -> AppearanceProfile { AppearanceProfile(id: UUID(), name: "P", isBuiltIn: false) }
+
+    suite("GenreTextCase") {
+        test("apply transforms text per case") {
+            try expectEqual(GenreTextCase.uppercase.apply("Tango Vals"), "TANGO VALS")
+            try expectEqual(GenreTextCase.original.apply("Tango Vals"), "Tango Vals")
+            try expectEqual(GenreTextCase.titleCase.apply("tango vals"), "Tango Vals")
+        }
+        test("codable round-trip") {
+            for c in GenreTextCase.allCases {
+                let back = try JSONDecoder().decode([GenreTextCase].self, from: JSONEncoder().encode([c]))
+                try expectEqual(back, [c])
+            }
+        }
+    }
+
+    suite("AppearanceProfile — new option defaults") {
+        test("defaults: uppercase genre, radial fade, last-played off") {
+            let p = base()
+            try expectEqual(p.genreTextCase, .uppercase)
+            try expectEqual(p.albumArtworkFadeStyle, .radial)
+            try expect(!p.showLastPlayedDance)
+            try expect(!p.showLastPlayedCortina)
+        }
+        test("DisplayTextItem includes lastPlayed; order lists contain it") {
+            try expect(DisplayTextItem.allCases.contains(.lastPlayed))
+            try expect(base().danceItemOrder.contains(.lastPlayed))
+            try expect(base().cortinaItemOrder.contains(.lastPlayed))
+        }
+        test("legacy profile without new keys decodes to defaults + appends lastPlayed to orders") {
+            var dict = try JSONSerialization.jsonObject(with: JSONEncoder().encode(base())) as! [String: Any]
+            for k in ["genreTextCase", "albumArtworkFadeStyle", "showLastPlayedDance",
+                      "showLastPlayedCortina", "danceItemOrder", "cortinaItemOrder"] {
+                dict.removeValue(forKey: k)
+            }
+            let p = try JSONDecoder().decode(AppearanceProfile.self,
+                                             from: try JSONSerialization.data(withJSONObject: dict))
+            try expectEqual(p.genreTextCase, .uppercase)
+            try expectEqual(p.albumArtworkFadeStyle, .radial)
+            try expect(p.danceItemOrder.contains(.lastPlayed))
+            try expect(p.cortinaItemOrder.contains(.lastPlayed))
+        }
+    }
+}
+
+// MARK: - Per-genre position overrides
+
+func runGenrePositionOverrideTests() {
+    func base() -> AppearanceProfile { AppearanceProfile(id: UUID(), name: "P", isBuiltIn: false) }
+    // No allow/deny → nothing classified as cortina.
+    let detector = CortinaDetector(useAllowlist: false, allowlistGenres: [],
+                                   useDenylist: false, denylistGenres: [])
+
+    suite("GenreBackground.positions coding") {
+        test("legacy entry without positions decodes to nil") {
+            let g = GenreBackground(genreKey: "Tango", imageFilename: "g.jpg")
+            let data = try JSONEncoder().encode(g)
+            try expect(!(String(data: data, encoding: .utf8) ?? "").contains("positions"))
+            try expectNil(try JSONDecoder().decode(GenreBackground.self, from: data).positions)
+        }
+        test("round-trips with a position set") {
+            let set = PositionSet(placements: ["title": ElementPlacement(offsetX: 12, hAlign: .trailing)])
+            let g = GenreBackground(genreKey: "Tango", positions: set)
+            let back = try JSONDecoder().decode(GenreBackground.self, from: JSONEncoder().encode(g))
+            try expectEqual(back.positions, set)
+        }
+    }
+
+    suite("AppearanceProfile — applyingPositionOverride") {
+        test("nil override returns the profile unchanged") {
+            let p = base()
+            try expectEqual(p.applyingPositionOverride(nil), p)
+        }
+        test("override replaces only the listed element's flat fields") {
+            var p = base()
+            p.artistOffsetX = 5
+            let set = PositionSet(placements: ["title": ElementPlacement(offsetX: 30, offsetY: 40,
+                                                                         boxWidth: 50, hAlign: .leading)])
+            let out = p.applyingPositionOverride(set)
+            try expect(abs(out.titleOffsetX - 30) < 0.001)
+            try expect(abs(out.titleOffsetY - 40) < 0.001)
+            try expect(abs(out.titleBoxWidth - 50) < 0.001)
+            try expectEqual(out.titleHAlign, .leading)
+            try expect(abs(out.artistOffsetX - 5) < 0.001)   // untouched
+        }
+        test("currentPlacements reflects flat fields and round-trips through override") {
+            var p = base()
+            p.genreOffsetX = -20; p.genreHAlign = .trailing
+            let placements = p.currentPlacements()
+            try expect(abs((placements.placements["genre"]?.offsetX ?? 0) - (-20)) < 0.001)
+            try expectEqual(placements.placements["genre"]?.hAlign, .trailing)
+        }
+        test("artwork override replaces album-artwork placement") {
+            var p = base()
+            p.albumArtworkOffsetX = 0; p.albumArtworkScale = 1
+            let set = PositionSet(artwork: ArtworkPlacement(offsetX: 120, offsetY: -60, scale: 2.5, opacity: 0.8))
+            let out = p.applyingPositionOverride(set)
+            try expect(abs(out.albumArtworkOffsetX - 120) < 0.001)
+            try expect(abs(out.albumArtworkOffsetY - (-60)) < 0.001)
+            try expect(abs(out.albumArtworkScale - 2.5) < 0.001)
+            try expect(abs(out.albumArtworkOpacity - 0.8) < 0.001)
+        }
+        test("currentPlacements seeds artwork from the profile") {
+            var p = base()
+            p.albumArtworkScale = 1.7
+            try expect(abs((p.currentPlacements().artwork?.scale ?? 0) - 1.7) < 0.001)
+        }
+    }
+
+    suite("AppearanceProfile — positionOverride(forGenre:)") {
+        test("returns the matching genre entry's override") {
+            var p = base()
+            p.genreBackgroundsEnabled = true
+            let set = PositionSet(placements: ["title": ElementPlacement(offsetX: 9)])
+            p.genreBackgrounds = [GenreBackground(genreKey: "Tango", positions: set)]
+            try expectEqual(p.positionOverride(forGenre: "Tango", using: detector), set)
+            try expectNil(p.positionOverride(forGenre: "Milonga", using: detector))
+        }
+        test("nil when genre backgrounds disabled") {
+            var p = base()
+            p.genreBackgroundsEnabled = false
+            p.genreBackgrounds = [GenreBackground(genreKey: "Tango",
+                                                  positions: PositionSet(placements: ["title": ElementPlacement()]))]
+            try expectNil(p.positionOverride(forGenre: "Tango", using: detector))
+        }
+    }
+}
+
 // MARK: - Main entry point
 
 runCortinaDetectorTests()
@@ -1799,6 +2042,9 @@ runRegexTransformTests()
 runSingerTests()
 runTrackInfoTransformTests()
 runAutoBypassRuleTests()
+runRelativePositionTests()
+runPresentationOptionTests()
+runGenrePositionOverrideTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
