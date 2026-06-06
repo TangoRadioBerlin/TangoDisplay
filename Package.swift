@@ -15,11 +15,18 @@ let package = Package(
             name: "TangoDisplayCore",
             path: "Sources/TangoDisplayCore"
         ),
+        // ObjC helpers — provides @try/@catch wrappers that Swift cannot express
+        .target(
+            name: "TangoDisplayObjC",
+            path: "Sources/TangoDisplayObjC",
+            publicHeadersPath: "include"
+        ),
         // Main app executable
         .executableTarget(
             name: "TangoDisplay",
             dependencies: [
                 "TangoDisplayCore",
+                "TangoDisplayObjC",
                 .product(name: "Sparkle", package: "Sparkle")
             ],
             path: "Sources/TangoDisplay",

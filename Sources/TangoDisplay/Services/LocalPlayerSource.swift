@@ -5,6 +5,7 @@ import CoreAudioKit
 import Foundation
 import OSLog
 import TangoDisplayCore
+import TangoDisplayObjC
 
 final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
@@ -1003,10 +1004,17 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         audioEngine.connect(playerNode, to: eq, format: format)
         audioEngine.connect(eq, to: replayGainMixer, format: format)
 
+        // AU plugins often don't support mono. Upmix to stereo here so replayGainMixer
+        // (AVAudioMixerNode) does the channel conversion before the plugin chain sees any data.
+        let pluginFormat: AVAudioFormat? = {
+            guard let fmt = format, fmt.channelCount < 2 else { return format }
+            return AVAudioFormat(standardFormatWithSampleRate: fmt.sampleRate, channels: 2)
+        }()
+
         var prev: AVAudioNode = replayGainMixer
         var failedSlots: [(id: UUID, reason: String)] = []
         for (slot, unit) in liveChainUnits() {
-            if let fmt = format {
+            if let fmt = pluginFormat {
                 do {
                     try unit.auAudioUnit.inputBusses[0].setFormat(fmt)
                 } catch {
@@ -1016,14 +1024,21 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                     continue
                 }
             }
-            audioEngine.connect(prev, to: unit, format: format)
-            prev = unit
+            var connectReason: NSString?
+            if TDTryAudioEngineConnect(audioEngine, prev, unit, pluginFormat, &connectReason) {
+                prev = unit
+            } else {
+                let msg = (connectReason as String?) ?? "NSException during connect"
+                os_log(.error, "TangoDisplay: plugin '%{public}@' connect threw exception; disabling: %{public}@",
+                       slot.selection.name, msg)
+                failedSlots.append((id: slot.id, reason: msg))
+            }
         }
         for (id, reason) in failedSlots {
             markSlotFailed(id: id, reason: reason)
         }
-        audioEngine.connect(prev, to: balanceMixer, format: format)
-        audioEngine.connect(balanceMixer, to: audioEngine.mainMixerNode, format: format)
+        audioEngine.connect(prev, to: balanceMixer, format: pluginFormat)
+        audioEngine.connect(balanceMixer, to: audioEngine.mainMixerNode, format: pluginFormat)
     }
 
     private func rewireGraphSafely() {
