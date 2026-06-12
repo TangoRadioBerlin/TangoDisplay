@@ -50,8 +50,22 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(useAllowlist, forKey: kPrefix + "useAllowlist") }
     }
     @Published var allowlistGenres: [String] {
-        didSet { UserDefaults.standard.set(allowlistGenres.joined(separator: ","),
-                                           forKey: kPrefix + "allowlistGenres") }
+        didSet {
+            UserDefaults.standard.set(allowlistGenres.joined(separator: ","),
+                                      forKey: kPrefix + "allowlistGenres")
+            // Prune partial-match entries no longer in the allowlist
+            allowlistPartialMatchGenres = allowlistPartialMatchGenres.filter {
+                allowlistGenres.contains($0)
+            }
+        }
+    }
+    @Published var allowlistPartialMatchGenres: Set<String> {
+        didSet {
+            UserDefaults.standard.set(
+                Array(allowlistPartialMatchGenres).joined(separator: ","),
+                forKey: kPrefix + "allowlistPartialMatchGenres"
+            )
+        }
     }
     @Published var useDenylist: Bool {
         didSet { UserDefaults.standard.set(useDenylist, forKey: kPrefix + "useDenylist") }
@@ -312,6 +326,8 @@ final class AppSettings: ObservableObject {
                            .flatMap { $0 as? Bool } ?? true
         allowlistGenres = AppSettings.parseGenres(
             ud.string(forKey: kPrefix + "allowlistGenres"), default: ["Cortina"])
+        allowlistPartialMatchGenres = Set(AppSettings.parseGenres(
+            ud.string(forKey: kPrefix + "allowlistPartialMatchGenres"), default: []))
         useDenylist   = ud.object(forKey: kPrefix + "useDenylist")
                            .flatMap { $0 as? Bool } ?? true
         denylistGenres = AppSettings.parseGenres(
@@ -492,6 +508,7 @@ final class AppSettings: ObservableObject {
         CortinaDetector(
             useAllowlist: useAllowlist,
             allowlistGenres: Set(allowlistGenres.map { $0.lowercased() }),
+            allowlistPartialGenres: Set(allowlistPartialMatchGenres.map { $0.lowercased() }),
             useDenylist: useDenylist,
             denylistGenres: Set(denylistGenres.map { $0.lowercased() }),
             denylistPartialGenres: Set(denylistPartialMatchGenres.map { $0.lowercased() })

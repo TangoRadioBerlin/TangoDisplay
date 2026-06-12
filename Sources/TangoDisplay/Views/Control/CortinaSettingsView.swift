@@ -20,11 +20,7 @@ struct CortinaSettingsView: View {
                 Text("A track is a cortina if its genre matches one of these genres:")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                genreListEditor(
-                    genres: $settings.allowlistGenres,
-                    newGenre: $newAllowlistGenre,
-                    placeholder: "e.g. Cortina"
-                )
+                allowlistEditor()
             } header: {
                 Text("Cortina Genres (allowlist)")
                     .foregroundColor(ControlTheme.accent)
@@ -181,6 +177,54 @@ struct CortinaSettingsView: View {
                     .disabled(newDenylistGenre.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
+    }
+
+    @ViewBuilder
+    private func allowlistEditor() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(settings.allowlistGenres.indices, id: \.self) { idx in
+                let genre = settings.allowlistGenres[idx]
+                HStack(spacing: 8) {
+                    Text(genre).frame(maxWidth: .infinity, alignment: .leading)
+                    Toggle("Partial match", isOn: Binding(
+                        get: { settings.allowlistPartialMatchGenres.contains(genre) },
+                        set: { enabled in
+                            if enabled {
+                                settings.allowlistPartialMatchGenres.insert(genre)
+                            } else {
+                                settings.allowlistPartialMatchGenres.remove(genre)
+                            }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .fixedSize()
+                    .help("Also matches genres containing \"\(genre)\" at a word boundary (e.g. \"\(genre) Instrumental\", \"Alt \(genre)\")")
+                    Button {
+                        settings.allowlistGenres.remove(at: idx)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
+                }
+                .frame(height: 22)
+            }
+            HStack {
+                TextField("e.g. Cortina", text: $newAllowlistGenre)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 13))
+                    .onSubmit { addAllowlistGenre() }
+                Button("Add") { addAllowlistGenre() }
+                    .buttonStyle(.bordered)
+                    .disabled(newAllowlistGenre.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    private func addAllowlistGenre() {
+        let trimmed = newAllowlistGenre.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !settings.allowlistGenres.contains(trimmed) else { return }
+        settings.allowlistGenres.append(trimmed)
+        newAllowlistGenre = ""
     }
 
     private func addDenylistGenre() {

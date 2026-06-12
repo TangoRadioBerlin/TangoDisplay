@@ -99,6 +99,26 @@ func runCortinaDetectorTests() {
         }
     }
 
+    suite("CortinaDetector — Allowlist partial match") {
+        let d = CortinaDetector(useAllowlist: true, allowlistGenres: ["cortina"],
+                                allowlistPartialGenres: ["cortina"],
+                                useDenylist: false, denylistGenres: [])
+        test("word-boundary partial matches") {
+            try expect(d.isCortina(genre: "Cortina Instrumental"))   // prefix + space
+            try expect(d.isCortina(genre: "Alt Cortina"))            // space + suffix
+            try expect(d.isCortina(genre: "cortina"))                // exact still works
+        }
+        test("non-word-boundary substring does NOT match") {
+            try expect(!d.isCortina(genre: "Cortinaland"))
+        }
+        test("partial off → only exact matches") {
+            let exactOnly = CortinaDetector(useAllowlist: true, allowlistGenres: ["cortina"],
+                                            useDenylist: false, denylistGenres: [])
+            try expect(!exactOnly.isCortina(genre: "Cortina Instrumental"))
+            try expect(exactOnly.isCortina(genre: "Cortina"))
+        }
+    }
+
     suite("CortinaDetector — Denylist only") {
         let d = CortinaDetector(useAllowlist: false, allowlistGenres: [],
                                 useDenylist: true, denylistGenres: ["tango", "vals", "milonga"])
