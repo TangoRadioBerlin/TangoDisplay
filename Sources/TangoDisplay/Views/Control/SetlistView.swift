@@ -680,7 +680,8 @@ struct SetlistView: View {
         let detector = settings.makeDetector()
         SetlistRowView(
             entry: entry,
-            isStopAfter: entry.id == setlist.stopAfterEntryID,
+            isStopAfter: entry.id == setlist.stopAfterEntryID
+                      || (entry.isPerformance && settings.stopAfterEachPerformanceTrack),
             isActivelyPlaying: activeEntryID == entry.id && isPlayerActive,
             isNextToPlay: entry.id == nextToPlayID,
             showYear: settings.showYear,
@@ -995,6 +996,20 @@ struct SetlistView: View {
                 }
             }
         }
+        // Performance: available for any non-fully-played track(s)
+        let performanceTargets = targets.filter { id in
+            guard let e = setlist.entries.first(where: { $0.id == id }) else { return false }
+            return e.state != .played || e.id == player.currentEntryID
+        }
+        if !performanceTargets.isEmpty {
+            let areAllPerformance = performanceTargets.allSatisfy { id in
+                setlist.entries.first(where: { $0.id == id })?.isPerformance ?? false
+            }
+            Divider()
+            Button(areAllPerformance ? "Remove Performance Mark" : "Mark as Performance") {
+                setlist.setPerformance(!areAllPerformance, for: performanceTargets)
+            }
+        }
         Divider()
         let singleEntry = targets.count == 1 ? setlist.entries.first(where: { targets.contains($0.id) }) : nil
         let hasTag = singleEntry.map { $0.tagColor != TagColor.none } ?? targets.contains(where: { id in
@@ -1044,7 +1059,8 @@ struct SetlistView: View {
                 albumArtist: e.track.albumArtist,
                 duration: e.duration,
                 isPlayed: e.state != .queued,
-                isLastTanda: e.isLastTanda
+                isLastTanda: e.isLastTanda,
+                isPerformance: e.isPerformance
             )
         }
         let report = SetlistReport(id: UUID(), name: name, exportDate: Date(), entries: entries)
@@ -1473,6 +1489,16 @@ struct SetlistRowView: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(genreTagColor.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+
+                if entry.isPerformance {
+                    Text("PERFORMANCE")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.red.opacity(0.12))
                         .clipShape(Capsule())
                 }
 

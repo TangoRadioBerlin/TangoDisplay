@@ -25,11 +25,12 @@ struct SetlistEntry: Identifiable, Codable {
     var isLastTanda: Bool = false      // marks this cortina as the last-tanda trigger
     var pluginConfigurationID: UUID? = nil
     var tagColor: TagColor = .none
+    var isPerformance: Bool = false    // track is part of a guest performance
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
     var autoGapSkipped: Bool = false   // transient: true when the first-track setting automatically skips the gap
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor
+        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance
         // autoGapApplied and autoGapSkipped are intentionally excluded — reset each playback session
     }
 
@@ -57,6 +58,7 @@ struct SetlistEntry: Identifiable, Codable {
         } else {
             tagColor = .none
         }
+        isPerformance = try c.decodeIfPresent(Bool.self, forKey: .isPerformance) ?? false
         autoGapApplied = false
         autoGapSkipped = false
     }
@@ -226,6 +228,14 @@ final class SetlistManager: ObservableObject {
         for id in ids {
             guard let i = entries.firstIndex(where: { $0.id == id }) else { continue }
             entries[i].tagColor = color
+        }
+        save()
+    }
+
+    func setPerformance(_ value: Bool, for ids: Set<UUID>) {
+        for id in ids {
+            guard let i = entries.firstIndex(where: { $0.id == id }) else { continue }
+            entries[i].isPerformance = value
         }
         save()
     }

@@ -198,6 +198,7 @@ final class RemoteControlBridge: NSObject, ObservableObject {
         case .idle:     return "idle"
         case .paused:   return "paused"
         case .override: return "override"
+        case .performance: return "performance"
         }
     }
 

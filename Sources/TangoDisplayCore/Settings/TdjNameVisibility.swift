@@ -18,10 +18,10 @@ public enum TdjNameVisibility: String, CaseIterable, Identifiable {
     }
 
     /// Whether the name should be visible in the given display mode.
-    /// `.playing` covers cortinas too — the DJ is still working the floor.
+    /// `.playing` covers cortinas and performances too — the DJ is still working the floor.
     public func isVisible(in mode: DisplayMode) -> Bool {
         switch self {
-        case .playing:    return mode == .playing || mode == .cortina
+        case .playing:    return mode == .playing || mode == .cortina || mode == .performance
         case .idlePaused: return mode == .idle || mode == .paused
         case .always:     return true
         }

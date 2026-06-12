@@ -278,6 +278,16 @@ struct PlayerSettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
 
+                    subgroupLabel("Performance")
+                    Text("Performance Mode switches the audience display to a custom background and text when marked performance tracks are playing. Use it for star-couple performances during social dance evenings.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Toggle("Stop after each performance track", isOn: $settings.stopAfterEachPerformanceTrack)
+                    Text("When enabled, playback stops automatically after each performance track so you can re-cue for the next performer.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    PerformanceSettingsView()
+
                     subgroupLabel("Mark as Played")
                     LabeledContent("Mark as played") {
                         Picker("", selection: $settings.markAsPlayedAfterCompletion) {

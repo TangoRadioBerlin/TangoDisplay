@@ -10,8 +10,14 @@ struct CortinaView: View {
     var showBounds: Bool = false
     var containerSize: CGSize = .zero
 
+    private var perfCortinaLines: [PerformanceTextLine] {
+        settings.performanceTextLines.filter { $0.showDuringCortina }
+    }
+    private var showPerformanceComing: Bool {
+        state.nextTrackIsPerformance && !perfCortinaLines.isEmpty
+    }
     private var showComingUp: Bool {
-        profile.showNextTrackDuringCortina && state.nextTrack != nil
+        profile.showNextTrackDuringCortina && state.nextTrack != nil && !showPerformanceComing
     }
     private var showLastTanda: Bool {
         isLastTandaActive && profile.showLastTandaLabel && !settings.lastTandaLabel.isEmpty
@@ -30,6 +36,7 @@ struct CortinaView: View {
                         cortinaTrackItem(item)
                     }
                     cortinaYearView
+                    performanceComingView
                     ForEach(profile.cortinaItemOrder, id: \.self) { item in
                         comingUpItem(item)
                     }
@@ -47,7 +54,7 @@ struct CortinaView: View {
                         cortinaYearView
                     }
 
-                    if showComingUp || showLastTanda || showLastPlayedC {
+                    if showPerformanceComing || showComingUp || showLastTanda || showLastPlayedC {
                         // Divider between cortina section and coming-up section
                         Rectangle()
                             .fill(profile.genreSwiftUIColor.opacity(0.3))
@@ -56,6 +63,7 @@ struct CortinaView: View {
 
                         // Coming-up section
                         VStack(spacing: 12) {
+                            performanceComingView
                             ForEach(profile.cortinaItemOrder, id: \.self) { item in
                                 comingUpItem(item)
                             }
@@ -133,6 +141,39 @@ struct CortinaView: View {
                                 showBounds: showBounds, containerSize: containerSize)
             }
         }
+    }
+
+    /// Pre-announces a performance: replaces the normal coming-up details with the
+    /// DJ-configured performance lines (those marked "show during cortina").
+    @ViewBuilder
+    private var performanceComingView: some View {
+        if showPerformanceComing {
+            VStack(spacing: 12) {
+                if !settings.nextUpLabel.isEmpty {
+                    Text(settings.nextUpLabel)
+                        .font(profile.nextUpLabelFont(containerSize.height))
+                        .tracking(4)
+                        .foregroundColor(profile.nextUpLabelSwiftUIColor)
+                }
+                ForEach(perfCortinaLines) { line in
+                    let resolved = resolvePerformancePlaceholders(line.text, track: state.nextTrack)
+                    if !resolved.isEmpty {
+                        Text(resolved)
+                            .font(performanceLineFont(line))
+                            .foregroundColor(Color(hex: line.colorHex))
+                            .multilineTextAlignment(.center)
+                            .shadow(color: .black.opacity(0.4), radius: 3, x: 0, y: 1)
+                    }
+                }
+            }
+        }
+    }
+
+    private func performanceLineFont(_ line: PerformanceTextLine) -> Font {
+        if line.fontName == "System" || line.fontName.isEmpty {
+            return .system(size: line.fontSize)
+        }
+        return .custom(line.fontName, size: line.fontSize)
     }
 
     @ViewBuilder

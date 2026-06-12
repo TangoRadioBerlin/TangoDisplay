@@ -10,6 +10,7 @@ struct PresentationView: View {
     @State private var bgImage: NSImage? = nil
     @State private var artistBgImage: NSImage? = nil
     @State private var genreBgImage: NSImage? = nil
+    @State private var performanceBgImage: NSImage? = nil
 
     private var activeProfile: AppearanceProfile {
         if let draft = appState.draftProfile { return draft }
@@ -101,12 +102,25 @@ struct PresentationView: View {
         .background {
             // Rendered behind the content by SwiftUI's layout contract —
             // .background() can never cover its parent view.
-            // Priority: artist background → genre background → profile background → background colour.
+            // Priority (performance mode): performance background → background colour.
+            // Priority (normal mode): artist background → genre background → profile background → background colour.
             ZStack {
                 activeProfile.backgroundSwiftUIColor
                     .ignoresSafeArea()
 
-                if let img = artistBgImage {
+                let showPerformanceBg = appState.displayState.mode == .performance
+                    || (appState.displayState.mode == .cortina
+                        && appState.displayState.nextTrackIsPerformance
+                        && settings.performanceBackgroundDuringCortina)
+                if showPerformanceBg {
+                    if let img = performanceBgImage {
+                        Image(nsImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .clipped()
+                            .ignoresSafeArea()
+                    }
+                } else if let img = artistBgImage {
                     Image(nsImage: img)
                         .resizable()
                         .scaledToFill()
@@ -168,6 +182,10 @@ struct PresentationView: View {
             reloadBgImage()
             reloadArtistBgImage()
             reloadGenreBgImage()
+            reloadPerformanceBgImage()
+        }
+        .onChange(of: settings.performanceBackgroundImageFilename) { _ in
+            reloadPerformanceBgImage()
         }
         .onChange(of: activeProfile) { _ in
             reloadBgImage()
@@ -184,6 +202,14 @@ struct PresentationView: View {
         .onChange(of: appState.displayState.currentTrack?.genre ?? "") { _ in
             reloadGenreBgImage()
         }
+    }
+
+    private func reloadPerformanceBgImage() {
+        guard let filename = settings.performanceBackgroundImageFilename else {
+            performanceBgImage = nil
+            return
+        }
+        performanceBgImage = NSImage(contentsOf: appState.profileStore.imageURL(for: filename))
     }
 
     private func tdjNameVisible(in mode: DisplayMode) -> Bool {
@@ -335,6 +361,11 @@ struct PresentationView: View {
                 settings: appState.settings,
                 profile: activeProfile,
                 containerSize: containerSize
+            )
+        case .performance:
+            PerformanceView(
+                currentTrack: appState.displayState.currentTrack,
+                settings: appState.settings
             )
         case .override:
             overrideView(containerSize: containerSize)

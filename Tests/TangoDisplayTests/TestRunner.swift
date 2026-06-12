@@ -2164,6 +2164,30 @@ func runTdjNameTests() {
     }
 }
 
+// MARK: - Performance mode tests
+
+func runPerformanceModeTests() {
+    suite("DisplayState — performance mode") {
+        test("performance is a distinct display mode") {
+            try expect(DisplayMode.performance != DisplayMode.playing)
+            let s = DisplayState(mode: .performance,
+                                 currentTrack: Track(title: "T", artist: "A", genre: "Tango",
+                                                     persistentID: "p"))
+            try expectEqual(s.mode, .performance)
+        }
+        test("nextTrackIsPerformance defaults to false and round-trips") {
+            try expect(!DisplayState().nextTrackIsPerformance)
+            let s = DisplayState(mode: .cortina, nextTrackIsPerformance: true)
+            try expect(s.nextTrackIsPerformance)
+        }
+        test("TdjNameVisibility treats performance like an active mode") {
+            try expect(TdjNameVisibility.playing.isVisible(in: .performance))
+            try expect(!TdjNameVisibility.idlePaused.isVisible(in: .performance))
+            try expect(TdjNameVisibility.always.isVisible(in: .performance))
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2787,6 +2811,7 @@ runDraftPersistenceTests()
 runLayoutModeTests()
 runPinRateLimiterTests()
 runTdjNameTests()
+runPerformanceModeTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
