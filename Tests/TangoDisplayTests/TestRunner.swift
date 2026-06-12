@@ -1932,6 +1932,116 @@ func runDraftPersistenceTests() {
     }
 }
 
+// MARK: - Layout mode tests
+
+func runLayoutModeTests() {
+    suite("AppearanceProfile — layout mode") {
+        test("absent layoutMode decodes as flow (existing profiles unchanged)") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            var dict = try JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(profile)) as! [String: Any]
+            dict.removeValue(forKey: "layoutMode")
+            let data = try JSONSerialization.data(withJSONObject: dict)
+            let decoded = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(decoded.layoutMode, .flow)
+        }
+
+        test("absolute layoutMode round-trips") {
+            var profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            profile.layoutMode = .absolute
+            let data = try JSONEncoder().encode(profile)
+            let decoded = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(decoded.layoutMode, .absolute)
+        }
+
+        test("unknown layoutMode raw value falls back to flow") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            var dict = try JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(profile)) as! [String: Any]
+            dict["layoutMode"] = "floating"
+            let data = try JSONSerialization.data(withJSONObject: dict)
+            let decoded = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(decoded.layoutMode, .flow)
+        }
+
+        test("new profiles default to flow") {
+            try expectEqual(AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false).layoutMode, .flow)
+            try expectEqual(AppearanceProfile.classic.layoutMode, .flow)
+        }
+    }
+
+    suite("AppearanceProfile — flow → absolute conversion") {
+        test("measured flow centres become absolute anchors on top of existing offsets") {
+            var profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            profile.titleOffsetY = 5
+            // Title's un-offset flow centre measured at (960, 324) → −20 % from screen centre
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["title": ElementCenter(x: 960, y: 324)],
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted.layoutMode, .absolute)
+            try expectEqual(converted.titleOffsetY, -15.0)   // 5 + (−20)
+            try expectEqual(converted.titleOffsetX, 0.0)     // centred → no delta
+        }
+
+        test("unmeasured elements keep their offsets unchanged") {
+            var profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            profile.singerOffsetY = 12
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["title": ElementCenter(x: 960, y: 540)],
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted.singerOffsetY, 12.0)
+        }
+
+        test("genre position overrides shift by the same delta") {
+            var profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            var bg = GenreBackground(genreKey: "Vals")
+            bg.positions = PositionSet(
+                placements: ["title": ElementPlacement(offsetX: 0, offsetY: 10)])
+            profile.genreBackgrounds = [bg]
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["title": ElementCenter(x: 960, y: 324)],   // −20 % delta
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted.genreBackgrounds[0].positions?.placements["title"]?.offsetY, -10.0)
+        }
+
+        test("converting an already-absolute profile is a no-op") {
+            var profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            profile.layoutMode = .absolute
+            profile.titleOffsetY = -15
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["title": ElementCenter(x: 960, y: 324)],
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted, profile)
+        }
+    }
+
+    suite("AbsoluteLayoutMath — measured centre → offset percent") {
+        test("container centre maps to 0/0") {
+            try expectEqual(AbsoluteLayoutMath.offsetXPercent(centerX: 960, containerWidth: 1920), 0)
+            try expectEqual(AbsoluteLayoutMath.offsetYPercent(centerY: 540, containerHeight: 1080), 0)
+        }
+
+        test("corners map to ±50") {
+            try expectEqual(AbsoluteLayoutMath.offsetXPercent(centerX: 0, containerWidth: 1920), -50)
+            try expectEqual(AbsoluteLayoutMath.offsetYPercent(centerY: 1080, containerHeight: 1080), 50)
+        }
+
+        test("round-trips with the positioned() point conversion") {
+            // positioned() computes points as offset/100 × container; converting a measured
+            // centre back must land on the same offset.
+            let offset = AbsoluteLayoutMath.offsetXPercent(centerX: 1344, containerWidth: 1920) // +20%
+            try expectEqual(offset, 20)
+            let points = offset / 100.0 * 1920.0
+            try expectEqual(960 + points, 1344)
+        }
+
+        test("zero-sized container yields 0 instead of NaN") {
+            try expectEqual(AbsoluteLayoutMath.offsetXPercent(centerX: 100, containerWidth: 0), 0)
+            try expectEqual(AbsoluteLayoutMath.offsetYPercent(centerY: 100, containerHeight: 0), 0)
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2552,6 +2662,7 @@ runProfileStoreResilienceTests()
 runProfileFormatContractTests()
 runProfileExporterTests()
 runDraftPersistenceTests()
+runLayoutModeTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"

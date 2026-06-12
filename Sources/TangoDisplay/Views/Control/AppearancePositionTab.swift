@@ -9,6 +9,7 @@ struct AppearancePositionTab: View {
     @Binding var working: AppearanceProfile
     @EnvironmentObject var appState: AppState
     @State private var selectedGenreID: UUID? = nil
+    @State private var measuredCenters: [String: ElementCenter] = [:]
 
     private var genreEntries: [GenreBackground] {
         let dance = working.genreBackgrounds.filter { !$0.isCortinaEntry }
@@ -42,6 +43,35 @@ struct AppearancePositionTab: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Mode", selection: $working.layoutMode) {
+                    ForEach(LayoutMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                if working.layoutMode == .flow {
+                    Button("Convert to absolute layout (keep current look)") {
+                        working = working.convertedToAbsoluteLayout(
+                            measuredCenters: measuredCenters,
+                            containerWidth: LayoutMeasurementView.measurementSize.width,
+                            containerHeight: LayoutMeasurementView.measurementSize.height)
+                    }
+                    .disabled(measuredCenters.isEmpty)
+                }
+            } header: {
+                Text("Layout mode")
+                    .foregroundColor(ControlTheme.accent)
+            } footer: {
+                Label {
+                    Text(working.layoutMode == .flow
+                         ? "Stacked: elements flow vertically, so a track without e.g. a singer shifts the others. Convert keeps the current look but anchors every element independently — empty fields then never move their neighbours. Check genre-specific positions and the cortina preview afterwards."
+                         : "Absolute: every element is anchored at screen centre plus its offsets; empty fields never shift the others. Switching back to Stacked keeps the converted offsets, so positions will jump — usually you want to stay absolute.")
+                } icon: {
+                    Image(systemName: "info.circle")
+                }
+            }
+
             Section {
                 if genreEntries.isEmpty {
                     Text("Add genre backgrounds in the Artwork & Motion tab to save genre-specific positions.")
@@ -154,11 +184,29 @@ struct AppearancePositionTab: View {
             }
         }
         .formStyle(.grouped)
+        .background(measurementHost)
         .onAppear {
             appState.showElementBoundsInPreview = true
             if selectedGenreID == nil { selectedGenreID = genreEntries.first?.id }
         }
         .onDisappear { appState.showElementBoundsInPreview = false }
+    }
+
+    /// Invisible full-size flow rendering used to seed the flow→absolute conversion.
+    /// Mounted only while the profile is still in flow mode.
+    @ViewBuilder
+    private var measurementHost: some View {
+        if working.layoutMode == .flow {
+            LayoutMeasurementView(profile: working, settings: appState.settings) {
+                measuredCenters = $0
+            }
+            .fixedSize()
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .frame(width: 0, height: 0)
+            .clipped()
+        }
     }
 
     @ViewBuilder

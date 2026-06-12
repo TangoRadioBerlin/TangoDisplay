@@ -277,6 +277,11 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     /// rather than absolute points. Older profiles (flag absent) are migrated from points on decode.
     public var relativeArtworkPosition: Bool
 
+    /// How the presentation lays out text elements (see `LayoutMode`). In `.absolute`
+    /// the *Offset percentages anchor each element from screen centre, so an empty
+    /// field never shifts its neighbours. Older profiles (key absent) stay `.flow`.
+    public var layoutMode: LayoutMode = .flow
+
     public init(id: UUID, name: String, isBuiltIn: Bool,
                 titleFontName: String = "System", titleFontSize: Double = 7,
                 titleFontBold: Bool = true, titleFontItalic: Bool = false,
@@ -866,6 +871,14 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
             albumArtworkOffsetX = albumArtworkOffsetX / 1920.0 * 100.0
             albumArtworkOffsetY = albumArtworkOffsetY / 1080.0 * 100.0
             relativeArtworkPosition = true
+        }
+
+        // Layout mode — absent in older profiles (flow), unknown raw values from
+        // newer versions fall back to flow rather than failing the decode.
+        if let rawLayout = try c.decodeIfPresent(String.self, forKey: .layoutMode) {
+            layoutMode = LayoutMode(rawValue: rawLayout) ?? .flow
+        } else {
+            layoutMode = .flow
         }
 
         // Migration: append items to order lists if absent

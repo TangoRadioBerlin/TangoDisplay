@@ -75,6 +75,17 @@ extension AppearanceProfile {
     func overrideTextFont(_ h: CGFloat) -> Font { font(name: overrideTextFontName, size: overrideTextFontSize / 100 * Double(h), bold: overrideTextFontBold, italic: overrideTextFontItalic) }
 }
 
+/// Collects the un-offset flow frames of presentation elements, keyed by
+/// `AppearanceProfile.positionElementKeys`. Read by the flow→absolute layout
+/// conversion to seed absolute anchors from the measured flow rendering.
+struct ElementFramesPreferenceKey: PreferenceKey {
+    static var defaultValue: [String: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [String: Anchor<CGRect>],
+                       nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 extension View {
     /// Positions a presentation text element using resolution-relative coordinates.
     ///
@@ -83,11 +94,14 @@ extension View {
     /// - `boxWidth` is a percentage (0…100) of the container width. 0 = full width (no box).
     /// - `hAlign` controls the text's alignment within its box (or the full width when no box).
     /// - When a box is set, the text is constrained to that width and auto-shrinks on a single line.
+    /// - `measureKey` reports the element's *pre-offset* bounds via
+    ///   `ElementFramesPreferenceKey` for the flow→absolute layout conversion.
     @ViewBuilder
     func positioned(offsetX: Double, offsetY: Double,
                     boxWidth: Double = 0, hAlign: TextHAlignment = .center,
                     lineLimit: Int? = nil, autoShrink: Bool = false,
-                    showBounds: Bool = false, containerSize: CGSize) -> some View {
+                    showBounds: Bool = false, containerSize: CGSize,
+                    measureKey: String? = nil) -> some View {
         let offX = offsetX / 100.0 * containerSize.width
         let offY = offsetY / 100.0 * containerSize.height
         let boxPts = boxWidth / 100.0 * containerSize.width
@@ -100,6 +114,7 @@ extension View {
                 .minimumScaleFactor(0.1)
                 .frame(width: boxPts, alignment: frameAlign)
                 .elementBoundsOverlay(showBounds)
+                .measuredElementFrame(measureKey)
                 .offset(x: offX, y: offY)
         } else {
             self
@@ -108,7 +123,19 @@ extension View {
                 .minimumScaleFactor(autoShrink ? 0.5 : 1)
                 .frame(maxWidth: .infinity, alignment: frameAlign)
                 .elementBoundsOverlay(showBounds)
+                .measuredElementFrame(measureKey)
                 .offset(x: offX, y: offY)
+        }
+    }
+
+    /// Attaches the element's bounds anchor under the given key (no-op when nil).
+    /// Applied before `.offset` so the reported frame is the pure flow position.
+    @ViewBuilder
+    fileprivate func measuredElementFrame(_ key: String?) -> some View {
+        if let key {
+            self.anchorPreference(key: ElementFramesPreferenceKey.self, value: .bounds) { [key: $0] }
+        } else {
+            self
         }
     }
 
