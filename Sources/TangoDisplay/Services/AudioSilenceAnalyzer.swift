@@ -30,7 +30,9 @@ actor AudioSilenceAnalyzer {
     // MARK: - Private
 
     private static let overviewRate: Double = 100.0   // samples per second
-    private static let silenceThreshold: UInt8 = 4    // on 0–255 scale (matches Embrace)
+    private static let silenceThreshold: UInt8 = 2    // on 0–255 scale ≈ −42 dBFS peak
+                                                      // (was 4 ≈ −36 dB, Embrace-compatible, but
+                                                      // that classified quiet fade-outs as silence)
     private static let scanWindow: Double = 10.0       // seconds to scan at each end
 
     private static func analyzeFile(url: URL) -> Result {
@@ -128,7 +130,8 @@ actor AudioSilenceAnalyzer {
                 if abs > peak { peak = abs }
             }
         }
-        // Clamp to 0–255; peak of 1.0 → 255
-        return UInt8(min(255, Int(peak * 255)))
+        // Clamp to 0–255; peak of 1.0 → 255. Round to nearest — truncating would
+        // push borderline-quiet chunks below the silence threshold.
+        return UInt8(min(255, Int((peak * 255).rounded())))
     }
 }

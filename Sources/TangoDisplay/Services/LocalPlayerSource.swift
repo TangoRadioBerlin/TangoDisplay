@@ -114,6 +114,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     private var currentPaddingFrames: AVAudioFrameCount = 0
     private var prevTrackSilenceAtEnd: Double = 0   // populated by background analysis of the track that just played
     private var nextTrackSilenceAtStart: Double = 0 // populated by background analysis of the upcoming track
+    private var nextTrackSilenceAtEnd: Double = 0   // upcoming track's trailing silence (for force-trim mode)
     private var audioStartSampleTime: AVAudioFramePosition = 0
     private var silencePending: Bool = false
 
@@ -802,17 +803,37 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 && !setlist.entries.contains(where: { $0.state == .played })
             var autoGapApplied = false
             var autoGapSkipped = false
+            let sr = file.fileFormat.sampleRate
+            var startFrame: AVAudioFramePosition = 0
+            var segmentFrames = AVAudioFrameCount(file.length)
+
             if !bypassAutoGap && !entry.ignoresAutoGap && settings.autoGapEnabled {
                 if settings.autoGapIgnoreFirstTrack && isFirstTrack {
                     autoGapSkipped = true
                 } else {
-                    let padding = computeAutoGapPadding(
-                        prevSilenceAtEnd: prevTrackSilenceAtEnd,
-                        nextSilenceAtStart: nextTrackSilenceAtStart,
-                        minimumSilence: settings.autoGapDuration
+                    let plan = autoGapPlan(
+                        leading: nextTrackSilenceAtStart,
+                        trailing: nextTrackSilenceAtEnd,
+                        prevEnd: prevTrackSilenceAtEnd,
+                        target: settings.autoGapDuration,
+                        force: settings.autoGapForceLength
                     )
-                    if padding > 0 {
-                        let frames = AVAudioFrameCount(padding * file.fileFormat.sampleRate)
+                    // Force mode: trim this track's leading/trailing silence by playing only the
+                    // audible segment. elapsed/duration track the real file position via seekOffset.
+                    if settings.autoGapForceLength {
+                        let lead = AVAudioFramePosition(max(0, plan.skipLeading) * sr)
+                        let trail = AVAudioFramePosition(max(0, plan.trimTrailing) * sr)
+                        let audible = file.length - lead - trail
+                        if audible > 0 {
+                            startFrame = lead
+                            segmentFrames = AVAudioFrameCount(audible)
+                            seekOffset = plan.skipLeading
+                            elapsed = plan.skipLeading
+                            duration = Double(file.length - trail) / sr
+                        }
+                    }
+                    if plan.insert > 0 {
+                        let frames = AVAudioFrameCount(plan.insert * sr)
                         silencePending = true
                         let entryID = entry.id
                         playerNode.scheduleBuffer(
@@ -838,8 +859,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             setlist.setAutoGapSkipped(id: entry.id, skipped: autoGapSkipped)
             prevTrackSilenceAtEnd = 0
             nextTrackSilenceAtStart = 0
+            nextTrackSilenceAtEnd = 0
 
-            playerNode.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+            playerNode.scheduleSegment(file, startingFrame: startFrame, frameCount: segmentFrames,
+                                       at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
                 DispatchQueue.main.async { self?.handleTrackEnd(generation: gen) }
             }
 
@@ -849,15 +872,21 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             Task { [weak self] in
                 let result = await AudioSilenceAnalyzer.shared.analyze(url: currentURL)
                 let nextStart: Double
+                let nextEnd: Double
                 if let nextURL {
                     let nextResult = await AudioSilenceAnalyzer.shared.analyze(url: nextURL)
                     nextStart = nextResult.silenceAtStart
+                    nextEnd = nextResult.silenceAtEnd
                 } else {
                     nextStart = 0
+                    nextEnd = 0
                 }
                 await MainActor.run { [weak self] in
-                    self?.prevTrackSilenceAtEnd = result.silenceAtEnd
-                    self?.nextTrackSilenceAtStart = nextStart
+                    // Discard results from a superseded load (e.g. user skipped before analysis finished).
+                    guard let self, self.scheduleGeneration == gen else { return }
+                    self.prevTrackSilenceAtEnd = result.silenceAtEnd
+                    self.nextTrackSilenceAtStart = nextStart
+                    self.nextTrackSilenceAtEnd = nextEnd
                 }
             }
         } catch {
@@ -890,16 +919,6 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     private func handleTrackEnd(generation: Int) {
         guard generation == scheduleGeneration else { return }
         skipNext()
-    }
-
-    private func computeAutoGapPadding(
-        prevSilenceAtEnd: Double,
-        nextSilenceAtStart: Double,
-        minimumSilence: Double
-    ) -> Double {
-        guard minimumSilence > 0 else { return 0 }
-        let existing = prevSilenceAtEnd + nextSilenceAtStart
-        return max(0, minimumSilence - existing)
     }
 
     private func makeSilenceBuffer(format: AVAudioFormat, frameCount: AVAudioFrameCount) -> AVAudioPCMBuffer {

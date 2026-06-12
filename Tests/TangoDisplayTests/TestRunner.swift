@@ -2099,8 +2099,73 @@ func runGenrePositionOverrideTests() {
     }
 }
 
+// MARK: - Auto-gap planning
+
+func runAutoGapTests() {
+    suite("autoGapPlan — pad mode (force off)") {
+        test("tops up to target using existing silence") {
+            let p = autoGapPlan(leading: 1.0, trailing: 9.0, prevEnd: 0.5, target: 4.0, force: false)
+            try expect(abs(p.insert - 2.5) < 0.001)   // 4 − (0.5 + 1.0)
+            try expect(p.skipLeading == 0 && p.trimTrailing == 0)
+        }
+        test("no padding when existing silence already meets target") {
+            let p = autoGapPlan(leading: 3.0, trailing: 0, prevEnd: 2.0, target: 4.0, force: false)
+            try expect(p.insert == 0)                  // existing 5 ≥ 4
+        }
+        test("target <= 0 inserts nothing") {
+            try expect(autoGapPlan(leading: 0, trailing: 0, prevEnd: 0, target: 0, force: false).insert == 0)
+        }
+        test("does not trim long trailing silence in pad mode") {
+            let p = autoGapPlan(leading: 0, trailing: 12.0, prevEnd: 0, target: 4.0, force: false)
+            try expect(p.trimTrailing == 0)            // 12s end silence stays → gap too long
+        }
+    }
+
+    suite("autoGapPlan — force mode") {
+        test("inserts exactly target and trims both ends minus the safety margin") {
+            let p = autoGapPlan(leading: 2.0, trailing: 9.0, prevEnd: 0.5, target: 4.0, force: true)
+            try expect(abs(p.insert - 4.0) < 0.001)
+            try expect(abs(p.skipLeading - 1.5) < 0.001)    // 2.0 − 0.5 margin
+            try expect(abs(p.trimTrailing - 8.5) < 0.001)   // 9.0 − 0.5 margin
+        }
+        test("negative inputs are clamped") {
+            let p = autoGapPlan(leading: -1, trailing: -1, prevEnd: -1, target: 3.0, force: true)
+            try expect(p.insert == 3.0 && p.skipLeading == 0 && p.trimTrailing == 0)
+        }
+    }
+
+    suite("autoGapPlan — safety margin (don't cut quiet music)") {
+        test("default margin is half a second") {
+            try expectEqual(AutoGapPlan.defaultSafetyMargin, 0.5)
+        }
+        test("detected silence shorter than the margin is never trimmed") {
+            let p = autoGapPlan(leading: 0.3, trailing: 0.4, prevEnd: 0, target: 2.0, force: true)
+            try expect(p.skipLeading == 0, "0.3 s leading silence must survive a 0.5 s margin")
+            try expect(p.trimTrailing == 0, "0.4 s trailing silence must survive a 0.5 s margin")
+        }
+        test("explicit zero margin reproduces the exact-trim behaviour") {
+            let p = autoGapPlan(leading: 2.0, trailing: 9.0, prevEnd: 0, target: 4.0,
+                                force: true, safetyMargin: 0)
+            try expect(abs(p.skipLeading - 2.0) < 0.001)
+            try expect(abs(p.trimTrailing - 9.0) < 0.001)
+        }
+        test("pad mode is unaffected by the margin (it never cuts)") {
+            let p = autoGapPlan(leading: 1.0, trailing: 9.0, prevEnd: 0.5, target: 4.0, force: false)
+            try expect(abs(p.insert - 2.5) < 0.001)   // unchanged: 4 − (0.5 + 1.0)
+            try expect(p.skipLeading == 0 && p.trimTrailing == 0)
+        }
+        test("negative margin is treated as zero") {
+            let p = autoGapPlan(leading: 1.0, trailing: 1.0, prevEnd: 0, target: 2.0,
+                                force: true, safetyMargin: -3)
+            try expect(abs(p.skipLeading - 1.0) < 0.001)
+            try expect(abs(p.trimTrailing - 1.0) < 0.001)
+        }
+    }
+}
+
 // MARK: - Main entry point
 
+runAutoGapTests()
 runCortinaDetectorTests()
 runTandaTrackerTests()
 runProfileStoreTests()

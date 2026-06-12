@@ -255,7 +255,7 @@ struct PlayerSettingsView: View {
                     subgroupLabel("Auto-gap")
                     Toggle("Auto-gap", isOn: $settings.autoGapEnabled)
                     if settings.autoGapEnabled {
-                        LabeledContent("Minimum gap") {
+                        LabeledContent(settings.autoGapForceLength ? "Gap length" : "Minimum gap") {
                             HStack(spacing: 8) {
                                 Slider(value: $settings.autoGapDuration, in: 0.5...5, step: 0.5)
                                 Text("\(settings.autoGapDuration, specifier: "%.1f")s")
@@ -263,6 +263,12 @@ struct PlayerSettingsView: View {
                                     .frame(width: 36, alignment: .trailing)
                             }
                         }
+                        Toggle("Force exact gap length", isOn: $settings.autoGapForceLength)
+                        Text(settings.autoGapForceLength
+                             ? "Trims excess silence so the gap is exactly the set length (built-in player)."
+                             : "Adds silence only up to the minimum; longer existing gaps are left as-is.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                         Toggle("Skip gap before first track", isOn: $settings.autoGapIgnoreFirstTrack)
                         Text("The first track in the setlist starts immediately with no silence preroll.")
                             .font(.caption)
