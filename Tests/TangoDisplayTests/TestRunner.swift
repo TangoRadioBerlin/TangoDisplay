@@ -1574,6 +1574,215 @@ func runProfileStoreImageTests() {
     }
 }
 
+// MARK: - ProfileStore resilience tests
+
+func runProfileStoreResilienceTests() {
+    func tmpProfilesDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TangoDisplayTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("profiles", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Valid profile JSON with one field corrupted so decoding throws
+    /// (genreBackgrounds entry missing its required keys).
+    func corruptedProfileData() throws -> Data {
+        let profile = AppearanceProfile(id: UUID(), name: "Broken", isBuiltIn: false)
+        let data = try JSONEncoder().encode(profile)
+        var dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        dict["genreBackgrounds"] = [["bad": true]]
+        return try JSONSerialization.data(withJSONObject: dict)
+    }
+
+    suite("ProfileStore — resilient load") {
+        test("decode failure is recorded, sibling profiles still load") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try store.save(AppearanceProfile(id: UUID(), name: "Good", isBuiltIn: false))
+            let badURL = profilesURL.appendingPathComponent("broken.json")
+            try Data("not valid json".utf8).write(to: badURL)
+
+            let fresh = ProfileStore(storeURL: profilesURL)
+            fresh.load()
+            try expectEqual(fresh.userProfiles.count, 1)
+            try expectEqual(fresh.loadFailures.count, 1)
+            try expectEqual(fresh.loadFailures[0].fileURL.lastPathComponent, "broken.json")
+            try expect(!fresh.loadFailures[0].message.isEmpty, "Failure message should not be empty")
+        }
+
+        test("invalid nested structure fails that profile only") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try store.save(AppearanceProfile(id: UUID(), name: "Good", isBuiltIn: false))
+            try corruptedProfileData().write(to: profilesURL.appendingPathComponent("nested-bad.json"))
+
+            let fresh = ProfileStore(storeURL: profilesURL)
+            fresh.load()
+            try expectEqual(fresh.userProfiles.count, 1)
+            try expectEqual(fresh.userProfiles[0].name, "Good")
+            try expectEqual(fresh.loadFailures.count, 1)
+        }
+
+        test("original file is left byte-identical and a quarantine copy is made") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let badData = Data("{\"truncated\": ".utf8)
+            let badURL = profilesURL.appendingPathComponent("damaged.json")
+            try badData.write(to: badURL)
+
+            let store = ProfileStore(storeURL: profilesURL)
+            store.load()
+            try expectEqual(store.loadFailures.count, 1)
+            // Original untouched
+            try expectEqual(try Data(contentsOf: badURL), badData)
+            // Quarantine copy exists with identical contents
+            let quarantineURL = profilesURL
+                .appendingPathComponent("unloadable", isDirectory: true)
+                .appendingPathComponent("damaged.json")
+            try expect(FileManager.default.fileExists(atPath: quarantineURL.path),
+                       "Expected quarantine copy at \(quarantineURL.path)")
+            try expectEqual(try Data(contentsOf: quarantineURL), badData)
+        }
+
+        test("loadFailures resets on a subsequent clean load") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let badURL = profilesURL.appendingPathComponent("junk.json")
+            try Data("junk".utf8).write(to: badURL)
+
+            let store = ProfileStore(storeURL: profilesURL)
+            store.load()
+            try expectEqual(store.loadFailures.count, 1)
+            try FileManager.default.removeItem(at: badURL)
+            store.load()
+            try expectEqual(store.loadFailures.count, 0)
+        }
+
+        test("quarantine directory is not scanned as profiles") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            try Data("junk".utf8).write(to: profilesURL.appendingPathComponent("junk.json"))
+
+            let store = ProfileStore(storeURL: profilesURL)
+            store.load()   // creates quarantine copy
+            store.load()   // must not pick up unloadable/junk.json as a profile file
+            try expectEqual(store.loadFailures.count, 1)
+            try expectEqual(store.userProfiles.count, 0)
+        }
+    }
+}
+
+// MARK: - Profile format contract tests (frozen JSON fixtures)
+
+func runProfileFormatContractTests() {
+    // Frozen pre-v3.24 profile format: offsets/box widths in absolute points
+    // (1920×1080 baseline), font sizes in points, no relative* flags.
+    // Must keep decoding and migrating forever.
+    let legacyFixture = """
+    {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "name": "Legacy",
+      "isBuiltIn": false,
+      "titleFontName": "System",
+      "titleFontSize": 96,
+      "artistFontName": "System",
+      "artistFontSize": 64,
+      "genreFontName": "System",
+      "genreFontSize": 54,
+      "backgroundColor": "#000000",
+      "titleColor": "#FFFFFF",
+      "artistColor": "#CCCCCC",
+      "genreColor": "#FFD700",
+      "transitionStyle": "fade",
+      "transitionDuration": 0.5,
+      "titleOffsetX": 192,
+      "titleOffsetY": 108,
+      "artistOffsetX": 0,
+      "artistOffsetY": -54,
+      "titleBoxWidth": 960
+    }
+    """
+
+    func decode(_ json: String) throws -> AppearanceProfile {
+        try JSONDecoder().decode(AppearanceProfile.self, from: Data(json.utf8))
+    }
+
+    suite("Profile format contract — frozen fixtures") {
+        test("pre-relative fixture migrates points to percent") {
+            let p = try decode(legacyFixture)
+            try expectEqual(p.titleOffsetX, 10.0)       // 192 / 1920 × 100
+            try expectEqual(p.titleOffsetY, 10.0)       // 108 / 1080 × 100
+            try expectEqual(p.artistOffsetY, -5.0)      // -54 / 1080 × 100
+            try expectEqual(p.titleBoxWidth, 50.0)      // 960 / 1920 × 100
+            try expect(p.relativePositions, "Migration must set relativePositions")
+        }
+
+        test("pre-relative fixture keeps the old offset-means-left-aligned look") {
+            let p = try decode(legacyFixture)
+            try expectEqual(p.titleHAlign, .leading)    // had non-zero X offset
+            try expectEqual(p.artistHAlign, .center)    // X offset was 0
+        }
+
+        test("pre-relative fixture migrates font points to levels") {
+            let p = try decode(legacyFixture)
+            try expectEqual(p.titleFontSize, 9.0)       // round(96 / 1080 × 100)
+            try expectEqual(p.artistFontSize, 6.0)      // round(64 / 1080 × 100)
+            try expect(p.relativeFontSizes, "Migration must set relativeFontSizes")
+        }
+
+        test("current format with genre position overrides round-trips") {
+            var profile = AppearanceProfile(id: UUID(), name: "Current", isBuiltIn: false)
+            profile.titleOffsetX = -12.5
+            profile.singerOffsetY = 7.25
+            var bg = GenreBackground(genreKey: "Vals")
+            bg.positions = PositionSet(
+                placements: ["title": ElementPlacement(offsetX: 5, offsetY: -10,
+                                                       boxWidth: 40, hAlign: .trailing)],
+                artwork: ArtworkPlacement(offsetX: 1, offsetY: 2, scale: 1.5, opacity: 0.8))
+            profile.genreBackgrounds = [bg]
+
+            // First decode may canonicalise item-order arrays; position data must survive as-is.
+            let data = try JSONEncoder().encode(profile)
+            let decoded = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(decoded.titleOffsetX, -12.5)
+            try expectEqual(decoded.singerOffsetY, 7.25)
+            try expectEqual(decoded.genreBackgrounds, profile.genreBackgrounds)
+
+            // From canonical form onward, round-trips must be exact (no re-applied migration)
+            let data2 = try JSONEncoder().encode(decoded)
+            let decoded2 = try JSONDecoder().decode(AppearanceProfile.self, from: data2)
+            try expectEqual(decoded2, decoded)
+        }
+
+        test("unknown singerSource raw value falls back to comments") {
+            let json = legacyFixture.replacingOccurrences(
+                of: "\"transitionStyle\": \"fade\",",
+                with: "\"transitionStyle\": \"fade\",\n  \"singerSource\": \"artist\",")
+            let p = try decode(json)
+            try expectEqual(p.singerSource, .comments)
+        }
+
+        test("unknown transitionStyle raw value falls back to fade") {
+            let json = legacyFixture.replacingOccurrences(
+                of: "\"transitionStyle\": \"fade\"",
+                with: "\"transitionStyle\": \"sparkle\"")
+            let p = try decode(json)
+            try expectEqual(p.transitionStyle, .fade)
+        }
+
+        test("missing transitionStyle falls back to fade") {
+            let json = legacyFixture.replacingOccurrences(
+                of: "\"transitionStyle\": \"fade\",",
+                with: "")
+            let p = try decode(json)
+            try expectEqual(p.transitionStyle, .fade)
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2190,6 +2399,8 @@ runAutoBypassRuleTests()
 runRelativePositionTests()
 runPresentationOptionTests()
 runGenrePositionOverrideTests()
+runProfileStoreResilienceTests()
+runProfileFormatContractTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"

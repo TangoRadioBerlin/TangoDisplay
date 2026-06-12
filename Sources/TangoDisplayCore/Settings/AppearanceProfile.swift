@@ -597,7 +597,13 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         genreColor           = try c.decode(String.self,          forKey: .genreColor)
         yearColor            = try c.decodeIfPresent(String.self,  forKey: .yearColor)         ?? "#AAAAAA"
         trackCounterColor    = try c.decodeIfPresent(String.self, forKey: .trackCounterColor) ?? "#AAAAAA"
-        transitionStyle      = try c.decode(TransitionStyle.self, forKey: .transitionStyle)
+        // Tolerant decode: an unknown raw value (file from a newer app version, or hand-edited)
+        // must not fail the whole profile — fall back to the default style.
+        if let rawTransition = try c.decodeIfPresent(String.self, forKey: .transitionStyle) {
+            transitionStyle = TransitionStyle(rawValue: rawTransition) ?? .fade
+        } else {
+            transitionStyle = .fade
+        }
         transitionDuration   = try c.decode(Double.self,          forKey: .transitionDuration)
         // New fields — absent in older JSON files, fall back to defaults
         backgroundImageFilename = try c.decodeIfPresent(String.self,  forKey: .backgroundImageFilename)

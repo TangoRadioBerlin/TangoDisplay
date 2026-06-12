@@ -7,6 +7,11 @@ import Combine
 public final class ProfileStore: ObservableObject {
     @Published public var userProfiles: [AppearanceProfile] = []
 
+    /// Files in the store that could not be decoded on the last `load()`.
+    /// The originals are never modified or deleted; a copy is placed in
+    /// `profiles/unloadable/` so the data survives any later rewrite.
+    @Published public private(set) var loadFailures: [ProfileLoadFailure] = []
+
     private let storeURL: URL
 
     public init(storeURL: URL? = nil) {
@@ -55,19 +60,45 @@ public final class ProfileStore: ObservableObject {
             files = try FileManager.default.contentsOfDirectory(
                 at: storeURL,
                 includingPropertiesForKeys: nil
-            ).filter { $0.pathExtension == "json" }
+            ).filter { $0.pathExtension == "json" && !$0.hasDirectoryPath }
         } catch {
             files = []
         }
 
         let decoder = JSONDecoder()
-        userProfiles = files.compactMap { url in
-            guard let data = try? Data(contentsOf: url),
-                  let profile = try? decoder.decode(AppearanceProfile.self, from: data),
-                  !profile.isBuiltIn
-            else { return nil }
-            return profile
-        }.sorted { $0.name < $1.name }
+        var loaded: [AppearanceProfile] = []
+        var failures: [ProfileLoadFailure] = []
+        for url in files {
+            do {
+                let data = try Data(contentsOf: url)
+                let profile = try decoder.decode(AppearanceProfile.self, from: data)
+                guard !profile.isBuiltIn else { continue }
+                loaded.append(profile)
+            } catch {
+                failures.append(ProfileLoadFailure(fileURL: url,
+                                                   message: String(describing: error)))
+                quarantineCopy(of: url)
+            }
+        }
+        userProfiles = loaded.sorted { $0.name < $1.name }
+        loadFailures = failures
+    }
+
+    /// Directory holding copies of files that failed to decode.
+    public var quarantineDirectoryURL: URL {
+        storeURL.appendingPathComponent("unloadable", isDirectory: true)
+    }
+
+    /// Copies an unloadable file into the quarantine directory (never moves or
+    /// deletes the original). Best-effort: failures here must not block loading.
+    private func quarantineCopy(of url: URL) {
+        let dir = quarantineDirectoryURL
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent(url.lastPathComponent)
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try? FileManager.default.removeItem(at: dest)
+        }
+        try? FileManager.default.copyItem(at: url, to: dest)
     }
 
     // MARK: - Save
@@ -120,6 +151,17 @@ public final class ProfileStore: ObservableObject {
         guard !FileManager.default.fileExists(atPath: storeURL.path) else { return }
         try? FileManager.default.createDirectory(at: storeURL,
                                                   withIntermediateDirectories: true)
+    }
+}
+
+/// Describes a profile file that could not be decoded during `load()`.
+public struct ProfileLoadFailure: Equatable {
+    public let fileURL: URL
+    public let message: String
+
+    public init(fileURL: URL, message: String) {
+        self.fileURL = fileURL
+        self.message = message
     }
 }
 
