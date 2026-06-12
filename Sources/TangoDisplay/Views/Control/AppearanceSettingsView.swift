@@ -35,6 +35,8 @@ struct AppearanceSettingsView: View {
     @State private var danceDragItem: DisplayTextItem? = nil
     @State private var cortinaTrackDragItem: DisplayTextItem? = nil
     @State private var cortinaUpDragItem: DisplayTextItem? = nil
+    @State private var draftSaveWork: DispatchWorkItem? = nil
+    @State private var didRestoreDraft = false
 
     private var workingIsBuiltIn: Bool { working.isBuiltIn }
     private var isDirty: Bool { working != savedWorking }
@@ -58,6 +60,7 @@ struct AppearanceSettingsView: View {
         }
         .onAppear {
             loadWorkingCopy()
+            restoreDraftIfPresent()
             appState.draftProfile = working
         }
         .onDisappear {
@@ -71,6 +74,7 @@ struct AppearanceSettingsView: View {
         .onChange(of: working) { _ in
             appState.draftProfile = working
             appState.hasUnsavedAppearanceChanges = isDirty
+            scheduleDraftSave()
         }
         .sheet(isPresented: $showingSaveSheet) { saveSheet }
     }
@@ -204,7 +208,8 @@ struct AppearanceSettingsView: View {
                     .font(.caption)
                     .transition(.opacity)
             } else if isDirty {
-                Label("Unsaved changes", systemImage: "exclamationmark.circle.fill")
+                Label(didRestoreDraft ? "Restored unsaved changes" : "Unsaved changes",
+                      systemImage: "exclamationmark.circle.fill")
                     .foregroundColor(.orange)
                     .font(.caption)
                     .transition(.opacity)
@@ -489,6 +494,7 @@ struct AppearanceSettingsView: View {
             appState.hasUnsavedAppearanceChanges = false
             appState.draftProfile = working
         }
+        clearDraftState()
         showSaveConfirmation()
     }
 
@@ -502,6 +508,42 @@ struct AppearanceSettingsView: View {
         try? appState.profileStore.save(newProfile)
         appState.settings.activeProfileID = newProfile.id
         showingSaveSheet = false
+        clearDraftState()
+    }
+
+    // MARK: - Draft persistence (unsaved edits survive restarts/updates)
+
+    /// Debounced write of the working copy to the on-disk draft, so unsaved
+    /// position tweaks survive a quit or an update-forced relaunch.
+    private func scheduleDraftSave() {
+        draftSaveWork?.cancel()
+        guard isDirty else {
+            appState.profileStore.clearDraft()
+            return
+        }
+        let snapshot = working
+        let store = appState.profileStore
+        let work = DispatchWorkItem { try? store.saveDraft(snapshot) }
+        draftSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    /// Restores a persisted draft of the currently selected profile (drafts of
+    /// other profiles stay on disk untouched until that profile is opened).
+    private func restoreDraftIfPresent() {
+        guard let draft = appState.profileStore.loadDraft(),
+              draft.id == working.id,
+              draft != working
+        else { return }
+        working = draft
+        appState.hasUnsavedAppearanceChanges = true
+        didRestoreDraft = true
+    }
+
+    private func clearDraftState() {
+        draftSaveWork?.cancel()
+        appState.profileStore.clearDraft()
+        didRestoreDraft = false
     }
 
     private func showSaveConfirmation() {

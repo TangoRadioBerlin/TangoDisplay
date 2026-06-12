@@ -145,6 +145,40 @@ public final class ProfileStore: ObservableObject {
         userProfiles.removeAll { $0.id == profile.id }
     }
 
+    // MARK: - Draft persistence
+
+    /// Where unsaved working-copy edits are persisted so they survive an app
+    /// restart (updates always force one). Lives next to the profiles folder.
+    public var draftURL: URL {
+        storeURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("draft-profile.json")
+    }
+
+    /// Persists the in-progress (unsaved) working profile. Unlike `save(_:)`,
+    /// built-ins are allowed here — a draft is exactly the case of editing one.
+    public func saveDraft(_ profile: AppearanceProfile) throws {
+        let parent = draftURL.deletingLastPathComponent()
+        if !FileManager.default.fileExists(atPath: parent.path) {
+            try? FileManager.default.createDirectory(at: parent,
+                                                     withIntermediateDirectories: true)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        try encoder.encode(profile).write(to: draftURL, options: .atomic)
+    }
+
+    /// Returns the persisted draft, or nil when there is none or it can't be
+    /// decoded (a corrupt draft must never block app start).
+    public func loadDraft() -> AppearanceProfile? {
+        guard let data = try? Data(contentsOf: draftURL) else { return nil }
+        return try? JSONDecoder().decode(AppearanceProfile.self, from: data)
+    }
+
+    public func clearDraft() {
+        try? FileManager.default.removeItem(at: draftURL)
+    }
+
     // MARK: - Helpers
 
     private func createDirectoryIfNeeded() {

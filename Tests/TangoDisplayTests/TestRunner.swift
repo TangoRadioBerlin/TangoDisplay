@@ -1864,6 +1864,74 @@ func runProfileExporterTests() {
     }
 }
 
+// MARK: - Draft persistence tests
+
+func runDraftPersistenceTests() {
+    func tmpProfilesDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TangoDisplayTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("profiles", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    suite("ProfileStore — draft persistence") {
+        test("draft round-trips across store instances") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            var draft = AppearanceProfile(id: UUID(), name: "WIP", isBuiltIn: false)
+            draft.titleOffsetX = 33.5
+
+            let store = ProfileStore(storeURL: profilesURL)
+            try store.saveDraft(draft)
+
+            let fresh = ProfileStore(storeURL: profilesURL)
+            let restored = fresh.loadDraft()
+            try expectNotNil(restored)
+            try expectEqual(restored?.id, draft.id)
+            try expectEqual(restored?.titleOffsetX, 33.5)
+        }
+
+        test("draft of a built-in profile is allowed (unsaved edits to built-ins)") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try store.saveDraft(AppearanceProfile.classic)
+            let restored = store.loadDraft()
+            try expectNotNil(restored)
+            try expectEqual(restored?.id, AppearanceProfile.classic.id)
+        }
+
+        test("clearDraft removes the draft") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try store.saveDraft(AppearanceProfile(id: UUID(), name: "WIP", isBuiltIn: false))
+            store.clearDraft()
+            try expectNil(store.loadDraft())
+            store.clearDraft()   // idempotent on missing file
+        }
+
+        test("corrupt draft returns nil without throwing") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try Data("garbage".utf8).write(to: store.draftURL)
+            try expectNil(store.loadDraft())
+        }
+
+        test("draft file is not picked up by load() as a profile") {
+            let profilesURL = tmpProfilesDir()
+            defer { try? FileManager.default.removeItem(at: profilesURL.deletingLastPathComponent()) }
+            let store = ProfileStore(storeURL: profilesURL)
+            try store.saveDraft(AppearanceProfile(id: UUID(), name: "WIP", isBuiltIn: false))
+            store.load()
+            try expectEqual(store.userProfiles.count, 0)
+            try expectEqual(store.loadFailures.count, 0)
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2483,6 +2551,7 @@ runGenrePositionOverrideTests()
 runProfileStoreResilienceTests()
 runProfileFormatContractTests()
 runProfileExporterTests()
+runDraftPersistenceTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
