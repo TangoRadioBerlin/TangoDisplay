@@ -1,14 +1,20 @@
+import OSLog
 import SwiftUI
 import TangoDisplayCore
+import UniformTypeIdentifiers
 
 struct ProfilesView: View {
     @EnvironmentObject var appState: AppState
     @State private var showingSaveSheet = false
     @State private var newProfileName = ""
     @State private var profileToDelete: AppearanceProfile? = nil
+    @State private var importErrorMessage: String? = nil
+
+    private static let log = Logger(subsystem: "TangoDisplay", category: "profiles")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            loadFailureBanner
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     sectionHeader("Built-in")
@@ -36,6 +42,12 @@ struct ProfilesView: View {
             Divider()
 
             HStack {
+                Button("Import Profile…") { importProfile() }
+                    .buttonStyle(.bordered)
+                    .padding()
+                Text("Background images are not included in profile exports.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 Spacer()
                 Button("Save Current Settings As New Profile…") {
                     newProfileName = ""
@@ -49,6 +61,17 @@ struct ProfilesView: View {
             saveSheet
         }
         .alert(
+            "Import failed",
+            isPresented: Binding(
+                get: { importErrorMessage != nil },
+                set: { if !$0 { importErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importErrorMessage ?? "")
+        }
+        .alert(
             "Delete \"\(profileToDelete?.name ?? "Profile")\"?",
             isPresented: Binding(
                 get: { profileToDelete != nil },
@@ -59,6 +82,61 @@ struct ProfilesView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This profile will be permanently removed.")
+        }
+    }
+
+    /// Shown when profile files on disk failed to decode on the last load. The
+    /// originals are never deleted; copies sit in the store's quarantine folder.
+    @ViewBuilder
+    private var loadFailureBanner: some View {
+        let failures = appState.profileStore.loadFailures
+        if !failures.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.yellow)
+                Text("\(failures.count) profile file\(failures.count == 1 ? "" : "s") could not be loaded. The files were not deleted.")
+                    .font(.caption)
+                Spacer()
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting(failures.map(\.fileURL))
+                }
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.yellow.opacity(0.12))
+        }
+    }
+
+    private func exportProfile(_ profile: AppearanceProfile) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(profile.name).json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try ProfileExporter.exportData(profile).write(to: url, options: .atomic)
+        } catch {
+            Self.log.error("Profile export failed: \(String(describing: error))")
+            importErrorMessage = "Could not write the file: \(error.localizedDescription)"
+        }
+    }
+
+    private func importProfile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose an exported TangoDisplay profile"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let existingIDs = Set(appState.profileStore.userProfiles.map(\.id))
+            let imported = try ProfileExporter.importProfile(from: data, existingIDs: existingIDs)
+            try appState.profileStore.save(imported)
+            appState.settings.activeProfileID = imported.id
+        } catch {
+            Self.log.error("Profile import failed: \(String(describing: error))")
+            importErrorMessage = "This file is not a valid TangoDisplay profile."
         }
     }
 
@@ -90,6 +168,13 @@ struct ProfilesView: View {
             }
 
             Spacer()
+
+            Button { exportProfile(profile) } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Export this profile as a JSON file")
 
             if !isBuiltIn {
                 Button { profileToDelete = profile } label: {

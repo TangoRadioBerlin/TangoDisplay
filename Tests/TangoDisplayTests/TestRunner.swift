@@ -1783,6 +1783,87 @@ func runProfileFormatContractTests() {
     }
 }
 
+// MARK: - Profile export/import tests
+
+func runProfileExporterTests() {
+    func sampleProfile() -> AppearanceProfile {
+        var profile = AppearanceProfile(id: UUID(), name: "Milonga Night", isBuiltIn: false)
+        profile.titleOffsetX = -12.5
+        profile.singerOffsetY = 7.25
+        profile.backgroundImageFilename = "bg.jpg"
+        profile.artistBackgrounds = [ArtistBackground(artistName: "Di Sarli", imageFilename: "disarli.jpg")]
+        var bg = GenreBackground(genreKey: "Vals", imageFilename: "vals.jpg")
+        bg.positions = PositionSet(
+            placements: ["title": ElementPlacement(offsetX: 5, offsetY: -10, boxWidth: 40, hAlign: .trailing)],
+            artwork: ArtworkPlacement(offsetX: 1, offsetY: 2, scale: 1.5, opacity: 0.8))
+        profile.genreBackgrounds = [bg]
+        return profile
+    }
+
+    suite("ProfileExporter — export/import") {
+        test("round-trip preserves positions and genre overrides") {
+            let original = sampleProfile()
+            let data = try ProfileExporter.exportData(original)
+            let imported = try ProfileExporter.importProfile(from: data, existingIDs: [])
+            try expectEqual(imported.id, original.id)
+            try expectEqual(imported.name, "Milonga Night")
+            try expectEqual(imported.titleOffsetX, -12.5)
+            try expectEqual(imported.singerOffsetY, 7.25)
+            try expectEqual(imported.genreBackgrounds.count, 1)
+            try expectEqual(imported.genreBackgrounds[0].positions,
+                            original.genreBackgrounds[0].positions)
+        }
+
+        test("import strips image filenames (files do not travel with the JSON)") {
+            let data = try ProfileExporter.exportData(sampleProfile())
+            let imported = try ProfileExporter.importProfile(from: data, existingIDs: [])
+            try expectNil(imported.backgroundImageFilename)
+            try expectNil(imported.artistBackgrounds[0].imageFilename)
+            try expectNil(imported.genreBackgrounds[0].imageFilename)
+        }
+
+        test("ID collision with an existing profile gets a fresh UUID") {
+            let original = sampleProfile()
+            let data = try ProfileExporter.exportData(original)
+            let imported = try ProfileExporter.importProfile(from: data, existingIDs: [original.id])
+            try expect(imported.id != original.id, "Expected a new UUID on collision")
+        }
+
+        test("built-in export imports as an editable user profile with a new ID") {
+            let data = try ProfileExporter.exportData(AppearanceProfile.classic)
+            let imported = try ProfileExporter.importProfile(from: data, existingIDs: [])
+            try expect(!imported.isBuiltIn, "Imported profile must not be built-in")
+            try expect(imported.id != AppearanceProfile.classic.id,
+                       "Built-in IDs are reserved — import must assign a new UUID")
+        }
+
+        test("legacy-format export imports with migration applied") {
+            let legacy = """
+            {"id": "11111111-2222-3333-4444-555555555555", "name": "Old", "isBuiltIn": false,
+             "titleFontName": "System", "titleFontSize": 96,
+             "artistFontName": "System", "artistFontSize": 64,
+             "genreFontName": "System", "genreFontSize": 54,
+             "backgroundColor": "#000000", "titleColor": "#FFFFFF",
+             "artistColor": "#CCCCCC", "genreColor": "#FFD700",
+             "transitionStyle": "fade", "transitionDuration": 0.5,
+             "titleOffsetX": 192}
+            """
+            let imported = try ProfileExporter.importProfile(from: Data(legacy.utf8), existingIDs: [])
+            try expectEqual(imported.titleOffsetX, 10.0)
+            try expect(imported.relativePositions, "Migration must apply on import")
+        }
+
+        test("garbage data throws") {
+            do {
+                _ = try ProfileExporter.importProfile(from: Data("nope".utf8), existingIDs: [])
+                try expect(false, "Expected import to throw on garbage data")
+            } catch is DecodingError {
+                // Expected
+            }
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2401,6 +2482,7 @@ runPresentationOptionTests()
 runGenrePositionOverrideTests()
 runProfileStoreResilienceTests()
 runProfileFormatContractTests()
+runProfileExporterTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
