@@ -67,6 +67,9 @@ struct TangoDisplayApp: App {
                 WindowManager.showControlWindow()
                 NotificationCenter.default.post(name: .navigateToSetlist, object: nil)
             }
+            Button("Show Waveform") {
+                WaveformWindowManager.show(appState: appState)
+            }
             Divider()
             Button("Quit TangoDisplay") {
                 NSApp.terminate(nil)

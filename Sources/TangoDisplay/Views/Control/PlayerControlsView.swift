@@ -71,6 +71,15 @@ struct PlayerControlsView: View {
                     .buttonStyle(.plain)
                     .help("Scroll setlist to current track")
                 }
+                Button {
+                    WaveformWindowManager.show(appState: appState)
+                } label: {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Show waveform window")
             }
             .frame(maxWidth: .infinity, alignment: .center)
             Text(track?.artist ?? " ")
