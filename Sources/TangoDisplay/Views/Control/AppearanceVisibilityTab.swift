@@ -33,6 +33,13 @@ struct AppearanceVisibilityTab: View {
                     Toggle("", isOn: $working.showLastPlayedDance).labelsHidden().frame(width: 70, alignment: .center)
                     Toggle("", isOn: $working.showLastPlayedCortina).labelsHidden().frame(width: 70, alignment: .center)
                 }
+                if working.showLastPlayedDance || working.showLastPlayedCortina {
+                    HStack {
+                        Text("Last Played prefix").foregroundColor(.secondary)
+                        TextField("prev. Song: ", text: $settings.lastPlayedPrefix)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
                 Divider()
                 Toggle("Show next track during cortina", isOn: $working.showNextTrackDuringCortina)
             } header: {

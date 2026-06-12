@@ -130,6 +130,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     public var showCortinaTrackDuringCortina: Bool
     public var showCortinaTrackArtist: Bool
     public var showCortinaTrackTitle:  Bool
+    public var showCortinaTrackYear:   Bool
+    public var showCortinaLabel:       Bool
 
     // Cortina label font/colour (was hardcoded to titleFont + artistColor)
     public var cortinaLabelFontName:   String
@@ -188,6 +190,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
 
     // Genre text casing on the display (uppercase / original / title case)
     public var genreTextCase: GenreTextCase
+    // Wrap the year in parentheses, e.g. "(1947)".
+    public var yearInParentheses: Bool
 
     // Album-artwork edge-fade style (radial vs. edges)
     public var albumArtworkFadeStyle: AlbumArtFadeStyle
@@ -316,6 +320,7 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 albumArtworkEdgeFade: Double = 0.0,
                 albumArtworkFadeStyle: AlbumArtFadeStyle = .radial,
                 genreTextCase: GenreTextCase = .uppercase,
+                yearInParentheses: Bool = false,
                 lastPlayedFontName: String = "System", lastPlayedFontSize: Double = 3,
                 lastPlayedFontBold: Bool = false, lastPlayedFontItalic: Bool = false,
                 lastPlayedColor: String = "#AAAAAA",
@@ -346,6 +351,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 showCortinaTrackDuringCortina: Bool = false,
                 showCortinaTrackArtist: Bool = true,
                 showCortinaTrackTitle: Bool = true,
+                showCortinaTrackYear: Bool = false,
+                showCortinaLabel: Bool = true,
                 cortinaLabelFontName: String = "System", cortinaLabelFontSize: Double = 7,
                 cortinaLabelFontBold: Bool = false, cortinaLabelFontItalic: Bool = false,
                 cortinaLabelColor: String = "#FFFFFF",
@@ -453,6 +460,7 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.albumArtworkEdgeFade = albumArtworkEdgeFade
         self.albumArtworkFadeStyle = albumArtworkFadeStyle
         self.genreTextCase = genreTextCase
+        self.yearInParentheses = yearInParentheses
         self.danceItemOrder = danceItemOrder
         self.cortinaItemOrder = cortinaItemOrder
         self.showSinger = showSinger
@@ -479,6 +487,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.showCortinaTrackDuringCortina = showCortinaTrackDuringCortina
         self.showCortinaTrackArtist = showCortinaTrackArtist
         self.showCortinaTrackTitle  = showCortinaTrackTitle
+        self.showCortinaTrackYear   = showCortinaTrackYear
+        self.showCortinaLabel       = showCortinaLabel
         self.cortinaLabelFontName   = cortinaLabelFontName
         self.cortinaLabelFontSize   = cortinaLabelFontSize
         self.cortinaLabelFontBold   = cortinaLabelFontBold
@@ -615,6 +625,7 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         albumArtworkEdgeFade    = try c.decodeIfPresent(Double.self,  forKey: .albumArtworkEdgeFade)    ?? 0.0
         albumArtworkFadeStyle   = try c.decodeIfPresent(AlbumArtFadeStyle.self, forKey: .albumArtworkFadeStyle) ?? .radial
         genreTextCase           = try c.decodeIfPresent(GenreTextCase.self,     forKey: .genreTextCase)           ?? .uppercase
+        yearInParentheses       = try c.decodeIfPresent(Bool.self,              forKey: .yearInParentheses)       ?? false
         showSinger              = try c.decodeIfPresent(Bool.self,         forKey: .showSinger)              ?? false
         // Tolerant decode: an older profile may carry a removed raw value (e.g. "artist") — map it to the
         // default rather than failing the whole profile decode.
@@ -668,6 +679,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         showCortinaTrackDuringCortina = (try c.decodeIfPresent(Bool.self, forKey: .showCortinaTrackDuringCortina)) ?? false
         showCortinaTrackArtist        = (try c.decodeIfPresent(Bool.self, forKey: .showCortinaTrackArtist))        ?? true
         showCortinaTrackTitle         = (try c.decodeIfPresent(Bool.self, forKey: .showCortinaTrackTitle))         ?? true
+        showCortinaTrackYear          = (try c.decodeIfPresent(Bool.self, forKey: .showCortinaTrackYear))          ?? false
+        showCortinaLabel              = (try c.decodeIfPresent(Bool.self, forKey: .showCortinaLabel))              ?? true
 
         cortinaLabelFontName   = try c.decodeIfPresent(String.self, forKey: .cortinaLabelFontName)   ?? titleFontName
         cortinaLabelFontSize   = try c.decodeIfPresent(Double.self, forKey: .cortinaLabelFontSize)   ?? titleFontSize

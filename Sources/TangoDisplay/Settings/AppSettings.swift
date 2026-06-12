@@ -43,6 +43,9 @@ final class AppSettings: ObservableObject {
     @Published var lastTandaLabel: String {
         didSet { UserDefaults.standard.set(lastTandaLabel, forKey: kPrefix + "lastTandaLabel") }
     }
+    @Published var lastPlayedPrefix: String {
+        didSet { UserDefaults.standard.set(lastPlayedPrefix, forKey: kPrefix + "lastPlayedPrefix") }
+    }
 
     // MARK: - Cortina rules
 
@@ -322,6 +325,7 @@ final class AppSettings: ObservableObject {
         nextUpLabel     = ud.string(forKey: kPrefix + "nextUpLabel")     ?? "COMING UP"
         idleMessage     = ud.string(forKey: kPrefix + "idleMessage")     ?? ""
         lastTandaLabel  = ud.string(forKey: kPrefix + "lastTandaLabel")  ?? ""
+        lastPlayedPrefix = ud.string(forKey: kPrefix + "lastPlayedPrefix") ?? "prev. Song: "
         useAllowlist  = ud.object(forKey: kPrefix + "useAllowlist")
                            .flatMap { $0 as? Bool } ?? true
         allowlistGenres = AppSettings.parseGenres(

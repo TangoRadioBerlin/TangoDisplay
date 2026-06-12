@@ -1965,6 +1965,9 @@ func runPresentationOptionTests() {
             try expectEqual(p.albumArtworkFadeStyle, .radial)
             try expect(!p.showLastPlayedDance)
             try expect(!p.showLastPlayedCortina)
+            try expect(!p.yearInParentheses)
+            try expect(p.showCortinaLabel)
+            try expect(!p.showCortinaTrackYear)
         }
         test("DisplayTextItem includes lastPlayed; order lists contain it") {
             try expect(DisplayTextItem.allCases.contains(.lastPlayed))

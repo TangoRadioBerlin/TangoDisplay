@@ -27,6 +27,7 @@ struct AppearanceTextTab: View {
                     .labelsHidden()
                     .pickerStyle(.segmented)
                 }
+                Toggle("Year in parentheses, e.g. (1947)", isOn: $working.yearInParentheses)
                 fontRow("Year",          name: $working.yearFontName,         size: $working.yearFontSize,
                         bold: $working.yearFontBold,         italic: $working.yearFontItalic)
                 HStack {
