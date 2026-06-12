@@ -1794,6 +1794,26 @@ func runAutoBypassRuleTests() {
             try expect(yearOnly.shouldBeActive(genre: "anything", year: 1940))
             try expect(!yearOnly.shouldBeActive(genre: "anything", year: nil))
         }
+        test("matchMode .any (OR): bypass when genre OR year matches") {
+            // bypass when (genre = Cortina) OR (older than 1950)
+            let r = AutoBypassRule(matchGenres: ["Cortina"], yearThreshold: 1950,
+                                   yearMode: .olderThan, action: .bypass, matchMode: .any)
+            try expect(!r.shouldBeActive(genre: "Cortina", year: 2020))  // genre hit → bypass
+            try expect(!r.shouldBeActive(genre: "Pop", year: 1940))      // year hit → bypass
+            try expect(!r.shouldBeActive(genre: "Cortina", year: 1940))  // both → bypass
+            try expect(r.shouldBeActive(genre: "Pop", year: 2020))       // neither → active
+        }
+        test("matchMode .all (AND) default still requires both") {
+            let r = AutoBypassRule(matchGenres: ["Cortina"], yearThreshold: 1950,
+                                   yearMode: .olderThan, action: .bypass)  // default .all
+            try expect(!r.shouldBeActive(genre: "Cortina", year: 1940))  // both → bypass
+            try expect(r.shouldBeActive(genre: "Cortina", year: 2020))   // only genre → active (not bypassed)
+        }
+        test(".any ignores unset conditions") {
+            let genreOnlyAny = AutoBypassRule(matchGenres: ["Cortina"], action: .bypass, matchMode: .any)
+            try expect(!genreOnlyAny.shouldBeActive(genre: "Cortina", year: 2020))  // genre hit → bypass
+            try expect(genreOnlyAny.shouldBeActive(genre: "Pop", year: 1900))       // no genre, year unset → active
+        }
     }
 
     suite("AudioUnitChainSlot — autoBypassRule coding") {

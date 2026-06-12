@@ -332,6 +332,7 @@ private struct AutoBypassRuleEditor: View {
     @State private var yearEnabled = false
     @State private var yearText = ""
     @State private var yearMode: YearComparison = .olderThan
+    @State private var matchMode: MatchMode = .all
 
     var body: some View {
         DisclosureGroup("Auto-bypass (genre / year)") {
@@ -377,6 +378,15 @@ private struct AutoBypassRuleEditor: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+
+                    if !genresText.trimmingCharacters(in: .whitespaces).isEmpty && yearEnabled {
+                        Picker("Combine", selection: $matchMode) {
+                            Text("Genre AND Year").tag(MatchMode.all)
+                            Text("Genre OR Year").tag(MatchMode.any)
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: matchMode) { _ in commit() }
+                    }
                 }
             }
             .padding(.top, 4)
@@ -391,6 +401,7 @@ private struct AutoBypassRuleEditor: View {
         if let rule = slot.autoBypassRule {
             enabled = true
             action = rule.action
+            matchMode = rule.matchMode
             genresText = rule.matchGenres.joined(separator: ", ")
             if let t = rule.yearThreshold {
                 yearEnabled = true
@@ -413,7 +424,8 @@ private struct AutoBypassRuleEditor: View {
         let rule = AutoBypassRule(matchGenres: genres,
                                   yearThreshold: threshold,
                                   yearMode: yearMode,
-                                  action: action)
+                                  action: action,
+                                  matchMode: matchMode)
         player.updateSlotAutoBypassRule(id: slot.id, rule: rule)
     }
 }
