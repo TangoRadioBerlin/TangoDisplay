@@ -55,7 +55,10 @@ struct AppearanceVisibilityTab: View {
 
             Section {
                 orderRows(items: $working.danceItemOrder, dragItem: $danceDragItem,
-                          filter: { $0 != .trackCounter || settings.trackCounterPosition == .centre })
+                          filter: {
+                              ($0 != .trackCounter || settings.trackCounterPosition == .centre) &&
+                              ($0 != .tdjName       || settings.tdjNamePosition == .centre)
+                          })
             } header: {
                 orderHeader("Dance Tracks")
             }
@@ -67,7 +70,8 @@ struct AppearanceVisibilityTab: View {
             }
 
             Section {
-                orderRows(items: $working.cortinaItemOrder, dragItem: $cortinaUpDragItem)
+                orderRows(items: $working.cortinaItemOrder, dragItem: $cortinaUpDragItem,
+                          filter: { $0 != .tdjName || settings.tdjNamePosition == .centre })
             } header: {
                 orderHeader("Cortinas — Coming Up")
             } footer: {

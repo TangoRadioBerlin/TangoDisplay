@@ -130,6 +130,18 @@ struct PlayingView: View {
                                 lineLimit: 2, autoShrink: true,
                                 showBounds: showBounds, containerSize: containerSize, measureKey: "lastPlayed")
             }
+        case .tdjName:
+            if settings.showTdjName,
+               settings.tdjNamePosition == .centre,
+               !settings.tdjName.isEmpty,
+               settings.tdjNameVisibility.isVisible(in: .playing) {
+                Text(settings.tdjName)
+                    .font(profile.tdjNameFont(containerSize.height))
+                    .foregroundColor(profile.tdjNameSwiftUIColor)
+                    .positioned(offsetX: profile.tdjNameOffsetX, offsetY: profile.tdjNameOffsetY,
+                                boxWidth: profile.tdjNameBoxWidth, hAlign: profile.tdjNameHAlign,
+                                showBounds: showBounds, containerSize: containerSize, measureKey: "tdjName")
+            }
         case .cortinaLabel, .cortinaArtist, .cortinaTitle, .nextUpLabel:
             EmptyView()
         }

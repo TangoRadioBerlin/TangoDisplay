@@ -47,6 +47,8 @@ struct AppearanceTextTab: View {
                         bold: $working.trackCounterFontBold, italic: $working.trackCounterFontItalic)
                 fontRow("Last Played",   name: $working.lastPlayedFontName,   size: $working.lastPlayedFontSize,
                         bold: $working.lastPlayedFontBold,   italic: $working.lastPlayedFontItalic)
+                fontRow("TDJ Name",      name: $working.tdjNameFontName,      size: $working.tdjNameFontSize,
+                        bold: $working.tdjNameFontBold,      italic: $working.tdjNameFontItalic)
             } header: {
                 Text("Fonts")
                     .foregroundColor(ControlTheme.accent)

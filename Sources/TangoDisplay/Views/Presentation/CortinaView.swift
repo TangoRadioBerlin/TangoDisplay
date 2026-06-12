@@ -230,6 +230,18 @@ struct CortinaView: View {
                                 lineLimit: 2, autoShrink: true,
                                 showBounds: showBounds, containerSize: containerSize)
             }
+        case .tdjName:
+            if settings.showTdjName,
+               settings.tdjNamePosition == .centre,
+               !settings.tdjName.isEmpty,
+               settings.tdjNameVisibility.isVisible(in: .cortina) {
+                Text(settings.tdjName)
+                    .font(profile.tdjNameFont(containerSize.height))
+                    .foregroundColor(profile.tdjNameSwiftUIColor)
+                    .positioned(offsetX: profile.tdjNameOffsetX, offsetY: profile.tdjNameOffsetY,
+                                boxWidth: profile.tdjNameBoxWidth, hAlign: profile.tdjNameHAlign,
+                                showBounds: showBounds, containerSize: containerSize)
+            }
         default:
             EmptyView()
         }

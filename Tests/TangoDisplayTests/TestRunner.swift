@@ -1430,7 +1430,7 @@ func runAppearanceProfileMigrationTests() {
         test("cortina order gains nextUpLabel (front), title, and lastTandaLabel") {
             let p = try decode(minimalJSON)
             try expectEqual(p.cortinaItemOrder,
-                            [.nextUpLabel, .genre, .artist, .year, .title, .singer, .lastTandaLabel, .lastPlayed])
+                            [.nextUpLabel, .genre, .artist, .year, .title, .singer, .lastTandaLabel, .lastPlayed, .tdjName])
         }
     }
 
@@ -2087,6 +2087,83 @@ func runPinRateLimiterTests() {
     }
 }
 
+// MARK: - TDJ name tests
+
+func runTdjNameTests() {
+    suite("TdjNameVisibility — visibility per display mode") {
+        test("playing: visible during playing and cortina only") {
+            try expect(TdjNameVisibility.playing.isVisible(in: .playing))
+            try expect(TdjNameVisibility.playing.isVisible(in: .cortina))
+            try expect(!TdjNameVisibility.playing.isVisible(in: .idle))
+            try expect(!TdjNameVisibility.playing.isVisible(in: .paused))
+        }
+        test("idlePaused: visible during idle and paused only") {
+            try expect(!TdjNameVisibility.idlePaused.isVisible(in: .playing))
+            try expect(!TdjNameVisibility.idlePaused.isVisible(in: .cortina))
+            try expect(TdjNameVisibility.idlePaused.isVisible(in: .idle))
+            try expect(TdjNameVisibility.idlePaused.isVisible(in: .paused))
+        }
+        test("always: visible in every mode") {
+            for mode in [DisplayMode.playing, .cortina, .idle, .paused, .override] {
+                try expect(TdjNameVisibility.always.isVisible(in: mode))
+            }
+        }
+        test("unknown raw value round-trip safety") {
+            try expectNil(TdjNameVisibility(rawValue: "sometimes"))
+        }
+    }
+
+    suite("DisplayTextItem — tdjName integration") {
+        test("tdjName is a known case with a display name") {
+            try expect(DisplayTextItem.allCases.contains(.tdjName))
+            try expectEqual(DisplayTextItem.tdjName.displayName, "TDJ Name")
+        }
+        test("decoding an old profile appends tdjName to both order lists") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            var dict = try JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(profile)) as! [String: Any]
+            dict["danceItemOrder"] = ["genre", "artist", "title"]
+            dict["cortinaItemOrder"] = ["genre", "artist"]
+            let data = try JSONSerialization.data(withJSONObject: dict)
+            let decoded = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expect(decoded.danceItemOrder.contains(.tdjName))
+            try expect(decoded.cortinaItemOrder.contains(.tdjName))
+        }
+        test("new profiles include tdjName in the default orders") {
+            let p = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            try expect(p.danceItemOrder.contains(.tdjName))
+            try expect(p.cortinaItemOrder.contains(.tdjName))
+        }
+    }
+
+    suite("AppearanceProfile — tdjName fields") {
+        test("old profiles decode with tdjName defaults") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            var dict = try JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(profile)) as! [String: Any]
+            for key in Array(dict.keys) where key.hasPrefix("tdjName") {
+                dict.removeValue(forKey: key)
+            }
+            let data = try JSONSerialization.data(withJSONObject: dict)
+            let decoded = try JSONDecoder().decode(AppearanceProfile.self, from: data)
+            try expectEqual(decoded.tdjNameColor, "#AAAAAA")
+            try expectEqual(decoded.tdjNameFontSize, 3)
+            try expectEqual(decoded.tdjNameOffsetX, 0)
+            try expectEqual(decoded.tdjNameHAlign, .center)
+        }
+        test("tdjName participates in genre position overrides") {
+            try expect(AppearanceProfile.positionElementKeys.contains("tdjName"))
+            var profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            profile.tdjNameOffsetY = 7
+            try expectEqual(profile.placement(forKey: "tdjName").offsetY, 7)
+            let set = PositionSet(placements: ["tdjName": ElementPlacement(offsetX: 3, offsetY: -4)])
+            let applied = profile.applyingPositionOverride(set)
+            try expectEqual(applied.tdjNameOffsetX, 3)
+            try expectEqual(applied.tdjNameOffsetY, -4)
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2709,6 +2786,7 @@ runProfileExporterTests()
 runDraftPersistenceTests()
 runLayoutModeTests()
 runPinRateLimiterTests()
+runTdjNameTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"

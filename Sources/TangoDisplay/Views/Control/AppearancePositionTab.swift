@@ -112,6 +112,7 @@ struct AppearancePositionTab: View {
                 offsetRow("Track Counter", x: $working.trackCounterOffsetX, y: $working.trackCounterOffsetY, bw: $working.trackCounterBoxWidth, align: $working.trackCounterHAlign)
                 offsetRow("Last Tanda Label", x: $working.lastTandaLabelOffsetX, y: $working.lastTandaLabelOffsetY, bw: $working.lastTandaLabelBoxWidth, align: $working.lastTandaLabelHAlign)
                 offsetRow("Last Played", x: $working.lastPlayedOffsetX, y: $working.lastPlayedOffsetY, bw: $working.lastPlayedBoxWidth, align: $working.lastPlayedHAlign)
+                offsetRow("TDJ Name", x: $working.tdjNameOffsetX, y: $working.tdjNameOffsetY, bw: $working.tdjNameBoxWidth, align: $working.tdjNameHAlign)
             } header: {
                 Text("Dance / General")
                     .foregroundColor(ControlTheme.accent)

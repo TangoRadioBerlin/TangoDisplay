@@ -264,6 +264,20 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(trackCounterPosition.rawValue, forKey: kPrefix + "trackCounterPosition") }
     }
 
+    // TDJ name on the dancer display (ported from upstream v3.25.2)
+    @Published var showTdjName: Bool {
+        didSet { UserDefaults.standard.set(showTdjName, forKey: kPrefix + "showTdjName") }
+    }
+    @Published var tdjName: String {
+        didSet { UserDefaults.standard.set(tdjName, forKey: kPrefix + "tdjName") }
+    }
+    @Published var tdjNamePosition: TrackCounterPosition {
+        didSet { UserDefaults.standard.set(tdjNamePosition.rawValue, forKey: kPrefix + "tdjNamePosition") }
+    }
+    @Published var tdjNameVisibility: TdjNameVisibility {
+        didSet { UserDefaults.standard.set(tdjNameVisibility.rawValue, forKey: kPrefix + "tdjNameVisibility") }
+    }
+
     // MARK: - Track info transformations
 
     @Published var trackTransforms: [String: TransformRule] {
@@ -412,6 +426,12 @@ final class AppSettings: ObservableObject {
         }
         mirrorMode = ud.object(forKey: kPrefix + "mirrorMode").flatMap { $0 as? Bool } ?? true
         showTrackCounter = ud.object(forKey: kPrefix + "showTrackCounter").flatMap { $0 as? Bool } ?? true
+        showTdjName = ud.object(forKey: kPrefix + "showTdjName").flatMap { $0 as? Bool } ?? false
+        tdjName = ud.string(forKey: kPrefix + "tdjName") ?? ""
+        let rawTdjPos = ud.string(forKey: kPrefix + "tdjNamePosition") ?? ""
+        tdjNamePosition = TrackCounterPosition(rawValue: rawTdjPos) ?? .bottomLeft
+        let rawTdjVis = ud.string(forKey: kPrefix + "tdjNameVisibility") ?? ""
+        tdjNameVisibility = TdjNameVisibility(rawValue: rawTdjVis) ?? .always
         let rawPos = ud.string(forKey: kPrefix + "trackCounterPosition") ?? ""
         trackCounterPosition = TrackCounterPosition(rawValue: rawPos) ?? .bottomRight
         if let data = ud.data(forKey: kPrefix + "trackTransforms") {

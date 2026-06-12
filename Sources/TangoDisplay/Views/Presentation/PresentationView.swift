@@ -142,21 +142,26 @@ struct PresentationView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             GeometryReader { geo in
-                if settings.showTrackCounter,
-                   settings.trackCounterPosition != .centre,
-                   appState.displayState.mode == .playing,
-                   let pos = appState.displayState.tandaPosition {
-                    Text(pos.label)
-                        .font(activeProfile.trackCounterFont(geo.size.height))
-                        .foregroundColor(activeProfile.trackCounterSwiftUIColor)
-                        .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
-                        .padding(24)
-                        .offset(x: activeProfile.trackCounterOffsetX / 100 * geo.size.width,
-                                y: activeProfile.trackCounterOffsetY / 100 * geo.size.height)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity,
-                               alignment: settings.trackCounterPosition.overlayAlignment)
-                        .allowsHitTesting(false)
+                ZStack {
+                    ForEach([TrackCounterPosition.topLeft, .topRight, .bottomLeft, .bottomRight],
+                            id: \.self) { corner in
+                        cornerItems(for: corner, geo: geo)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                   alignment: corner.overlayAlignment)
+                    }
+                    // Centred TDJ name outside playing/cortina — those modes render it
+                    // inline as a positioned display element instead.
+                    let mode = appState.displayState.mode
+                    if tdjNameVisible(in: mode), settings.tdjNamePosition == .centre,
+                       mode != .playing, mode != .cortina {
+                        Text(settings.tdjName)
+                            .font(activeProfile.tdjNameFont(geo.size.height))
+                            .foregroundColor(activeProfile.tdjNameSwiftUIColor)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    }
                 }
+                .allowsHitTesting(false)
             }
         }
         .onAppear {
@@ -178,6 +183,41 @@ struct PresentationView: View {
         }
         .onChange(of: appState.displayState.currentTrack?.genre ?? "") { _ in
             reloadGenreBgImage()
+        }
+    }
+
+    private func tdjNameVisible(in mode: DisplayMode) -> Bool {
+        settings.showTdjName && !settings.tdjName.isEmpty
+            && settings.tdjNameVisibility.isVisible(in: mode)
+    }
+
+    /// Corner overlay shared by the TDJ name and the track counter; when both pick
+    /// the same corner they stack. The counter keeps its position-tab offsets.
+    @ViewBuilder
+    private func cornerItems(for corner: TrackCounterPosition, geo: GeometryProxy) -> some View {
+        let mode = appState.displayState.mode
+        let showTdj = tdjNameVisible(in: mode) && settings.tdjNamePosition == corner
+        let counterPos = settings.showTrackCounter && mode == .playing
+            && settings.trackCounterPosition == corner
+            ? appState.displayState.tandaPosition : nil
+        if showTdj || counterPos != nil {
+            VStack(spacing: 12) {
+                if showTdj {
+                    Text(settings.tdjName)
+                        .font(activeProfile.tdjNameFont(geo.size.height))
+                        .foregroundColor(activeProfile.tdjNameSwiftUIColor)
+                        .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
+                }
+                if let pos = counterPos {
+                    Text(pos.label)
+                        .font(activeProfile.trackCounterFont(geo.size.height))
+                        .foregroundColor(activeProfile.trackCounterSwiftUIColor)
+                        .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
+                        .offset(x: activeProfile.trackCounterOffsetX / 100 * geo.size.width,
+                                y: activeProfile.trackCounterOffsetY / 100 * geo.size.height)
+                }
+            }
+            .padding(24)
         }
     }
 

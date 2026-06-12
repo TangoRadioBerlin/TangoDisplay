@@ -63,6 +63,7 @@ extension AppearanceProfile {
     var idleMessageSwiftUIColor:    Color { Color(hex: idleMessageColor) }
     var lastTandaLabelSwiftUIColor: Color { Color(hex: lastTandaLabelColor) }
     var lastPlayedSwiftUIColor:     Color { Color(hex: lastPlayedColor) }
+    var tdjNameSwiftUIColor:        Color { Color(hex: tdjNameColor) }
 
     func cortinaLabelFont(_ h: CGFloat) -> Font   { font(name: cortinaLabelFontName,   size: cortinaLabelFontSize   / 100 * Double(h), bold: cortinaLabelFontBold,   italic: cortinaLabelFontItalic) }
     func cortinaArtistFont(_ h: CGFloat) -> Font  { font(name: cortinaArtistFontName,  size: cortinaArtistFontSize  / 100 * Double(h), bold: cortinaArtistFontBold,  italic: cortinaArtistFontItalic) }
@@ -71,6 +72,7 @@ extension AppearanceProfile {
     func idleMessageFont(_ h: CGFloat) -> Font    { font(name: idleMessageFontName,    size: idleMessageFontSize    / 100 * Double(h), bold: idleMessageFontBold,    italic: idleMessageFontItalic) }
     func lastTandaLabelFont(_ h: CGFloat) -> Font { font(name: lastTandaLabelFontName, size: lastTandaLabelFontSize / 100 * Double(h), bold: lastTandaLabelFontBold, italic: lastTandaLabelFontItalic) }
     func lastPlayedFont(_ h: CGFloat) -> Font     { font(name: lastPlayedFontName,     size: lastPlayedFontSize     / 100 * Double(h), bold: lastPlayedFontBold,     italic: lastPlayedFontItalic) }
+    func tdjNameFont(_ h: CGFloat) -> Font        { font(name: tdjNameFontName,        size: tdjNameFontSize        / 100 * Double(h), bold: tdjNameFontBold,        italic: tdjNameFontItalic) }
     var overrideTextSwiftUIColor: Color { Color(hex: overrideTextColor) }
     func overrideTextFont(_ h: CGFloat) -> Font { font(name: overrideTextFontName, size: overrideTextFontSize / 100 * Double(h), bold: overrideTextFontBold, italic: overrideTextFontItalic) }
 }

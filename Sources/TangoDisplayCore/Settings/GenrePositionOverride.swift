@@ -49,7 +49,7 @@ extension AppearanceProfile {
     /// Canonical element keys that carry per-element position fields.
     public static let positionElementKeys: [String] = [
         "title", "artist", "genre", "year", "singer", "trackCounter",
-        "lastTandaLabel", "cortinaLabel", "cortinaArtist", "cortinaTitle", "nextUpLabel", "lastPlayed"
+        "lastTandaLabel", "cortinaLabel", "cortinaArtist", "cortinaTitle", "nextUpLabel", "lastPlayed", "tdjName"
     ]
 
     public static func positionElementDisplayName(_ key: String) -> String {
@@ -66,6 +66,7 @@ extension AppearanceProfile {
         case "cortinaTitle":   return "Cortina Title"
         case "nextUpLabel":    return "Next Up Label"
         case "lastPlayed":     return "Last Played"
+        case "tdjName":        return "TDJ Name"
         default:               return key
         }
     }
@@ -85,6 +86,7 @@ extension AppearanceProfile {
         case "cortinaTitle":   return ElementPlacement(offsetX: cortinaTitleOffsetX, offsetY: cortinaTitleOffsetY, boxWidth: cortinaTitleBoxWidth, hAlign: cortinaTitleHAlign)
         case "nextUpLabel":    return ElementPlacement(offsetX: nextUpLabelOffsetX, offsetY: nextUpLabelOffsetY, boxWidth: nextUpLabelBoxWidth, hAlign: nextUpLabelHAlign)
         case "lastPlayed":     return ElementPlacement(offsetX: lastPlayedOffsetX, offsetY: lastPlayedOffsetY, boxWidth: lastPlayedBoxWidth, hAlign: lastPlayedHAlign)
+        case "tdjName":        return ElementPlacement(offsetX: tdjNameOffsetX, offsetY: tdjNameOffsetY, boxWidth: tdjNameBoxWidth, hAlign: tdjNameHAlign)
         default:               return ElementPlacement()
         }
     }
@@ -103,6 +105,7 @@ extension AppearanceProfile {
         case "cortinaTitle":   cortinaTitleOffsetX = p.offsetX; cortinaTitleOffsetY = p.offsetY; cortinaTitleBoxWidth = p.boxWidth; cortinaTitleHAlign = p.hAlign
         case "nextUpLabel":    nextUpLabelOffsetX = p.offsetX; nextUpLabelOffsetY = p.offsetY; nextUpLabelBoxWidth = p.boxWidth; nextUpLabelHAlign = p.hAlign
         case "lastPlayed":     lastPlayedOffsetX = p.offsetX; lastPlayedOffsetY = p.offsetY; lastPlayedBoxWidth = p.boxWidth; lastPlayedHAlign = p.hAlign
+        case "tdjName":        tdjNameOffsetX = p.offsetX; tdjNameOffsetY = p.offsetY; tdjNameBoxWidth = p.boxWidth; tdjNameHAlign = p.hAlign
         default:               break
         }
     }

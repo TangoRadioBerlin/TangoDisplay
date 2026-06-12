@@ -277,6 +277,19 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     /// rather than absolute points. Older profiles (flag absent) are migrated from points on decode.
     public var relativeArtworkPosition: Bool
 
+    // TDJ name (the DJ's name on the dancer display; the name text, global toggle,
+    // corner/centre position and show-when rule live in AppSettings — the profile only
+    // styles and places the centre-mode element).
+    public var tdjNameColor: String = "#AAAAAA"
+    public var tdjNameFontName: String = "System"
+    public var tdjNameFontSize: Double = 3
+    public var tdjNameFontBold: Bool = false
+    public var tdjNameFontItalic: Bool = false
+    public var tdjNameOffsetX: Double = 0
+    public var tdjNameOffsetY: Double = 0
+    public var tdjNameBoxWidth: Double = 0
+    public var tdjNameHAlign: TextHAlignment = .center
+
     /// How the presentation lays out text elements (see `LayoutMode`). In `.absolute`
     /// the *Offset percentages anchor each element from screen centre, so an empty
     /// field never shifts its neighbours. Older profiles (key absent) stay `.flow`.
@@ -330,8 +343,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 lastPlayedFontBold: Bool = false, lastPlayedFontItalic: Bool = false,
                 lastPlayedColor: String = "#AAAAAA",
                 showLastPlayedDance: Bool = false, showLastPlayedCortina: Bool = false,
-                danceItemOrder: [DisplayTextItem] = [.genre, .artist, .year, .title, .singer, .lastTandaLabel, .trackCounter, .lastPlayed],
-                cortinaItemOrder: [DisplayTextItem] = [.genre, .artist, .year, .singer, .lastTandaLabel, .lastPlayed],
+                danceItemOrder: [DisplayTextItem] = [.genre, .artist, .year, .title, .singer, .lastTandaLabel, .tdjName, .trackCounter, .lastPlayed],
+                cortinaItemOrder: [DisplayTextItem] = [.genre, .artist, .year, .singer, .lastTandaLabel, .tdjName, .lastPlayed],
                 showSinger: Bool = false,
                 singerSource: SingerSource = .comments,
                 showSingerDuringCortina: Bool = false,
@@ -873,6 +886,16 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
             relativeArtworkPosition = true
         }
 
+        tdjNameColor      = try c.decodeIfPresent(String.self, forKey: .tdjNameColor)      ?? "#AAAAAA"
+        tdjNameFontName   = try c.decodeIfPresent(String.self, forKey: .tdjNameFontName)   ?? "System"
+        tdjNameFontSize   = try c.decodeIfPresent(Double.self, forKey: .tdjNameFontSize)   ?? 3
+        tdjNameFontBold   = try c.decodeIfPresent(Bool.self,   forKey: .tdjNameFontBold)   ?? false
+        tdjNameFontItalic = try c.decodeIfPresent(Bool.self,   forKey: .tdjNameFontItalic) ?? false
+        tdjNameOffsetX    = try c.decodeIfPresent(Double.self, forKey: .tdjNameOffsetX)    ?? 0
+        tdjNameOffsetY    = try c.decodeIfPresent(Double.self, forKey: .tdjNameOffsetY)    ?? 0
+        tdjNameBoxWidth   = try c.decodeIfPresent(Double.self, forKey: .tdjNameBoxWidth)   ?? 0
+        tdjNameHAlign     = try c.decodeIfPresent(TextHAlignment.self, forKey: .tdjNameHAlign) ?? .center
+
         // Layout mode — absent in older profiles (flow), unknown raw values from
         // newer versions fall back to flow rather than failing the decode.
         if let rawLayout = try c.decodeIfPresent(String.self, forKey: .layoutMode) {
@@ -896,6 +919,12 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         }
         if !cortinaItemOrder.contains(.lastPlayed) {
             cortinaItemOrder.append(.lastPlayed)
+        }
+        if !danceItemOrder.contains(.tdjName) {
+            danceItemOrder.append(.tdjName)
+        }
+        if !cortinaItemOrder.contains(.tdjName) {
+            cortinaItemOrder.append(.tdjName)
         }
     }
 
@@ -985,6 +1014,7 @@ public enum DisplayTextItem: String, Codable, CaseIterable {
     case lastTandaLabel  // "LAST TANDA" announcement label
     case trackCounter    // rendered inline when position == .centre
     case lastPlayed      // previously played track ("Artist — Title")
+    case tdjName         // the DJ's name; rendered inline when position == .centre
 
     public var displayName: String {
         switch self {
@@ -1000,6 +1030,7 @@ public enum DisplayTextItem: String, Codable, CaseIterable {
         case .lastTandaLabel:  "Last Tanda Label"
         case .trackCounter:    "Track Counter"
         case .lastPlayed:      "Last Played"
+        case .tdjName:         "TDJ Name"
         }
     }
 }
