@@ -20,6 +20,7 @@ final class RemoteControlBridge: NSObject, ObservableObject {
     private var stateCancellables = Set<AnyCancellable>()
     private var transportCancellables = Set<AnyCancellable>()
     private var authenticatedClients = Set<UUID>()
+    private var pinLimiter = PinRateLimiter()
 
     private let stateChangeSubject = PassthroughSubject<Void, Never>()
 
@@ -226,13 +227,25 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             transport.disconnect(clientID)
             return
         }
+        // Brute-force throttle: while locked, refuse without even checking the
+        // PIN. Global on purpose — reconnecting clients get fresh UUIDs, so a
+        // per-client limit would be trivially bypassed.
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !pinLimiter.isLocked(at: now) else {
+            let nack = #"{"type":"auth","ok":false,"reason":"locked"}"#
+            transport.send(nack, to: clientID)
+            transport.disconnect(clientID)
+            return
+        }
         let expected = settings.remoteControlPin
         guard let pin, !expected.isEmpty, pin == expected else {
+            pinLimiter.registerFailure(at: now)
             let nack = #"{"type":"auth","ok":false}"#
             transport.send(nack, to: clientID)
             transport.disconnect(clientID)
             return
         }
+        pinLimiter.registerSuccess()
         authenticatedClients.insert(clientID)
         let ack = #"{"type":"auth","ok":true}"#
         transport.send(ack, to: clientID)

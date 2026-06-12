@@ -286,8 +286,15 @@ final class HTTPServerTransport: RemoteTransport {
         }
     }
 
+    // Remote clients only ever send small JSON commands; any frame declaring more
+    // than this is hostile or corrupt. Without the cap, a declared 64-bit length
+    // above Int.max would trap on conversion (remote pre-auth crash), and any huge
+    // value would make the buffer grow unboundedly waiting for data that never comes.
+    private static let maxInboundFrameLength = 1 << 20  // 1 MiB
+
     // Decodes one frame from the front of `buffer`. Returns nil if the buffer doesn't
     // contain a complete frame yet. Mutates `buffer` to remove the consumed frame.
+    // Oversized declared lengths clear the buffer (the connection is desynced anyway).
     private static func decodeFrame(from buffer: inout Data) -> (opcode: UInt8, payload: Data)? {
         guard buffer.count >= 2 else { return nil }
         let bytes = [UInt8](buffer)
@@ -304,8 +311,16 @@ final class HTTPServerTransport: RemoteTransport {
             guard bytes.count >= cursor + 8 else { return nil }
             var l: UInt64 = 0
             for i in 0..<8 { l = (l << 8) | UInt64(bytes[cursor + i]) }
+            guard l <= UInt64(maxInboundFrameLength) else {
+                buffer.removeAll()
+                return nil
+            }
             length = Int(l)
             cursor += 8
+        }
+        guard length <= maxInboundFrameLength else {
+            buffer.removeAll()
+            return nil
         }
 
         var maskKey: [UInt8] = []

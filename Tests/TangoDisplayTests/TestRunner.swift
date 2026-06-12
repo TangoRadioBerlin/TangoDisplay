@@ -2042,6 +2042,51 @@ func runLayoutModeTests() {
     }
 }
 
+// MARK: - PIN rate limiter tests
+
+func runPinRateLimiterTests() {
+    suite("PinRateLimiter — brute-force lockout") {
+        test("not locked initially and below the failure threshold") {
+            var limiter = PinRateLimiter(maxAttempts: 5, baseLockout: 5, maxLockout: 300)
+            try expect(!limiter.isLocked(at: 0), "Fresh limiter must not be locked")
+            for t in 0..<4 { limiter.registerFailure(at: Double(t)) }
+            try expect(!limiter.isLocked(at: 4), "4 of 5 failures must not lock")
+        }
+
+        test("reaching the threshold locks for the base duration") {
+            var limiter = PinRateLimiter(maxAttempts: 5, baseLockout: 5, maxLockout: 300)
+            for t in 0..<5 { limiter.registerFailure(at: Double(t)) }
+            try expect(limiter.isLocked(at: 4), "5th failure must lock")
+            try expect(limiter.isLocked(at: 8.9), "Still locked within the base window")
+            try expect(!limiter.isLocked(at: 9.1), "Unlocked after baseLockout seconds")
+        }
+
+        test("failures after a lockout double the next lockout") {
+            var limiter = PinRateLimiter(maxAttempts: 5, baseLockout: 5, maxLockout: 300)
+            for t in 0..<5 { limiter.registerFailure(at: Double(t)) }   // locked until 9
+            limiter.registerFailure(at: 10)                              // next lock: 10 s
+            try expect(limiter.isLocked(at: 19.9), "Second lockout must last 10 s")
+            try expect(!limiter.isLocked(at: 20.1), "Second lockout ends after 10 s")
+        }
+
+        test("lockout duration is capped at maxLockout") {
+            var limiter = PinRateLimiter(maxAttempts: 1, baseLockout: 100, maxLockout: 150)
+            limiter.registerFailure(at: 0)      // 100 s
+            limiter.registerFailure(at: 200)    // would be 200 s → capped at 150
+            try expect(limiter.isLocked(at: 349), "Capped lockout still active")
+            try expect(!limiter.isLocked(at: 351), "Capped lockout ends after maxLockout")
+        }
+
+        test("a successful auth resets the limiter") {
+            var limiter = PinRateLimiter(maxAttempts: 5, baseLockout: 5, maxLockout: 300)
+            for t in 0..<4 { limiter.registerFailure(at: Double(t)) }
+            limiter.registerSuccess()
+            for t in 10..<14 { limiter.registerFailure(at: Double(t)) }
+            try expect(!limiter.isLocked(at: 14), "Counter must reset on success")
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2663,6 +2708,7 @@ runProfileFormatContractTests()
 runProfileExporterTests()
 runDraftPersistenceTests()
 runLayoutModeTests()
+runPinRateLimiterTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
