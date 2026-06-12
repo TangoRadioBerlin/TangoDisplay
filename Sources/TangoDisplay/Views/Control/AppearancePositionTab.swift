@@ -104,32 +104,50 @@ struct AppearancePositionTab: View {
             }
 
             Section {
-                HStack {
-                    Text("Horizontal").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
-                    Slider(value: $working.albumArtworkOffsetX, in: -100...100)
-                    Text(String(format: "%+.0f%%", working.albumArtworkOffsetX)).monospacedDigit().frame(width: 48)
-                }
-                HStack {
-                    Text("Vertical").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
-                    Slider(value: $working.albumArtworkOffsetY, in: -100...100)
-                    Text(String(format: "%+.0f%%", working.albumArtworkOffsetY)).monospacedDigit().frame(width: 48)
-                }
-                HStack {
-                    Text("Size").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
-                    Slider(value: $working.albumArtworkScale, in: 0.1...5.0)
-                    Text(String(format: "%.2f×", working.albumArtworkScale)).monospacedDigit().frame(width: 48)
-                }
-                HStack {
-                    Text("Opacity").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
-                    Slider(value: $working.albumArtworkOpacity, in: 0...1)
-                    Text(String(format: "%.0f%%", working.albumArtworkOpacity * 100)).monospacedDigit().frame(width: 48)
+                Toggle("Show artwork on dance tracks", isOn: $working.showArtworkDance)
+                if working.showArtworkDance || working.showArtworkCortina {
+                    HStack {
+                        Text("Horizontal").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
+                        Slider(value: $working.albumArtworkOffsetX, in: -100...100)
+                        Text(String(format: "%+.0f%%", working.albumArtworkOffsetX)).monospacedDigit().frame(width: 48)
+                    }
+                    HStack {
+                        Text("Vertical").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
+                        Slider(value: $working.albumArtworkOffsetY, in: -100...100)
+                        Text(String(format: "%+.0f%%", working.albumArtworkOffsetY)).monospacedDigit().frame(width: 48)
+                    }
+                    HStack {
+                        Text("Size").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
+                        Slider(value: $working.albumArtworkScale, in: 0.1...5.0)
+                        Text(String(format: "%.2f×", working.albumArtworkScale)).monospacedDigit().frame(width: 48)
+                    }
+                    HStack {
+                        Text("Opacity").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
+                        Slider(value: $working.albumArtworkOpacity, in: 0...1)
+                        Text(String(format: "%.0f%%", working.albumArtworkOpacity * 100)).monospacedDigit().frame(width: 48)
+                    }
+                    HStack {
+                        Text("Edge Fade").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
+                        Slider(value: $working.albumArtworkEdgeFade, in: 0...1)
+                        Text(String(format: "%.0f%%", working.albumArtworkEdgeFade * 100)).monospacedDigit().frame(width: 48)
+                    }
+                    HStack {
+                        Text("Fade Style").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
+                        Picker("", selection: $working.albumArtworkFadeStyle) {
+                            ForEach(AlbumArtFadeStyle.allCases, id: \.self) { s in
+                                Text(s.displayName).tag(s)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                    }
                 }
             } header: {
                 Text("Album Artwork")
                     .foregroundColor(ControlTheme.accent)
             } footer: {
                 Label {
-                    Text("Position (percent of resolution) and size of the album artwork. Included when you Save to a genre above. Fade style/intensity stay on the Artwork & Motion tab.")
+                    Text("Position is percent of resolution. Included when you Save to a genre above. A placeholder shows the artwork box in the preview while this tab is open.")
                 } icon: {
                     Image(systemName: "info.circle")
                 }
