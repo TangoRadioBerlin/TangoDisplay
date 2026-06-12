@@ -996,6 +996,25 @@ struct SetlistView: View {
             }
         }
         Divider()
+        let singleEntry = targets.count == 1 ? setlist.entries.first(where: { targets.contains($0.id) }) : nil
+        let hasTag = singleEntry.map { $0.tagColor != TagColor.none } ?? targets.contains(where: { id in
+            setlist.entries.first(where: { $0.id == id })?.tagColor != TagColor.none
+        })
+        if hasTag {
+            Button("Clear Tag Colour") { setlist.setTagColor(.none, for: targets) }
+        }
+        ForEach(TagColor.allCases.filter { $0 != .none }, id: \.self) { colour in
+            Button {
+                setlist.setTagColor(colour, for: targets)
+            } label: {
+                Label {
+                    Text(colour.displayName)
+                } icon: {
+                    Image(nsImage: colour.menuCircleImage)
+                }
+            }
+        }
+        Divider()
         Button("Delete", role: .destructive) { pendingDeleteIDs = targets }
     }
 
@@ -1338,6 +1357,45 @@ private struct DoubleClickOverlay: NSViewRepresentable {
     }
 }
 
+// MARK: - Tag colour
+
+extension TagColor {
+    var swiftUIColor: Color? {
+        switch self {
+        case .none:   return nil
+        case .red:    return .red
+        case .orange: return .orange
+        case .yellow: return Color(red: 0.95, green: 0.80, blue: 0.0)
+        case .green:  return .green
+        case .blue:   return .blue
+        case .purple: return .purple
+        }
+    }
+
+    var menuCircleImage: NSImage {
+        let nsColor: NSColor
+        switch self {
+        case .none:   nsColor = .clear
+        case .red:    nsColor = .systemRed
+        case .orange: nsColor = .systemOrange
+        case .yellow: nsColor = NSColor(red: 0.95, green: 0.80, blue: 0.0, alpha: 1)
+        case .green:  nsColor = .systemGreen
+        case .blue:   nsColor = .systemBlue
+        case .purple: nsColor = .systemPurple
+        }
+        let size = CGFloat(13)
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            nsColor.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
+    var displayName: String { rawValue.capitalized }
+}
+
 // MARK: - Row
 
 struct SetlistRowView: View {
@@ -1368,6 +1426,11 @@ struct SetlistRowView: View {
     }
 
     var body: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(entry.tagColor.swiftUIColor ?? Color.clear)
+                .frame(width: 3)
+
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 stateIndicator
@@ -1455,6 +1518,7 @@ struct SetlistRowView: View {
                     .padding(.leading, 22)
                     .padding(.bottom, 5)
             }
+        }
         }
         .contentShape(Rectangle())
         .listRowBackground(rowBackground)

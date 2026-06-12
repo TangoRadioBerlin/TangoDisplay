@@ -9,6 +9,11 @@ enum SetlistEntryState: String, Codable {
     case queued, playing, paused, played
 }
 
+/// Colour tag for visual setlist organisation (ported from upstream v3.25.0).
+enum TagColor: String, Codable, CaseIterable {
+    case none, red, orange, yellow, green, blue, purple
+}
+
 struct SetlistEntry: Identifiable, Codable {
     let id: UUID
     let fileURL: URL
@@ -19,11 +24,12 @@ struct SetlistEntry: Identifiable, Codable {
     var ignoresAutoFade: Bool = false
     var isLastTanda: Bool = false      // marks this cortina as the last-tanda trigger
     var pluginConfigurationID: UUID? = nil
+    var tagColor: TagColor = .none
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
     var autoGapSkipped: Bool = false   // transient: true when the first-track setting automatically skips the gap
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda, pluginConfigurationID
+        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor
         // autoGapApplied and autoGapSkipped are intentionally excluded — reset each playback session
     }
 
@@ -45,6 +51,12 @@ struct SetlistEntry: Identifiable, Codable {
         ignoresAutoFade = try c.decodeIfPresent(Bool.self, forKey: .ignoresAutoFade) ?? false
         isLastTanda = try c.decodeIfPresent(Bool.self, forKey: .isLastTanda) ?? false
         pluginConfigurationID = try c.decodeIfPresent(UUID.self, forKey: .pluginConfigurationID) ?? nil
+        // Tolerant: older setlists have no tag, unknown raw values fall back to none.
+        if let rawTag = try c.decodeIfPresent(String.self, forKey: .tagColor) {
+            tagColor = TagColor(rawValue: rawTag) ?? .none
+        } else {
+            tagColor = .none
+        }
         autoGapApplied = false
         autoGapSkipped = false
     }
@@ -206,6 +218,14 @@ final class SetlistManager: ObservableObject {
         for id in ids {
             guard let i = entries.firstIndex(where: { $0.id == id }) else { continue }
             entries[i].pluginConfigurationID = configID
+        }
+        save()
+    }
+
+    func setTagColor(_ color: TagColor, for ids: Set<UUID>) {
+        for id in ids {
+            guard let i = entries.firstIndex(where: { $0.id == id }) else { continue }
+            entries[i].tagColor = color
         }
         save()
     }
