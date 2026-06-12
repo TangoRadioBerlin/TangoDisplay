@@ -334,6 +334,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         let uid = hoggedDeviceUID
         audioDeviceQueue.async {
             if let uid { AudioDeviceManager.releaseHogMode(forUID: uid) }

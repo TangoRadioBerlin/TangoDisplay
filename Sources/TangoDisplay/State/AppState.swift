@@ -164,30 +164,45 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Sources are contractually expected to call back on the main queue, but
+    /// AppState mutations drive SwiftUI — enforce the hop at the boundary so a
+    /// source that slips up can't cause data races.
+    private static func onMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
+        }
+    }
+
     private func wireCallbacks(to source: any MusicPlayerSource) {
         source.onTrackUpdate = { [weak self] track, state in
-            self?.handleTrackUpdate(track: track, playerState: state)
+            Self.onMain { self?.handleTrackUpdate(track: track, playerState: state) }
         }
         source.onPlaylistUpdate = { [weak self] context in
-            self?.handlePlaylistUpdate(context)
+            Self.onMain { self?.handlePlaylistUpdate(context) }
         }
         source.onNextTrackUpdate = { [weak self] nextTrack in
-            guard let self else { return }
-            self.lastKnownNextTrack = nextTrack
-            if self.displayState.mode == .cortina {
-                let detector = self.settings.makeDetector()
-                let validNext = nextTrack.flatMap { detector.isCortina(genre: $0.genre) ? nil : $0 }
-                if self.displayState.nextTrack != validNext {
-                    self.displayState.nextTrack = validNext
+            Self.onMain {
+                guard let self else { return }
+                self.lastKnownNextTrack = nextTrack
+                if self.displayState.mode == .cortina {
+                    let detector = self.settings.makeDetector()
+                    let validNext = nextTrack.flatMap { detector.isCortina(genre: $0.genre) ? nil : $0 }
+                    if self.displayState.nextTrack != validNext {
+                        self.displayState.nextTrack = validNext
+                    }
                 }
             }
         }
         source.onWatchdogChanged = { [weak self] active in
-            self?.watchdogActive = active
-            let name = self?.settings.selectedPlayer.displayName ?? "Player"
-            self?.appendDebugLog(active
-                ? "⚠ Watchdog active — \(name) unreachable"
-                : "✓ \(name) reconnected")
+            Self.onMain {
+                self?.watchdogActive = active
+                let name = self?.settings.selectedPlayer.displayName ?? "Player"
+                self?.appendDebugLog(active
+                    ? "⚠ Watchdog active — \(name) unreachable"
+                    : "✓ \(name) reconnected")
+            }
         }
     }
 
