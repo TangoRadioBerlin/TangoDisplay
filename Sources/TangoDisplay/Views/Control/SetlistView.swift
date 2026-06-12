@@ -525,7 +525,10 @@ struct SetlistView: View {
                 Divider()
             }
 
-            if setlist.entries.isEmpty {
+            let visibleEntries = settings.hidePlayed
+                ? setlist.entries.filter { $0.state != .played || $0.id == activeEntryID }
+                : setlist.entries
+            if visibleEntries.isEmpty {
                 emptyDropZone
             } else {
                 ScrollViewReader { proxy in
@@ -1133,6 +1136,7 @@ private struct StatusBarView: View {
     var selectedIDs: Set<UUID>
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var settings: AppSettings
+    @Environment(\.openWindow) var openWindow
 
     var body: some View {
         HStack {
@@ -1173,29 +1177,36 @@ private struct StatusBarView: View {
                     .foregroundColor(.primary)
                 }
 
-                HStack(spacing: 4) {
-                    Image(systemName: "clock")
-                    Text(formatDuration(setlist.totalPlaylistDuration))
-                    Text("·")
-                    Text("\(unplayedCount) remaining")
-                }
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                Button {
+                    openWindow(id: "set-timings")
+                } label: {
+                    HStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
+                            Text(formatDuration(setlist.totalPlaylistDuration))
+                            Text("·")
+                            Text("\(unplayedCount) remaining")
+                        }
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
 
-                HStack(spacing: 4) {
-                    Text("Next cortina:")
-                    Text(setlistFormatDuration(timeUntilNextCortina))
-                        .monospacedDigit()
-                }
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Text("Next cortina:")
+                            Text(setlistFormatDuration(timeUntilNextCortina))
+                                .monospacedDigit()
+                        }
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
 
-                HStack(spacing: 4) {
-                    Text("Ends at:")
-                    Text(formattedEndTime)
+                        HStack(spacing: 4) {
+                            Text("Ends at:")
+                            Text(formattedEndTime)
+                        }
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    }
                 }
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 12)

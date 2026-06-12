@@ -46,6 +46,14 @@ struct TangoDisplayApp: App {
             }
         }
 
+        // Set Timings window — floating info panel opened from the status bar
+        Window("Set Timings", id: "set-timings") {
+            SetTimingsWindowContent()
+                .environmentObject(appState)
+                .environmentObject(appState.settings)
+        }
+        .defaultSize(width: 580, height: 530)
+
         // Presentation window — WindowGroup allows dragging to external monitors
         WindowGroup(id: "presentation") {
             PresentationView()
