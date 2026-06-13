@@ -391,11 +391,13 @@ final class JRiverPoller: MusicPlayerSource {
     }
 
     private func decodeXML(_ s: String) -> String {
-        s.replacingOccurrences(of: "&amp;",  with: "&")
-         .replacingOccurrences(of: "&lt;",   with: "<")
+        // &amp; must be decoded LAST: doing it first turns "&amp;lt;" into "&lt;",
+        // which the next pass would wrongly decode again.
+        s.replacingOccurrences(of: "&lt;",   with: "<")
          .replacingOccurrences(of: "&gt;",   with: ">")
          .replacingOccurrences(of: "&quot;", with: "\"")
          .replacingOccurrences(of: "&apos;", with: "'")
+         .replacingOccurrences(of: "&amp;",  with: "&")
     }
 
     // MARK: - Watchdog
