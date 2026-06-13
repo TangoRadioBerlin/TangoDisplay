@@ -40,6 +40,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     // MARK: - Diagnostics
 
     @Published private(set) var replayGainStatus: String = ""
+    /// Linear ReplayGain factor currently applied to the playing track (1.0 = no change,
+    /// excludes the separate cortina volume cut). Drives the waveform's "after ReplayGain" view.
+    @Published private(set) var appliedReplayGainLinear: Float = 1.0
     @Published private(set) var hogModeConflict: Bool = false
     @Published private(set) var hogDeviceStolenAlert: Bool = false
     @Published private(set) var isChangingDevice: Bool = false
@@ -398,6 +401,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         }
 
         let result = calculateReplayGain(info: info, analysis: analysis, settings: rgSettings)
+        appliedReplayGainLinear = result.linearGain
         var finalGain = result.linearGain
         let cortinaCutDb = settings.cortinaVolumeReductionDb
         if cortinaCutDb < 0 {
@@ -510,6 +514,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         guard let id = currentEntryID,
               let entry = setlist.entries.first(where: { $0.id == id }) else {
             replayGainStatus = ""
+            appliedReplayGainLinear = 1.0
             return
         }
         applyReplayGain(for: entry)
@@ -537,6 +542,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         isCurrentEntryMarkedAsPlayed = false
         isActivePlaying = false
         replayGainStatus = ""
+        appliedReplayGainLinear = 1.0
         replayGainMixer.outputVolume = 1.0
         inFlightAnalysisURLs.removeAll()
         playerNode.stop()
@@ -642,6 +648,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         isCurrentEntryMarkedAsPlayed = false
         isActivePlaying = false
         replayGainStatus = ""
+        appliedReplayGainLinear = 1.0
         playerNode.stop()
         audioFile = nil
         elapsed = 0
@@ -673,6 +680,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             currentEntryID = nil
             isActivePlaying = false
             replayGainStatus = ""
+            appliedReplayGainLinear = 1.0
             playerNode.stop()
             audioFile = nil
             elapsed = 0
@@ -700,6 +708,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             currentEntryID = nil
             isActivePlaying = false
             replayGainStatus = ""
+            appliedReplayGainLinear = 1.0
             playerNode.stop()
             audioFile = nil
             elapsed = 0
@@ -1601,6 +1610,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                     self.currentEntryID = nil
                     self.isActivePlaying = false
                     self.replayGainStatus = ""
+                    self.appliedReplayGainLinear = 1.0
                     self.playerNode.stop()
                     self.audioFile = nil
                     self.elapsed = 0

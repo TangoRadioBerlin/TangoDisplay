@@ -2273,6 +2273,24 @@ func runWaveformMathTests() {
         }
     }
 
+    suite("normalizedPeak — gain scaling for the post-ReplayGain view") {
+        test("gain of 1 leaves the peak unchanged") {
+            try expectEqual(normalizedPeak(0.6, gain: 1.0), 0.6)
+        }
+        test("gain below 1 shrinks the peak") {
+            try expectEqual(normalizedPeak(0.8, gain: 0.5), 0.4)
+        }
+        test("gain above 1 clips flat at 1.0") {
+            try expectEqual(normalizedPeak(0.8, gain: 2.0), 1.0)
+        }
+        test("negative gain clamps to 0") {
+            try expectEqual(normalizedPeak(0.5, gain: -2.0), 0)
+        }
+        test("array variant maps every bucket") {
+            try expectEqual(normalizedWaveformPeaks([0.2, 0.8, 1.0], gain: 0.5), [0.1, 0.4, 0.5])
+        }
+    }
+
     suite("WindowFramePlacement.sanitized — off-screen recovery") {
         let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
         let minSize = CGSize(width: 320, height: 110)

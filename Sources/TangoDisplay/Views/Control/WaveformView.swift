@@ -14,6 +14,10 @@ struct WaveformView: View {
     @State private var progress: Double = 0
     @State private var elapsed: Double = 0
     @State private var duration: Double = 0
+    @State private var replayGain: Float = 1.0
+    /// When on, peaks are scaled by the applied ReplayGain so the waveform shows
+    /// post-normalisation levels. Persisted so it survives reopening the window.
+    @AppStorage("TangoDisplay.waveformShowNormalized") private var showNormalized = false
 
     private let tick = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
@@ -46,6 +50,7 @@ struct WaveformView: View {
             placeholder(loading ? "Analysing…" : "No track playing")
         } else {
             VStack(spacing: 2) {
+                normalizeToggle
                 Canvas { ctx, size in drawWaveform(ctx, size) }
                     .frame(maxHeight: .infinity)
                 Canvas { ctx, size in drawTimeline(ctx, size) }
@@ -55,6 +60,27 @@ struct WaveformView: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 4)
         }
+    }
+
+    private var normalizeToggle: some View {
+        HStack(spacing: 6) {
+            Spacer()
+            Toggle(isOn: $showNormalized) {
+                Text(showNormalized ? "After ReplayGain (\(gainDbLabel))" : "After ReplayGain")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .help("Scale the waveform by the ReplayGain applied to this track")
+        }
+        .frame(height: 16)
+    }
+
+    private var gainDbLabel: String {
+        let db = replayGain > 0 ? 20 * log10(Double(replayGain)) : -.infinity
+        guard db.isFinite else { return "−∞ dB" }
+        return String(format: "%+.1f dB", db)
     }
 
     private var timeLabels: some View {
@@ -97,6 +123,7 @@ struct WaveformView: View {
             var amp: Float = 0
             var i = lo
             while i < min(hi, n) { amp = max(amp, samples[i]); i += 1 }
+            if showNormalized { amp = normalizedPeak(amp, gain: replayGain) }
             let barH = max(1, CGFloat(amp) * (h * 0.92))
             let color: Color = CGFloat(x) <= playedX ? .cyan : .white.opacity(0.32)
             ctx.fill(Path(CGRect(x: CGFloat(x), y: mid - barH / 2, width: 1, height: barH)),
@@ -174,10 +201,11 @@ struct WaveformView: View {
     // MARK: - Data
 
     private func refreshTimes() {
-        guard let p = player else { elapsed = 0; duration = 0; progress = 0; return }
+        guard let p = player else { elapsed = 0; duration = 0; progress = 0; replayGain = 1.0; return }
         elapsed = p.elapsed
         duration = p.duration
         progress = duration > 0 ? min(1, max(0, elapsed / duration)) : 0
+        replayGain = p.appliedReplayGainLinear
     }
 
     private func resetTrack() {

@@ -16,6 +16,18 @@ public func waveformSilenceFractions(peaks: [Float],
     return (Double(first) / Double(n), Double(n - 1 - last) / Double(n))
 }
 
+/// Scales a single peak by a linear gain and clamps to the 0…1 display range.
+/// Used to show the waveform "after ReplayGain": a gain < 1 shrinks the peak, a
+/// gain > 1 raises it until it clips flat at 1.0 (mirroring real playback).
+public func normalizedPeak(_ peak: Float, gain: Float) -> Float {
+    min(1, max(0, peak) * max(0, gain))
+}
+
+/// Applies `normalizedPeak` across a whole overview.
+public func normalizedWaveformPeaks(_ peaks: [Float], gain: Float) -> [Float] {
+    peaks.map { normalizedPeak($0, gain: gain) }
+}
+
 /// Validates a window frame restored from persistence against the current screens,
 /// so a frame saved on a since-disconnected monitor can't come back invisible.
 public enum WindowFramePlacement {
