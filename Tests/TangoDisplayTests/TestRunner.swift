@@ -2188,6 +2188,59 @@ func runPerformanceModeTests() {
     }
 }
 
+// MARK: - Settings format contract tests (decode tolerance for persisted blobs)
+
+func runSettingsFormatContractTests() {
+    func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
+        try JSONDecoder().decode(type, from: Data(json.utf8))
+    }
+
+    suite("TransformRule — decode tolerance") {
+        test("unknown sourceField raw value decodes as nil instead of failing") {
+            let rules = try decode([String: TransformRule].self, """
+            {"artist": {"enabled": true, "pattern": "x", "replacement": "y",
+                        "testInput": "", "sourceField": "lyricist", "clearWhenNoMatch": false}}
+            """)
+            try expectNotNil(rules["artist"])
+            try expectNil(rules["artist"]?.sourceField)
+            try expect(rules["artist"]?.enabled == true, "Rest of the rule must survive")
+        }
+        test("known sourceField still decodes") {
+            let rules = try decode([String: TransformRule].self, """
+            {"albumArtist": {"enabled": true, "pattern": "", "replacement": "",
+                             "testInput": "", "sourceField": "artist"}}
+            """)
+            try expectEqual(rules["albumArtist"]?.sourceField, .artist)
+        }
+    }
+
+    suite("AutoBypassRule — decode tolerance") {
+        test("unknown yearMode, action and matchMode raw values fall back to defaults") {
+            let rule = try decode(AutoBypassRule.self, """
+            {"matchGenres": ["Vals"], "yearThreshold": 1950,
+             "yearMode": "exactly", "action": "mute", "matchMode": "either"}
+            """)
+            try expectEqual(rule.yearMode, .olderThan)
+            try expectEqual(rule.action, .activate)
+            try expectEqual(rule.matchMode, .all)
+            try expectEqual(rule.matchGenres, ["Vals"])
+            try expectEqual(rule.yearThreshold, 1950)
+        }
+        test("a corrupt nested rule does not fail the whole plugin chain") {
+            let chain = try decode([AudioUnitChainSlot].self, """
+            [{"id": "11111111-2222-3333-4444-555555555555",
+              "selection": {"id": "11111111-2222-3333-4444-555555555556",
+                            "name": "EQ", "manufacturerName": "Apple",
+                            "componentType": 1635083896, "componentSubType": 1, "componentManufacturer": 1},
+              "isEnabled": true,
+              "autoBypassRule": {"matchGenres": [], "yearMode": "bogus", "action": "bogus"}}]
+            """)
+            try expectEqual(chain.count, 1)
+            try expectEqual(chain[0].autoBypassRule?.yearMode, .olderThan)
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2812,6 +2865,7 @@ runLayoutModeTests()
 runPinRateLimiterTests()
 runTdjNameTests()
 runPerformanceModeTests()
+runSettingsFormatContractTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"

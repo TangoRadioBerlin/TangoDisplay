@@ -352,6 +352,24 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(hideLeftMenuBarOnStartup, forKey: kPrefix + "hideLeftMenuBarOnStartup") }
     }
 
+    // MARK: - Persistence helpers
+
+    /// Decodes a persisted JSON blob; on failure the raw data is preserved under
+    /// "<key>.unloadable" (instead of being silently overwritten by the next save)
+    /// and nil is returned so the caller falls back to its default.
+    private static func decodeOrQuarantine<T: Decodable>(_ type: T.Type, key: String) -> T? {
+        let ud = UserDefaults.standard
+        guard let data = ud.data(forKey: key) else { return nil }
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            ud.set(data, forKey: key + ".unloadable")
+            NSLog("[TangoDisplay] WARNING: %@ failed to decode — raw data kept under %@.unloadable: %@",
+                  key, key, String(describing: error))
+            return nil
+        }
+    }
+
     // MARK: - Init
 
     init() {
@@ -379,12 +397,8 @@ final class AppSettings: ObservableObject {
             denylistPartialMatchGenres = Set(AppSettings.parseGenres(
                 ud.string(forKey: kPrefix + "denylistGenres"), default: ["Tango", "Vals", "Milonga"]))
         }
-        if let data = ud.data(forKey: kPrefix + "denylistLabelOverrides"),
-           let overrides = try? JSONDecoder().decode([String: String].self, from: data) {
-            denylistLabelOverrides = overrides
-        } else {
-            denylistLabelOverrides = [:]
-        }
+        denylistLabelOverrides = AppSettings.decodeOrQuarantine(
+            [String: String].self, key: kPrefix + "denylistLabelOverrides") ?? [:]
         let rawPlayer = ud.string(forKey: kPrefix + "selectedPlayer") ?? ""
         selectedPlayer = MusicPlayerChoice(rawValue: rawPlayer) ?? .builtIn
         jriverZoneID = ud.object(forKey: kPrefix + "jriverZoneID").flatMap { $0 as? Int } ?? -1
@@ -424,12 +438,8 @@ final class AppSettings: ObservableObject {
         showAlbumArtist = ud.object(forKey: kPrefix + "showAlbumArtist").flatMap { $0 as? Bool } ?? false
         showGrouping = ud.object(forKey: kPrefix + "showGrouping").flatMap { $0 as? Bool } ?? false
         genreColorsEnabled = ud.object(forKey: kPrefix + "genreColorsEnabled").flatMap { $0 as? Bool } ?? false
-        if let data = ud.data(forKey: kPrefix + "genreColorRules"),
-           let rules = try? JSONDecoder().decode([GenreColorRule].self, from: data) {
-            genreColorRules = rules
-        } else {
-            genreColorRules = []
-        }
+        genreColorRules = AppSettings.decodeOrQuarantine(
+            [GenreColorRule].self, key: kPrefix + "genreColorRules") ?? []
         genreColorTitleEnabled = ud.object(forKey: kPrefix + "genreColorTitleEnabled").flatMap { $0 as? Bool } ?? false
         if let idString = ud.string(forKey: kPrefix + "activeProfileID") {
             activeProfileID = UUID(uuidString: idString)
@@ -455,31 +465,19 @@ final class AppSettings: ObservableObject {
         performanceBackgroundImageFilename = ud.string(forKey: kPrefix + "performanceBackgroundImageFilename")
         performanceBackgroundDuringCortina = ud.object(forKey: kPrefix + "performanceBackgroundDuringCortina")
             .flatMap { $0 as? Bool } ?? false
-        if let data = ud.data(forKey: kPrefix + "performanceTextLines"),
-           let lines = try? JSONDecoder().decode([PerformanceTextLine].self, from: data) {
-            performanceTextLines = lines
-        } else {
-            performanceTextLines = []
-        }
+        performanceTextLines = AppSettings.decodeOrQuarantine(
+            [PerformanceTextLine].self, key: kPrefix + "performanceTextLines") ?? []
         let rawPos = ud.string(forKey: kPrefix + "trackCounterPosition") ?? ""
         trackCounterPosition = TrackCounterPosition(rawValue: rawPos) ?? .bottomRight
-        if let data = ud.data(forKey: kPrefix + "trackTransforms") {
-            if let rules = try? JSONDecoder().decode([String: TransformRule].self, from: data) {
-                trackTransforms = rules
-            } else {
-                NSLog("[TangoDisplay] WARNING: trackTransforms decode failed — resetting to empty")
-                trackTransforms = [:]
-            }
-        } else {
-            trackTransforms = [:]
-        }
+        trackTransforms = AppSettings.decodeOrQuarantine(
+            [String: TransformRule].self, key: kPrefix + "trackTransforms") ?? [:]
         audioUnitPluginEnabled = ud.object(forKey: kPrefix + "audioUnitPluginEnabled").flatMap { $0 as? Bool } ?? false
         audioUnitPluginBypassed = ud.object(forKey: kPrefix + "audioUnitPluginBypassed").flatMap { $0 as? Bool } ?? false
-        if let data = ud.data(forKey: kPrefix + "audioUnitPluginChain"),
-           let chain = try? JSONDecoder().decode([AudioUnitChainSlot].self, from: data) {
+        if let chain = AppSettings.decodeOrQuarantine(
+            [AudioUnitChainSlot].self, key: kPrefix + "audioUnitPluginChain") {
             audioUnitPluginChain = Array(chain.prefix(AudioUnitChainSlot.maxSlots))
-        } else if let data = ud.data(forKey: kPrefix + "selectedAudioUnitPlugin"),
-                  let sel = try? JSONDecoder().decode(AudioUnitPluginSelection.self, from: data) {
+        } else if let sel = AppSettings.decodeOrQuarantine(
+            AudioUnitPluginSelection.self, key: kPrefix + "selectedAudioUnitPlugin") {
             // Migrate the legacy single-plugin setting into a one-slot chain.
             let legacyPreset = ud.string(forKey: kPrefix + "lastUsedAUPresetName")
             let migrated = [AudioUnitChainSlot(

@@ -78,7 +78,13 @@ public struct TransformRule: Codable, Equatable {
         pattern          = try c.decodeIfPresent(String.self, forKey: .pattern)        ?? ""
         replacement      = try c.decodeIfPresent(String.self, forKey: .replacement)    ?? ""
         testInput        = try c.decodeIfPresent(String.self, forKey: .testInput)      ?? ""
-        sourceField      = try c.decodeIfPresent(TrackInfoField.self, forKey: .sourceField)
+        // Tolerant: an unknown raw value (field removed/renamed in another version)
+        // must not fail the whole rules dictionary — treat it as "no remap".
+        if let rawSource = try c.decodeIfPresent(String.self, forKey: .sourceField) {
+            sourceField = TrackInfoField(rawValue: rawSource)
+        } else {
+            sourceField = nil
+        }
         clearWhenNoMatch = try c.decodeIfPresent(Bool.self, forKey: .clearWhenNoMatch) ?? false
     }
 }

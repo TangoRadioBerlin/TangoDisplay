@@ -57,9 +57,14 @@ public struct AutoBypassRule: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         matchGenres   = try c.decodeIfPresent([String].self, forKey: .matchGenres) ?? []
         yearThreshold = try c.decodeIfPresent(Int.self, forKey: .yearThreshold)
-        yearMode      = try c.decodeIfPresent(YearComparison.self, forKey: .yearMode) ?? .olderThan
-        action        = try c.decodeIfPresent(SlotRuleAction.self, forKey: .action) ?? .activate
-        matchMode     = try c.decodeIfPresent(MatchMode.self, forKey: .matchMode) ?? .all
+        // Tolerant: unknown raw values (from a newer/older app version) fall back to
+        // defaults instead of failing the whole plugin chain.
+        yearMode  = (try c.decodeIfPresent(String.self, forKey: .yearMode))
+            .flatMap { YearComparison(rawValue: $0) } ?? .olderThan
+        action    = (try c.decodeIfPresent(String.self, forKey: .action))
+            .flatMap { SlotRuleAction(rawValue: $0) } ?? .activate
+        matchMode = (try c.decodeIfPresent(String.self, forKey: .matchMode))
+            .flatMap { MatchMode(rawValue: $0) } ?? .all
     }
 
     /// True when the track's genre satisfies the genre condition. Empty list → always true.
