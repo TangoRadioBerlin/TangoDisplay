@@ -2241,6 +2241,74 @@ func runSettingsFormatContractTests() {
     }
 }
 
+// MARK: - Waveform math tests
+
+func runWaveformMathTests() {
+    suite("waveformSilenceFractions") {
+        test("empty peaks yield zero fractions") {
+            let f = waveformSilenceFractions(peaks: [], threshold: 0.02)
+            try expectEqual(f.leading, 0)
+            try expectEqual(f.trailing, 0)
+        }
+        test("fully silent input is not marked (avoids an all-silence panel)") {
+            let f = waveformSilenceFractions(peaks: [0, 0.01, 0], threshold: 0.02)
+            try expectEqual(f.leading, 0)
+            try expectEqual(f.trailing, 0)
+        }
+        test("leading and trailing silent buckets are fractioned correctly") {
+            // 10 buckets: 2 silent, 6 loud, 2 silent
+            let peaks: [Float] = [0, 0.01, 0.5, 0.6, 0.7, 0.6, 0.5, 0.4, 0.0, 0.01]
+            let f = waveformSilenceFractions(peaks: peaks, threshold: 0.02)
+            try expectEqual(f.leading, 0.2)
+            try expectEqual(f.trailing, 0.2)
+        }
+        test("threshold boundary: exactly-threshold counts as silent") {
+            let f = waveformSilenceFractions(peaks: [0.02, 0.5], threshold: 0.02)
+            try expectEqual(f.leading, 0.5)
+        }
+        test("no silence at either end") {
+            let f = waveformSilenceFractions(peaks: [0.5, 0.1, 0.5], threshold: 0.02)
+            try expectEqual(f.leading, 0)
+            try expectEqual(f.trailing, 0)
+        }
+    }
+
+    suite("WindowFramePlacement.sanitized — off-screen recovery") {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let minSize = CGSize(width: 320, height: 110)
+
+        test("frame on screen is returned unchanged") {
+            let f = CGRect(x: 100, y: 100, width: 700, height: 200)
+            try expectEqual(WindowFramePlacement.sanitized(frame: f, visibleScreens: [screen], minSize: minSize), f)
+        }
+        test("fully off-screen frame is centred on the first screen") {
+            let f = CGRect(x: 5000, y: 5000, width: 700, height: 200)
+            let s = WindowFramePlacement.sanitized(frame: f, visibleScreens: [screen], minSize: minSize)
+            try expect(screen.contains(s), "Recovered frame must be inside the screen")
+            try expectEqual(s.width, 700)
+            try expectEqual(s.height, 200)
+        }
+        test("frame smaller than the minimum size is grown") {
+            let f = CGRect(x: 100, y: 100, width: 50, height: 20)
+            let s = WindowFramePlacement.sanitized(frame: f, visibleScreens: [screen], minSize: minSize)
+            try expect(s.width >= 320 && s.height >= 110, "Size must be clamped to the minimum")
+        }
+        test("partially visible frame is left alone (user's choice)") {
+            let f = CGRect(x: -200, y: 500, width: 700, height: 200)
+            try expectEqual(WindowFramePlacement.sanitized(frame: f, visibleScreens: [screen], minSize: minSize), f)
+        }
+        test("no screens: frame is returned unchanged") {
+            let f = CGRect(x: 5000, y: 5000, width: 700, height: 200)
+            try expectEqual(WindowFramePlacement.sanitized(frame: f, visibleScreens: [], minSize: minSize), f)
+        }
+        test("second screen counts as visible") {
+            let right = CGRect(x: 1920, y: 0, width: 1920, height: 1080)
+            let f = CGRect(x: 2200, y: 300, width: 700, height: 200)
+            try expectEqual(WindowFramePlacement.sanitized(frame: f, visibleScreens: [screen, right], minSize: minSize), f)
+        }
+    }
+}
+
 // MARK: - Regex transform tests
 
 func runRegexTransformTests() {
@@ -2866,6 +2934,7 @@ runPinRateLimiterTests()
 runTdjNameTests()
 runPerformanceModeTests()
 runSettingsFormatContractTests()
+runWaveformMathTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"

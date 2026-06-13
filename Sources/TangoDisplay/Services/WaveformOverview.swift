@@ -1,5 +1,7 @@
 import AVFoundation
 import Foundation
+import OSLog
+import TangoDisplayCore
 
 /// Coarse peak overview + detected leading/trailing silence for an audio file.
 struct WaveformData {
@@ -13,6 +15,8 @@ struct WaveformData {
 actor WaveformOverview {
     static let shared = WaveformOverview()
 
+    private static let log = Logger(subsystem: "TangoDisplay", category: "waveform")
+
     private var cache: [URL: WaveformData] = [:]
     private let bucketCount = 3000
     private let silenceThreshold: Float = 0.02 // ≈ -34 dBFS
@@ -20,24 +24,18 @@ actor WaveformOverview {
     func overview(url: URL) async -> WaveformData {
         if let cached = cache[url] { return cached }
         let peaks = Self.generate(url: url, buckets: bucketCount)
-        let result = Self.withSilence(peaks: peaks, threshold: silenceThreshold)
-        cache[url] = result
-        return result
-    }
-
-    private static func withSilence(peaks: [Float], threshold: Float) -> WaveformData {
-        let n = peaks.count
-        guard n > 0 else { return WaveformData(peaks: peaks, leadingSilenceFraction: 0, trailingSilenceFraction: 0) }
-        var first = 0
-        while first < n && peaks[first] <= threshold { first += 1 }
-        if first == n { // entirely silent — mark nothing to avoid a fully red panel
-            return WaveformData(peaks: peaks, leadingSilenceFraction: 0, trailingSilenceFraction: 0)
+        let fractions = waveformSilenceFractions(peaks: peaks, threshold: silenceThreshold)
+        let result = WaveformData(peaks: peaks,
+                                  leadingSilenceFraction: fractions.leading,
+                                  trailingSilenceFraction: fractions.trailing)
+        // Don't cache failures: a transient read error (file briefly locked/unavailable)
+        // would otherwise pin an empty waveform for the rest of the session.
+        if peaks.isEmpty {
+            Self.log.error("Waveform read produced no data for \(url.lastPathComponent, privacy: .public)")
+        } else {
+            cache[url] = result
         }
-        var last = n - 1
-        while last > first && peaks[last] <= threshold { last -= 1 }
-        let leading = Double(first) / Double(n)
-        let trailing = Double(n - 1 - last) / Double(n)
-        return WaveformData(peaks: peaks, leadingSilenceFraction: leading, trailingSilenceFraction: trailing)
+        return result
     }
 
     private static func generate(url: URL, buckets: Int) -> [Float] {

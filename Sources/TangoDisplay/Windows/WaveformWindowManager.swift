@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TangoDisplayCore
 
 /// Manages a single floating, freely positionable/resizable waveform panel. Frame persisted to UserDefaults.
 @MainActor
@@ -25,8 +26,14 @@ enum WaveformWindowManager {
         let originX = (d.object(forKey: kX) as? Double) ?? 200
         let originY = (d.object(forKey: kY) as? Double) ?? 200
 
+        // A frame persisted on a since-disconnected monitor must not come back invisible.
+        let restored = WindowFramePlacement.sanitized(
+            frame: CGRect(x: originX, y: originY, width: width, height: height),
+            visibleScreens: NSScreen.screens.map(\.visibleFrame),
+            minSize: CGSize(width: 320, height: 110))
+
         let p = NSPanel(
-            contentRect: NSRect(x: originX, y: originY, width: width, height: height),
+            contentRect: restored,
             styleMask: [.titled, .closable, .resizable, .utilityWindow],
             backing: .buffered,
             defer: false
