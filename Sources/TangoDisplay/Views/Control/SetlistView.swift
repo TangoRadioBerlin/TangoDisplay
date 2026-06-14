@@ -1079,6 +1079,7 @@ struct SetlistView: View {
     }
 
     private func pasteFromClipboard() {
+        // Standard path: works for Finder, Music.app, etc.
         let urls = (NSPasteboard.general.readObjects(forClasses: [NSURL.self],
                     options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         if !urls.isEmpty {
@@ -1086,18 +1087,25 @@ struct SetlistView: View {
             return
         }
 
-        // Foobar2000 uses a proprietary type; each item is a plist [fileURLString, 0]
-        let foobarType = NSPasteboard.PasteboardType("com.foobar2000.location")
-        var foobarURLs: [URL] = []
+        // foobar2000 (macOS) writes public.file-url as a bare POSIX path string
+        // rather than a file:// URL, so readObjects yields nothing. Read per-item
+        // and construct the URL directly from the path or file:// string.
+        var perItemURLs: [URL] = []
         for item in NSPasteboard.general.pasteboardItems ?? [] {
-            guard let data = item.data(forType: foobarType),
-                  let array = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [Any],
-                  let urlString = array.first as? String,
-                  let url = URL(string: urlString), url.isFileURL else { continue }
-            foobarURLs.append(url)
+            if let str = item.string(forType: .fileURL), !str.isEmpty {
+                let url: URL
+                if str.hasPrefix("file://") {
+                    // percent-encode in case the app left spaces unencoded
+                    url = URL(string: str) ?? URL(fileURLWithPath: String(str.dropFirst(7)))
+                } else {
+                    url = URL(fileURLWithPath: str)
+                }
+                if url.isFileURL { perItemURLs.append(url) }
+            }
         }
-        guard !foobarURLs.isEmpty else { return }
-        handleIncomingURLs(foobarURLs, anchorID: nil)
+        if !perItemURLs.isEmpty {
+            handleIncomingURLs(perItemURLs, anchorID: nil)
+        }
     }
 
     private func loadURLs(from providers: [NSItemProvider]) async -> [URL] {
