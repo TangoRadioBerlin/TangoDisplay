@@ -428,9 +428,10 @@ final class SetlistManager: ObservableObject {
         let genrePredefined = await predefinedGenreName()                                  // M4A: gnre integer atom (Music.app dropdown)
         let genreVorbis     = await string(forRawKey: "genre")                             // FLAC/Vorbis comment
         let genreRawTcon    = resolveID3Genre(await string(forRawKey: "tcon"))             // raw ID3 key fallback (resolved)
-        let genre = genreID3 ?? genreiTunes ?? genrePredefined ?? genreVorbis
-            ?? genreRawTcon ?? SetlistManager.genreFromAudioToolbox(url)                   // AIFF ID3 chunk (AVFoundation misses these)
-            ?? SetlistManager.iTunesLibrary[SetlistManager.iTunesMediaRelativeKey(url.path)]?.genre // Music.app library XML (genre not embedded in file)
+        let genreEmbedded = genreID3 ?? genreiTunes ?? genrePredefined ?? genreVorbis ?? genreRawTcon
+        let genre = genreEmbedded
+            ?? SetlistManager.genreFromAudioToolbox(url)
+            ?? SetlistManager.iTunesLibrary[SetlistManager.iTunesMediaRelativeKey(url.path)]?.genre
             ?? ""
 
         let yearFromTYER    = (await string(for: .id3MetadataYear)).flatMap { Int($0) }
