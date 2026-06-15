@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Combine
 import CryptoKit
+import TangoDisplayCore
 
 /// Minimal HTTP/1.1 + WebSocket server built on `NWListener`.
 ///
@@ -119,6 +120,11 @@ final class HTTPServerTransport: RemoteTransport {
     // MARK: - Per-connection handling
 
     private func accept(connection: NWConnection) {
+        // Cap simultaneous connections so a flood can't exhaust resources (F1).
+        guard clients.count < RemoteServerLimits.maxConcurrentClients else {
+            connection.cancel()
+            return
+        }
         let client = ClientConnection(connection: connection)
         clients[client.id] = client
         connectionCountSubject.send(clients.count)
@@ -172,8 +178,15 @@ final class HTTPServerTransport: RemoteTransport {
     // MARK: - HTTP request handling
 
     private func processHTTPRequest(for client: ClientConnection) {
-        // Wait for full headers (terminator: \r\n\r\n)
-        guard let terminatorRange = client.buffer.range(of: Data("\r\n\r\n".utf8)) else { return }
+        // Wait for full headers (terminator: \r\n\r\n). Bound the wait: a client that
+        // keeps sending without ever terminating the headers (slowloris) must not grow
+        // the buffer without limit (F1).
+        guard let terminatorRange = client.buffer.range(of: Data("\r\n\r\n".utf8)) else {
+            if RemoteServerLimits.isHeaderOversized(bufferBytes: client.buffer.count) {
+                sendHTTPResponse(client: client, status: "400 Bad Request", body: nil, closeAfter: true)
+            }
+            return
+        }
         let headerData = client.buffer.subdata(in: 0..<terminatorRange.lowerBound)
         client.buffer.removeSubrange(0..<terminatorRange.upperBound)
 

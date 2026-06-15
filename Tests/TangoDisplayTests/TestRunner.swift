@@ -2291,6 +2291,24 @@ func runPerformanceLookaheadTests() {
 }
 
 
+// MARK: - Remote server limits tests
+
+func runRemoteServerLimitsTests() {
+    suite("RemoteServerLimits") {
+        test("header buffer at or below the cap is allowed") {
+            try expect(!RemoteServerLimits.isHeaderOversized(bufferBytes: 0))
+            try expect(!RemoteServerLimits.isHeaderOversized(bufferBytes: RemoteServerLimits.maxHeaderBytes))
+        }
+        test("header buffer above the cap is rejected") {
+            try expect(RemoteServerLimits.isHeaderOversized(bufferBytes: RemoteServerLimits.maxHeaderBytes + 1))
+        }
+        test("connection cap is a sane positive bound") {
+            try expect(RemoteServerLimits.maxConcurrentClients > 0)
+            try expect(RemoteServerLimits.maxConcurrentClients <= 64)
+        }
+    }
+}
+
 // MARK: - Waveform math tests
 
 func runWaveformMathTests() {
@@ -3003,6 +3021,7 @@ runTdjNameTests()
 runPerformanceModeTests()
 runSettingsFormatContractTests()
 runPerformanceLookaheadTests()
+runRemoteServerLimitsTests()
 runWaveformMathTests()
 
 print("\n════════════════════════════════")
