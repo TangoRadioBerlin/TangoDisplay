@@ -2180,10 +2180,10 @@ func runPerformanceModeTests() {
             let s = DisplayState(mode: .cortina, nextTrackIsPerformance: true)
             try expect(s.nextTrackIsPerformance)
         }
-        test("TdjNameVisibility treats performance like an active mode") {
-            try expect(TdjNameVisibility.playing.isVisible(in: .performance))
+        test("TdjName is never shown in performance mode (overlay-free view)") {
+            try expect(!TdjNameVisibility.playing.isVisible(in: .performance))
             try expect(!TdjNameVisibility.idlePaused.isVisible(in: .performance))
-            try expect(TdjNameVisibility.always.isVisible(in: .performance))
+            try expect(!TdjNameVisibility.always.isVisible(in: .performance))
         }
     }
 }

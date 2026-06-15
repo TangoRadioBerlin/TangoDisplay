@@ -18,12 +18,16 @@ public enum TdjNameVisibility: String, CaseIterable, Identifiable {
     }
 
     /// Whether the name should be visible in the given display mode.
-    /// `.playing` covers cortinas and performances too — the DJ is still working the floor.
+    /// `.playing` covers cortinas too — the DJ is still working the floor.
+    /// Performance mode is intentionally excluded: `PerformanceView` is a dedicated,
+    /// overlay-free full-screen layout, so the TDJ name is never drawn there. Keeping
+    /// the rule honest (rather than returning true and silently not rendering) avoids
+    /// a misleading "visible" setting.
     public func isVisible(in mode: DisplayMode) -> Bool {
         switch self {
-        case .playing:    return mode == .playing || mode == .cortina || mode == .performance
+        case .playing:    return mode == .playing || mode == .cortina
         case .idlePaused: return mode == .idle || mode == .paused
-        case .always:     return true
+        case .always:     return mode != .performance
         }
     }
 }
