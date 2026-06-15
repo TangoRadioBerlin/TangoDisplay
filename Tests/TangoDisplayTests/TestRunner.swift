@@ -2241,6 +2241,56 @@ func runSettingsFormatContractTests() {
     }
 }
 
+// MARK: - Performance lookahead tests
+
+func runPerformanceLookaheadTests() {
+    // Allowlist detector treating "Cortina" as the cortina genre.
+    let detector = CortinaDetector(useAllowlist: true, allowlistGenres: ["cortina"],
+                                   useDenylist: false, denylistGenres: [])
+    func entry(_ genre: String, performance: Bool = false, played: Bool = false) -> PerformanceLookaheadEntry {
+        PerformanceLookaheadEntry(genre: genre, isPerformance: performance, isPlayed: played)
+    }
+
+    suite("nextDanceTrackIsPerformance") {
+        test("first unplayed dance track after the cortina decides the flag") {
+            let entries = [entry("Cortina"), entry("Tango", performance: true), entry("Vals")]
+            try expect(nextDanceTrackIsPerformance(after: 0, entries: entries, detector: detector))
+        }
+        test("non-performance next track yields false") {
+            let entries = [entry("Cortina"), entry("Tango"), entry("Vals", performance: true)]
+            try expect(!nextDanceTrackIsPerformance(after: 0, entries: entries, detector: detector))
+        }
+        test("played tracks are skipped") {
+            let entries = [entry("Cortina"),
+                           entry("Tango", performance: false, played: true),
+                           entry("Vals", performance: true)]
+            try expect(nextDanceTrackIsPerformance(after: 0, entries: entries, detector: detector))
+        }
+        test("a following cortina stops the search (no dance track ahead → false)") {
+            let entries = [entry("Cortina"), entry("Cortina"), entry("Tango", performance: true)]
+            try expect(!nextDanceTrackIsPerformance(after: 0, entries: entries, detector: detector))
+        }
+        test("nothing after the current entry → false") {
+            let entries = [entry("Cortina")]
+            try expect(!nextDanceTrackIsPerformance(after: 0, entries: entries, detector: detector))
+        }
+        test("out-of-range index → false (no crash)") {
+            try expect(!nextDanceTrackIsPerformance(after: 5, entries: [entry("Tango", performance: true)],
+                                                    detector: detector))
+            try expect(!nextDanceTrackIsPerformance(after: -1, entries: [entry("Tango", performance: true)],
+                                                    detector: detector))
+        }
+        test("reflects a changed next track (F2: stale-flag regression)") {
+            // Same current cortina, but the entry that follows it changed from performance to plain.
+            let before = [entry("Cortina"), entry("Tango", performance: true)]
+            let after  = [entry("Cortina"), entry("Tango", performance: false)]
+            try expect(nextDanceTrackIsPerformance(after: 0, entries: before, detector: detector))
+            try expect(!nextDanceTrackIsPerformance(after: 0, entries: after, detector: detector))
+        }
+    }
+}
+
+
 // MARK: - Waveform math tests
 
 func runWaveformMathTests() {
@@ -2952,6 +3002,7 @@ runPinRateLimiterTests()
 runTdjNameTests()
 runPerformanceModeTests()
 runSettingsFormatContractTests()
+runPerformanceLookaheadTests()
 runWaveformMathTests()
 
 print("\n════════════════════════════════")

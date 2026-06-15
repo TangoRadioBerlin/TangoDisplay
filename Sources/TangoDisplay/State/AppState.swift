@@ -468,34 +468,34 @@ final class AppState: ObservableObject {
             isLastTandaActive = true
         }
 
-        // Detect whether the first dance track after this cortina is a performance track
-        // (local player only — external players don't have per-entry isPerformance metadata).
-        var nextIsPerformance = false
-        if let player = localPlayer, let currentID = player.currentEntryID {
-            let entries = setlist.entries
-            if let currentIdx = entries.firstIndex(where: { $0.id == currentID }) {
-                for i in (currentIdx + 1)..<entries.count {
-                    let e = entries[i]
-                    if e.state == .played { continue }
-                    if detector.isCortina(genre: e.track.genre) { break }
-                    nextIsPerformance = e.isPerformance
-                    break
-                }
-            }
-        }
-
         displayState = DisplayState(
             mode: .cortina,
             currentTrack: track,
             nextTrack: nextTrack,
             tandaPosition: nil,
             overrideText: nil,
-            nextTrackIsPerformance: nextIsPerformance
+            nextTrackIsPerformance: computeNextTrackIsPerformance(detector: detector)
         )
         currentArtwork = nil
         displayedArtworkTrackID = nil
 
         rescheduleAutoFadeIfNeeded()
+    }
+
+    /// Whether the dance track following the current cortina is a performance track.
+    /// Local player only — external players carry no per-entry `isPerformance` metadata,
+    /// so this returns false for them. Used both when entering a cortina and when a fresh
+    /// playlist arrives mid-cortina, so `nextTrackIsPerformance` never goes stale (F2).
+    private func computeNextTrackIsPerformance(detector: CortinaDetector) -> Bool {
+        guard let player = localPlayer, let currentID = player.currentEntryID,
+              let currentIdx = setlist.entries.firstIndex(where: { $0.id == currentID })
+        else { return false }
+        let lookahead = setlist.entries.map {
+            PerformanceLookaheadEntry(genre: $0.track.genre,
+                                      isPerformance: $0.isPerformance,
+                                      isPlayed: $0.state == .played)
+        }
+        return nextDanceTrackIsPerformance(after: currentIdx, entries: lookahead, detector: detector)
     }
 
     private func handleDanceTrack(track: Track, detector: CortinaDetector) {
@@ -631,6 +631,9 @@ final class AppState: ObservableObject {
             } else {
                 displayState.nextTrack = nil
             }
+            // Keep the performance flag in step with the (possibly changed) next track
+            // — otherwise a mid-cortina setlist edit leaves a stale announcement (F2).
+            displayState.nextTrackIsPerformance = computeNextTrackIsPerformance(detector: detector)
         }
     }
 
