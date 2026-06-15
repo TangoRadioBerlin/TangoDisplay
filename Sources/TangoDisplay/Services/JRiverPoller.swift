@@ -81,7 +81,7 @@ final class JRiverPoller: MusicPlayerSource {
     func fetchArtwork(for track: Track) async -> NSImage? {
         let fileKey = track.persistentID
         guard !fileKey.isEmpty,
-              let url = URL(string: "\(baseURL)/File/GetImage?File=\(fileKey)&Type=Thumb&Width=0&Height=0") else {
+              let url = URL(string: "\(baseURL)/File/GetImage?File=\(percentEncodedQueryValue(fileKey))&Type=Thumb&Width=0&Height=0") else {
             return nil
         }
         guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
@@ -180,7 +180,7 @@ final class JRiverPoller: MusicPlayerSource {
     // MARK: - Step 2: Enrich current track metadata
 
     private func fetchMetadata(fileKey: String, title: String, artist: String, genre: String, state: PlayerState) {
-        guard let url = URL(string: "\(baseURL)/File/GetInfo?File=\(fileKey)&Fields=Album%20Artist,Date%20(year),Comment,Grouping&Format=XML") else {
+        guard let url = URL(string: "\(baseURL)/File/GetInfo?File=\(percentEncodedQueryValue(fileKey))&Fields=Album%20Artist,Date%20(year),Comment,Grouping&Format=XML") else {
             let track = Track(title: title, artist: artist, genre: genre, persistentID: fileKey, year: nil, comment: nil, albumArtist: nil)
             handleSuccess()
             DispatchQueue.main.async { self.onTrackUpdate?(track, state) }
@@ -229,7 +229,7 @@ final class JRiverPoller: MusicPlayerSource {
     // MARK: - Next track (cortina preview)
 
     private func fetchNextTrackMetadata(fileKey: String) {
-        guard let url = URL(string: "\(baseURL)/File/GetInfo?File=\(fileKey)&Fields=Name,Artist,Genre,Album%20Artist,Date%20(year),Comment,Grouping&Format=XML") else {
+        guard let url = URL(string: "\(baseURL)/File/GetInfo?File=\(percentEncodedQueryValue(fileKey))&Fields=Name,Artist,Genre,Album%20Artist,Date%20(year),Comment,Grouping&Format=XML") else {
             DispatchQueue.main.async { self.onNextTrackUpdate?(nil) }
             return
         }

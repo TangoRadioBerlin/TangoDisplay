@@ -2309,6 +2309,27 @@ func runRemoteServerLimitsTests() {
     }
 }
 
+// MARK: - Query encoding tests
+
+func runQueryEncodingTests() {
+    suite("percentEncodedQueryValue") {
+        test("unreserved characters pass through unchanged") {
+            try expectEqual(percentEncodedQueryValue("12345"), "12345")
+            try expectEqual(percentEncodedQueryValue("a-b_c.d~e"), "a-b_c.d~e")
+        }
+        test("query-significant characters are escaped") {
+            try expectEqual(percentEncodedQueryValue("a&b"), "a%26b")
+            try expectEqual(percentEncodedQueryValue("a=b"), "a%3Db")
+            try expectEqual(percentEncodedQueryValue("a?b#c"), "a%3Fb%23c")
+            try expectEqual(percentEncodedQueryValue("a b"), "a%20b")
+            try expectEqual(percentEncodedQueryValue("a+b"), "a%2Bb")
+        }
+        test("empty string stays empty") {
+            try expectEqual(percentEncodedQueryValue(""), "")
+        }
+    }
+}
+
 // MARK: - Waveform math tests
 
 func runWaveformMathTests() {
@@ -3022,6 +3043,7 @@ runPerformanceModeTests()
 runSettingsFormatContractTests()
 runPerformanceLookaheadTests()
 runRemoteServerLimitsTests()
+runQueryEncodingTests()
 runWaveformMathTests()
 
 print("\n════════════════════════════════")
