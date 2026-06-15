@@ -62,7 +62,7 @@ final class JRiverPoller: MusicPlayerSource {
             session.dataTask(with: url) { [weak self] data, _, _ in
                 guard let self,
                       let data,
-                      let xml = String(data: data, encoding: .utf8) else {
+                      let xml = JRiverPoller.boundedXML(data) else {
                     DispatchQueue.main.async { self?.onNextTrackUpdate?(nil) }
                     return
                 }
@@ -115,7 +115,7 @@ final class JRiverPoller: MusicPlayerSource {
         session.dataTask(with: url) { [weak self] data, _, error in
             guard let self else { return }
 
-            guard error == nil, let data, let xml = String(data: data, encoding: .utf8) else {
+            guard error == nil, let data, let xml = JRiverPoller.boundedXML(data) else {
                 self.handleFailure()
                 DispatchQueue.main.async {
                     self.onTrackUpdate?(nil, .stopped)
@@ -196,7 +196,7 @@ final class JRiverPoller: MusicPlayerSource {
             var comment: String? = nil
             var grouping: String? = nil
 
-            if let data, let xml = String(data: data, encoding: .utf8) {
+            if let data, let xml = JRiverPoller.boundedXML(data) {
                 let aa = self.decodeXML(self.extractFieldValue(xml, fieldName: "Album Artist"))
                 if !aa.isEmpty { albumArtist = aa }
 
@@ -236,7 +236,7 @@ final class JRiverPoller: MusicPlayerSource {
 
         session.dataTask(with: url) { [weak self] data, _, _ in
             guard let self else { return }
-            guard let data, let xml = String(data: data, encoding: .utf8) else {
+            guard let data, let xml = JRiverPoller.boundedXML(data) else {
                 DispatchQueue.main.async { self.onNextTrackUpdate?(nil) }
                 return
             }
@@ -280,7 +280,7 @@ final class JRiverPoller: MusicPlayerSource {
         session.dataTask(with: url) { [weak self] data, _, _ in
             guard let self,
                   let data,
-                  let xml = String(data: data, encoding: .utf8) else { return }
+                  let xml = JRiverPoller.boundedXML(data) else { return }
 
             let tracks = self.parsePlaylistTracks(from: xml)
             guard !tracks.isEmpty else { return }
@@ -334,7 +334,7 @@ final class JRiverPoller: MusicPlayerSource {
             completion([]); return
         }
         URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data, let xml = String(data: data, encoding: .utf8) else {
+            guard let data, let xml = JRiverPoller.boundedXML(data) else {
                 DispatchQueue.main.async { completion([]) }; return
             }
             // Response uses flat items: ZoneID0/ZoneName0, ZoneID1/ZoneName1, …
@@ -389,6 +389,13 @@ final class JRiverPoller: MusicPlayerSource {
               let match = regex.firstMatch(in: xml, range: NSRange(xml.startIndex..., in: xml)),
               let range = Range(match.range(at: 1), in: xml) else { return "" }
         return String(xml[range])
+    }
+
+    /// Decodes the MCWS response to a String only if it's within the size cap, so a
+    /// compromised/buggy JRiver returning a huge payload isn't parsed into a larger String (F4).
+    private static func boundedXML(_ data: Data?) -> String? {
+        guard let data, ExternalInputLimits.isWithinLimit(data.count) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private func decodeXML(_ s: String) -> String {

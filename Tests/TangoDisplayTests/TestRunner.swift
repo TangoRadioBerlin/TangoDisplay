@@ -2330,6 +2330,20 @@ func runQueryEncodingTests() {
     }
 }
 
+// MARK: - External input limits tests
+
+func runExternalInputLimitsTests() {
+    suite("ExternalInputLimits") {
+        test("payloads at or below the cap are accepted") {
+            try expect(ExternalInputLimits.isWithinLimit(0))
+            try expect(ExternalInputLimits.isWithinLimit(ExternalInputLimits.maxResponseBytes))
+        }
+        test("payloads above the cap are rejected") {
+            try expect(!ExternalInputLimits.isWithinLimit(ExternalInputLimits.maxResponseBytes + 1))
+        }
+    }
+}
+
 // MARK: - Waveform math tests
 
 func runWaveformMathTests() {
@@ -3044,6 +3058,7 @@ runSettingsFormatContractTests()
 runPerformanceLookaheadTests()
 runRemoteServerLimitsTests()
 runQueryEncodingTests()
+runExternalInputLimitsTests()
 runWaveformMathTests()
 
 print("\n════════════════════════════════")

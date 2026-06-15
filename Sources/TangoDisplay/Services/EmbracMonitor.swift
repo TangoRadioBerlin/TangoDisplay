@@ -326,6 +326,9 @@ final class EmbracMonitor: @unchecked Sendable {
         }
 
         let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        // Bound the parse: a runaway/compromised player app returning a huge stdout
+        // must not be turned into an even larger String (F4).
+        guard ExternalInputLimits.isWithinLimit(data.count) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
