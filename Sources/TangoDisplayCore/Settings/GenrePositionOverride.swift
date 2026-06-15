@@ -91,7 +91,7 @@ extension AppearanceProfile {
         }
     }
 
-    private mutating func setPlacement(_ p: ElementPlacement, forKey key: String) {
+    public mutating func setPlacement(_ p: ElementPlacement, forKey key: String) {
         switch key {
         case "title":          titleOffsetX = p.offsetX; titleOffsetY = p.offsetY; titleBoxWidth = p.boxWidth; titleHAlign = p.hAlign
         case "artist":         artistOffsetX = p.offsetX; artistOffsetY = p.offsetY; artistBoxWidth = p.boxWidth; artistHAlign = p.hAlign

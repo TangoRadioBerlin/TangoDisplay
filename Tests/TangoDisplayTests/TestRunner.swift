@@ -2893,6 +2893,15 @@ func runGenrePositionOverrideTests() {
             try expect(abs((placements.placements["genre"]?.offsetX ?? 0) - (-20)) < 0.001)
             try expectEqual(placements.placements["genre"]?.hAlign, .trailing)
         }
+        test("setPlacement writes a single element's flat fields and round-trips") {
+            var p = base()
+            p.setPlacement(ElementPlacement(offsetX: 7, offsetY: -3, boxWidth: 25, hAlign: .leading),
+                           forKey: "artist")
+            try expectEqual(p.placement(forKey: "artist"),
+                            ElementPlacement(offsetX: 7, offsetY: -3, boxWidth: 25, hAlign: .leading))
+            try expect(abs(p.artistOffsetX - 7) < 0.001)   // wrote the flat field
+            try expectEqual(p.placement(forKey: "title"), ElementPlacement())  // others untouched
+        }
         test("artwork override replaces album-artwork placement") {
             var p = base()
             p.albumArtworkOffsetX = 0; p.albumArtworkScale = 1
