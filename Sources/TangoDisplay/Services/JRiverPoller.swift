@@ -95,6 +95,7 @@ final class JRiverPoller: MusicPlayerSource {
         t.schedule(deadline: .now() + interval)
         t.setEventHandler { [weak self] in self?.doPoll() }
         t.resume()
+        timer?.cancel()   // release any previous source before replacing it
         timer = t
     }
 

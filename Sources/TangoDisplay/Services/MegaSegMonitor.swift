@@ -100,6 +100,7 @@ final class MegaSegMonitor: @unchecked Sendable {
         t.schedule(deadline: .now() + delay)
         t.setEventHandler { [weak self] in self?.doPoll() }
         t.resume()
+        timer?.cancel()   // release any previous source before replacing it
         timer = t
     }
 

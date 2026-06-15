@@ -100,6 +100,7 @@ final class MusicPoller {
             self?.doPoll()
         }
         t.resume()
+        timer?.cancel()   // release any previous source before replacing it
         timer = t
     }
 
