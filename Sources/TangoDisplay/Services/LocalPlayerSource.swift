@@ -124,6 +124,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     // MARK: - Private — loudness analysis
 
     private var inFlightAnalysisURLs = Set<URL>()
+    private var analysisTasks: [URL: Task<Void, Never>] = [:]   // cancellable loudness scans, keyed by file
     private let loudnessCache = LoudnessAnalysisCache.shared
 
     // MARK: - Init
@@ -464,7 +465,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         let targetLufs = Double(settings.replayGainTargetLufs)
         let cache = loudnessCache
 
-        Task.detached(priority: .background) { [weak self] in
+        let task = Task.detached(priority: .background) { [weak self] in
             let analysisResult: LoudnessAnalysisResult?
             let errorStatus: String?
             do {
@@ -483,6 +484,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.inFlightAnalysisURLs.remove(url)               // always runs
+                self.analysisTasks[url] = nil
                 guard self.currentEntryID == entryID else { return }
                 if let currentEntry = self.setlist.entries.first(where: { $0.id == entryID }) {
                     self.applyReplayGain(for: currentEntry)         // re-reads cache or falls through
@@ -492,6 +494,14 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 }
             }
         }
+        analysisTasks[url] = task
+    }
+
+    /// Cancels all in-flight loudness scans. Called when the playing track changes so a
+    /// rapid skip doesn't leave several background scans running for tracks nobody is on (F8).
+    /// Cancellation is cooperative — `LoudnessAnalyzer` checks it at chunk boundaries.
+    private func cancelInFlightAnalyses() {
+        for task in analysisTasks.values { task.cancel() }
     }
 
     private func preAnalyseIfNeeded(_ entry: SetlistEntry) {
@@ -544,6 +554,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         replayGainStatus = ""
         appliedReplayGainLinear = 1.0
         replayGainMixer.outputVolume = 1.0
+        cancelInFlightAnalyses()
         inFlightAnalysisURLs.removeAll()
         playerNode.stop()
         audioEngine.stop()
@@ -786,6 +797,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     // MARK: - Private: entry loading
 
     private func loadEntry(_ entry: SetlistEntry, bypassAutoGap: Bool = false) {
+        // The previous track's (and stale next-track's) loudness scans are no longer
+        // needed; cancel them before this load re-queues what it actually needs (F8).
+        cancelInFlightAnalyses()
         earlyMarkedEntryIDs.remove(entry.id)
         isCurrentEntryMarkedAsPlayed = false
         // Set before the graph is (re)built below so auto-bypass rules evaluate against this track.

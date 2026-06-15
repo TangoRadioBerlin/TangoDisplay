@@ -125,6 +125,9 @@ actor LoudnessAnalyzer {
         else { throw LoudnessAnalysisError.unsupportedFormat }
 
         while file.framePosition < file.length {
+            // Cooperative cancellation: stop the (CPU-heavy) scan promptly when the
+            // requesting track is no longer current — e.g. the user skipped past it (F8).
+            try Task.checkCancellation()
             buffer.frameLength = 0
             guard (try? file.read(into: buffer, frameCount: readCap)) != nil,
                   buffer.frameLength > 0 else { break }
