@@ -6,6 +6,15 @@ import TangoDisplayCore
 
 enum FadeMode: Equatable { case none, fadeAndStop, fadeAndContinue }
 
+/// Which presentation scene the configuration preview simulates, so the DJ can
+/// position text for each scene and see it exactly as it will render at runtime
+/// (including the per-genre / cortina position override).
+enum PreviewScene: Equatable, Hashable {
+    case dance              // profile defaults, no genre override
+    case genre(String)      // dance layout with this genre's saved position override
+    case cortina            // cortina layout with the cortina position override
+}
+
 @MainActor
 final class AppState: ObservableObject {
 
@@ -24,6 +33,9 @@ final class AppState: ObservableObject {
     /// Transient: true only while the Position tab is open, so the preview draws element bounds/size.
     /// Never persisted and never affects the real presentation display.
     @Published var showElementBoundsInPreview: Bool = false
+    /// Which scene the Position-tab preview simulates (dance / a specific genre / cortina).
+    /// Transient; drives `PresentationView`'s preview sample state and override. Never persisted.
+    @Published var previewScene: PreviewScene = .dance
     /// Album artwork for the current dance track. Nil during cortinas and idle.
     @Published private(set) var currentArtwork: NSImage? = nil
     /// persistentID of the track whose artwork is currently displayed; drives transition identity.

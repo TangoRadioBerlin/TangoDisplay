@@ -288,24 +288,42 @@ struct PresentationView: View {
         genreBgImage = NSImage(contentsOf: appState.profileStore.imageURL(for: filename))
     }
 
-    /// Sample content shown in the configuration preview (when bounds are active and nothing is
-    /// playing) so every text element — and its positioning box — is visible while the DJ tunes layout.
-    private static let previewSampleState = DisplayState(
-        mode: .playing,
-        currentTrack: Track(title: "Sample Title", artist: "Sample Artist", genre: "Tango",
-                            persistentID: "preview-sample", year: 1947,
-                            comment: "Sample Singer", albumArtist: "Sample Singer",
-                            grouping: "Sample Singer"),
-        tandaPosition: TandaPosition(current: 2, total: 4)
+    /// Sample dance state for the preview, with a chosen genre so the picked scene's
+    /// per-genre override resolves against it.
+    private static func previewDanceState(genre: String) -> DisplayState {
+        DisplayState(
+            mode: .playing,
+            currentTrack: Track(title: "Sample Title", artist: "Sample Artist", genre: genre,
+                                persistentID: "preview-sample", year: 1947,
+                                comment: "Sample Singer", albumArtist: "Sample Singer",
+                                grouping: "Sample Singer"),
+            tandaPosition: TandaPosition(current: 2, total: 4)
+        )
+    }
+
+    /// Sample cortina state: a cortina track plus the upcoming dance track, so both the
+    /// cortina-track section and the "Coming Up" section render in the preview.
+    private static let previewCortinaState = DisplayState(
+        mode: .cortina,
+        currentTrack: Track(title: "Cortina Title", artist: "Cortina Artist", genre: "Cortina",
+                            persistentID: "preview-cortina"),
+        nextTrack: Track(title: "Next Title", artist: "Next Artist", genre: "Tango",
+                         persistentID: "preview-next", year: 1947,
+                         comment: "Sample Singer", albumArtist: "Sample Singer",
+                         grouping: "Sample Singer")
     )
 
-    /// While the Position tab is open and nothing real is playing, inject the sample so positioning
-    /// (and the bounds outlines) are visible in the preview.
+    /// While the Position tab is open and nothing real is playing, inject a sample for the
+    /// selected preview scene so positioning (and the bounds outlines) are visible.
     private var effectiveDisplayState: DisplayState {
-        if isPreview, appState.showElementBoundsInPreview, appState.displayState.currentTrack == nil {
-            return Self.previewSampleState
+        guard isPreview, appState.showElementBoundsInPreview,
+              appState.displayState.currentTrack == nil
+        else { return appState.displayState }
+        switch appState.previewScene {
+        case .dance:           return Self.previewDanceState(genre: "Tango")
+        case .genre(let g):    return Self.previewDanceState(genre: g)
+        case .cortina:         return Self.previewCortinaState
         }
-        return appState.displayState
     }
 
     private static let previewSampleLastPlayed = Track(
@@ -318,12 +336,23 @@ struct PresentationView: View {
         return appState.lastPlayedTrack
     }
 
-    /// Profile with any per-genre-background override (text positions + artwork placement) applied for
-    /// the current track. Used for both the artwork layer and the text views. In the configuration
-    /// preview we deliberately show the profile defaults (WYSIWYG while editing positions); per-genre
-    /// overrides apply only on the real presentation display.
+    /// Profile with the per-genre / cortina position override applied. Used for both the artwork
+    /// layer and the text views. The preview now applies the SAME override as runtime for the
+    /// selected scene, so configuring positions is WYSIWYG for each genre and the cortina.
     private var renderProfile: AppearanceProfile {
-        guard !isPreview else { return activeProfile }
+        if isPreview {
+            guard appState.showElementBoundsInPreview else { return activeProfile }
+            switch appState.previewScene {
+            case .dance:
+                return activeProfile   // profile defaults, no override
+            case .genre(let g):
+                return activeProfile.applyingPositionOverride(
+                    activeProfile.positionOverride(forGenre: g, using: appState.settings.makeDetector()))
+            case .cortina:
+                let set = activeProfile.genreBackgrounds.first { $0.isCortinaEntry }?.positions
+                return activeProfile.applyingPositionOverride(set)
+            }
+        }
         return activeProfile.applyingPositionOverride(
             activeProfile.positionOverride(forGenre: effectiveDisplayState.currentTrack?.genre ?? "",
                                            using: appState.settings.makeDetector()))
