@@ -3138,6 +3138,7 @@ runRemoteServerLimitsTests()
 runQueryEncodingTests()
 runExternalInputLimitsTests()
 runWaveformMathTests()
+runRemoteProtocolV2Tests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3146,4 +3147,89 @@ print("════════════════════════�
 
 if totalFailed > 0 {
     exit(1)
+}
+
+// MARK: - Remote control protocol v2
+
+func runRemoteProtocolV2Tests() {
+    suite("Remote protocol v2 — transport decode") {
+        test("decodes every action with id and fadeSec") {
+            for action in RemoteTransportCommand.Action.allCases {
+                let json = #"{"type":"transport","id":"abc","action":"\#(action.rawValue)","fadeSec":2.5}"#
+                let cmd = RemoteCommandDecoder.transport(from: Data(json.utf8))
+                try expectNotNil(cmd)
+                try expectEqual(cmd?.action, action)
+                try expectEqual(cmd?.id, "abc")
+                try expect(abs((cmd?.fadeSec ?? 0) - 2.5) < 0.001)
+            }
+        }
+        test("id and fadeSec are optional") {
+            let cmd = RemoteCommandDecoder.transport(from: Data(#"{"type":"transport","action":"play"}"#.utf8))
+            try expectEqual(cmd?.action, .play)
+            try expectNil(cmd?.id)
+            try expectNil(cmd?.fadeSec)
+        }
+        test("unknown action fails to decode") {
+            try expectNil(RemoteCommandDecoder.transport(from: Data(#"{"type":"transport","action":"warp"}"#.utf8)))
+        }
+        test("malformed body fails to decode") {
+            try expectNil(RemoteCommandDecoder.transport(from: Data(#"{"type":"transport"}"#.utf8)))
+        }
+    }
+
+    suite("Remote protocol v2 — playEntry decode") {
+        test("decodes entryId and optional id") {
+            let cmd = RemoteCommandDecoder.playEntry(from: Data(#"{"type":"playEntry","id":"7","entryId":"E1"}"#.utf8))
+            try expectEqual(cmd?.entryId, "E1")
+            try expectEqual(cmd?.id, "7")
+        }
+        test("missing entryId fails to decode") {
+            try expectNil(RemoteCommandDecoder.playEntry(from: Data(#"{"type":"playEntry"}"#.utf8)))
+        }
+    }
+
+    suite("Remote protocol v2 — ack encode") {
+        test("ok ack has type=ack and no rejected") {
+            let s = RemoteJSON.encodeToString(RemoteAck(id: "9", ok: true))
+            try expectNotNil(s)
+            let back = try JSONDecoder().decode(RemoteAck.self, from: Data((s ?? "").utf8))
+            try expectEqual(back.type, "ack")
+            try expectEqual(back.id, "9")
+            try expect(back.ok)
+            try expectNil(back.rejected)
+        }
+        test("rejected ack carries the reason") {
+            let s = RemoteJSON.encodeToString(RemoteAck(id: nil, ok: false,
+                                                        rejectedReason: RemoteRejectReason.controllerDisabled))
+            let back = try JSONDecoder().decode(RemoteAck.self, from: Data((s ?? "").utf8))
+            try expect(!back.ok)
+            try expectEqual(back.rejected?.reason, "controllerDisabled")
+        }
+    }
+
+    suite("Remote protocol v2 — setlist DTO + capabilities") {
+        test("setlist entry DTO round-trips with state and duration") {
+            let dto = RemoteSetlistEntryDTO(entryId: "id-1", clientRef: "c-1", title: "T", artist: "A",
+                                            genre: "Tango", isCortina: false, state: "queued",
+                                            durationSec: 173.0, isPerformance: true)
+            let data = try JSONEncoder().encode(dto)
+            let back = try JSONDecoder().decode(RemoteSetlistEntryDTO.self, from: data)
+            try expectEqual(back, dto)
+            try expectEqual(back.state, "queued")
+            try expect(abs((back.durationSec ?? 0) - 173.0) < 0.001)
+        }
+        test("clientRef and duration are optional") {
+            let dto = RemoteSetlistEntryDTO(entryId: "id-2", title: "T", artist: "A",
+                                            genre: "Cortina", isCortina: true, state: "playing")
+            let back = try JSONDecoder().decode(RemoteSetlistEntryDTO.self, from: try JSONEncoder().encode(dto))
+            try expectNil(back.clientRef)
+            try expectNil(back.durationSec)
+            try expect(back.isCortina)
+        }
+        test("capability raw values are stable wire strings") {
+            try expectEqual(RemoteCapability.transport.rawValue, "transport")
+            try expectEqual(RemoteCapability.setlistRead.rawValue, "setlist.read")
+            try expectEqual(RemoteProtocol.version, 2)
+        }
+    }
 }
