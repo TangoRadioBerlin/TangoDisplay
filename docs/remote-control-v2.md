@@ -6,9 +6,8 @@ ReplayGain and reads now-playing state. **v2** adds, backward-compatibly, capabi
 full setlist broadcast, and transport control so an external planner (e.g. MilongaForge) can drive a
 milonga that TangoDisplay plays with its own engine (fades, EQ, ReplayGain, auto-gap, cortinas).
 
-This document specifies **Slice 1** (capability negotiation, setlist broadcast, transport —
-implemented) and **Slice 2** (`loadSetlist` + ordering edits `setlist.insert/remove/move` —
-proposed; see *Slice 2* below).
+This document specifies **Slice 1** (capability negotiation, setlist broadcast, transport) and
+**Slice 2** (`loadSetlist` + ordering edits `setlist.insert/remove/move`) — both **implemented**.
 
 > All messages are JSON text frames with a `type` field. No TLS — intended for trusted LANs only.
 
@@ -114,15 +113,16 @@ Every controller command is answered with `ack{ id?, ok }`. Rejections carry
 
 ## Slice 2 — setlist loading & ordering edits
 
-> **Status:** proposed (design for the next slice; Slice 1 above is implemented). Motivated by the
-> MilongaForge planner (its ADR-033 / US-EXP-07): hand a planned milonga to TangoDisplay and then
-> reconcile the running order. Adds **one capability** (`setlist.write`) and **four command types**;
-> everything in Slice 1 is unchanged.
+> **Status:** implemented. Motivated by the MilongaForge planner (its ADR-033 / US-EXP-07): hand a
+> planned milonga to TangoDisplay and then reconcile the running order. Adds **one capability**
+> (`setlist.write`) and **four command types**; everything in Slice 1 is unchanged.
 
 ### Capability
 
-When this slice is implemented **and** controller scope is on, `hello.capabilities` additionally
-includes `"setlist.write"`:
+Slice 2 is gated by a **separate, opt-in switch** — "Allow remote setlist loading & editing" (Player
+▸ Setlist Remote), shown only once "Allow remote setlist control" is on. This second switch is more
+sensitive because it lets a client load **local files by absolute path**. When it is on (controller
+scope is therefore also on), `hello.capabilities` additionally includes `"setlist.write"`:
 
 ```json
 { "type": "hello", "needsAuth": true, "protocolVersion": 2,
@@ -151,8 +151,10 @@ protocol:
 
 - `path` is validated server-side: it must be an existing, readable, regular file of a supported
   audio type. Directories, URLs, and unsupported types are refused (per entry).
-- `title`/`artist`/`isCortina` are display hints; if omitted the server uses the file's own tags
-  (the same path as drag-and-drop import).
+- `title`/`artist` are display hints; if omitted the server uses the file's own tags (the same path
+  as drag-and-drop import). `isCortina` is currently **advisory** — TangoDisplay derives cortina
+  status (and cortina automation) from the track's genre via the configured detector, and the
+  echoed `state.setlist[].isCortina` reflects that genre-based result.
 - The server assigns a stable `entryId` (UUID) per loaded entry and echoes the `clientRef` in
   subsequent `state.setlist[]` broadcasts (replacing the `null` carried by drag-and-drop entries).
 
@@ -236,5 +238,8 @@ Slice 1's "no paths in `state`, stable `entryId`" contract.
 
 - Paths are **local absolute paths on the TangoDisplay host**; the simplest deployment is the planner
   and TangoDisplay on the **same Mac**. No cross-host path translation or streaming in this slice.
-- Path validation MUST reject anything that is not an existing, readable audio file. The remote stays
-  **LAN-only, PIN-gated**, and the controller-scope toggle continues to apply.
+- Path validation rejects anything that is not an **absolute** path to an existing, readable, regular
+  **audio** file (`pathNotAllowed` / `fileNotFound` / `unreadable` / `unsupportedType`). There is no
+  folder restriction — a DJ's library may live anywhere.
+- The remote stays **LAN-only, PIN-gated**. Slice 2 additionally requires the separate "Allow remote
+  setlist loading & editing" switch (off by default), on top of the controller-scope toggle.

@@ -3161,6 +3161,7 @@ runExternalInputLimitsTests()
 runWaveformMathTests()
 runColorMatchingTests()
 runRemoteProtocolV2Tests()
+runRemoteProtocolV2Slice2Tests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3284,6 +3285,87 @@ func runRemoteProtocolV2Tests() {
             try expectEqual(RemoteCapability.transport.rawValue, "transport")
             try expectEqual(RemoteCapability.setlistRead.rawValue, "setlist.read")
             try expectEqual(RemoteProtocol.version, 2)
+        }
+    }
+}
+
+// MARK: - Remote control protocol v2 — Slice 2 (loadSetlist + ordering edits)
+
+func runRemoteProtocolV2Slice2Tests() {
+    suite("Remote v2 Slice 2 — load entry & loadSetlist decode") {
+        test("decodes a load entry with isCortina default false") {
+            let json = #"{"type":"loadSetlist","mode":"append","entries":[{"clientRef":"r1","path":"/m/a.flac"}]}"#
+            let cmd = RemoteCommandDecoder.loadSetlist(from: Data(json.utf8))
+            try expectEqual(cmd?.mode, .append)
+            try expectEqual(cmd?.entries.count, 1)
+            try expectEqual(cmd?.entries.first?.clientRef, "r1")
+            try expectEqual(cmd?.entries.first?.path, "/m/a.flac")
+            try expect(!(cmd?.entries.first?.cortina ?? true))
+            try expectNil(cmd?.entries.first?.title)
+        }
+        test("honours explicit isCortina and title/artist/tandaRef") {
+            let json = #"{"type":"loadSetlist","mode":"replace","entries":[{"clientRef":"r2","path":"/m/c.flac","title":"T","artist":"A","isCortina":true,"tandaRef":"t1"}]}"#
+            let e = RemoteCommandDecoder.loadSetlist(from: Data(json.utf8))?.entries.first
+            try expect(e?.cortina == true)
+            try expectEqual(e?.title, "T")
+            try expectEqual(e?.artist, "A")
+            try expectEqual(e?.tandaRef, "t1")
+        }
+        test("rejects an unknown mode") {
+            try expectNil(RemoteCommandDecoder.loadSetlist(from: Data(#"{"type":"loadSetlist","mode":"merge","entries":[]}"#.utf8)))
+        }
+    }
+
+    suite("Remote v2 Slice 2 — ordering command decode") {
+        test("insert / remove / move / replaceFuture decode") {
+            try expectEqual(RemoteCommandDecoder.insert(from: Data(#"{"type":"setlist.insert","at":5,"entry":{"clientRef":"r","path":"/m/a.flac"}}"#.utf8))?.at, 5)
+            try expectEqual(RemoteCommandDecoder.remove(from: Data(#"{"type":"setlist.remove","entryId":"E1"}"#.utf8))?.entryId, "E1")
+            let mv = RemoteCommandDecoder.move(from: Data(#"{"type":"setlist.move","entryId":"E1","toIndex":9}"#.utf8))
+            try expectEqual(mv?.entryId, "E1"); try expectEqual(mv?.toIndex, 9)
+            try expectEqual(RemoteCommandDecoder.replaceFuture(from: Data(#"{"type":"setlist.replaceFuture","entries":[]}"#.utf8))?.entries.count, 0)
+        }
+        test("malformed ordering commands fail to decode") {
+            try expectNil(RemoteCommandDecoder.remove(from: Data(#"{"type":"setlist.remove"}"#.utf8)))
+            try expectNil(RemoteCommandDecoder.move(from: Data(#"{"type":"setlist.move","entryId":"E1"}"#.utf8)))
+        }
+    }
+
+    suite("Remote v2 Slice 2 — ack resolved/failed encoding") {
+        test("resolved + failed round-trip and are present") {
+            let ack = RemoteAck(id: "c-20", ok: true,
+                                resolved: [.init(clientRef: "r1", entryId: "9F0A")],
+                                failed: [.init(clientRef: "r2", reason: RemoteRejectReason.fileNotFound)])
+            let s = RemoteJSON.encodeToString(ack) ?? ""
+            try expect(s.contains("resolved")); try expect(s.contains("failed"))
+            let back = try JSONDecoder().decode(RemoteAck.self, from: Data(s.utf8))
+            try expectEqual(back.resolved?.first?.entryId, "9F0A")
+            try expectEqual(back.failed?.first?.reason, "fileNotFound")
+        }
+        test("plain ack omits resolved/failed/rejected") {
+            let s = RemoteJSON.encodeToString(RemoteAck(id: "x", ok: true)) ?? ""
+            try expect(!s.contains("resolved"))
+            try expect(!s.contains("failed"))
+            try expect(!s.contains("rejected"))
+        }
+    }
+
+    suite("Remote v2 Slice 2 — queued-region rule + constants") {
+        test("firstQueuedIndex is just past the last locked entry") {
+            try expectEqual(RemoteSetlistEditing.firstQueuedIndex(locked: [true, false, false]), 1)
+            try expectEqual(RemoteSetlistEditing.firstQueuedIndex(locked: [true, true, false]), 2)
+            try expectEqual(RemoteSetlistEditing.firstQueuedIndex(locked: [false, false]), 0)
+            try expectEqual(RemoteSetlistEditing.firstQueuedIndex(locked: []), 0)
+            // Conservative when a played entry trails queued ones.
+            try expectEqual(RemoteSetlistEditing.firstQueuedIndex(locked: [false, true]), 2)
+        }
+        test("setlist.write capability + Slice 2 reasons are stable wire strings") {
+            try expectEqual(RemoteCapability.setlistWrite.rawValue, "setlist.write")
+            try expectEqual(RemoteRejectReason.entryImmutable, "entryImmutable")
+            try expectEqual(RemoteRejectReason.immutablePosition, "immutablePosition")
+            try expectEqual(RemoteRejectReason.fileNotFound, "fileNotFound")
+            try expectEqual(RemoteRejectReason.unreadable, "unreadable")
+            try expectEqual(RemoteRejectReason.unsupportedType, "unsupportedType")
+            try expectEqual(RemoteRejectReason.pathNotAllowed, "pathNotAllowed")
         }
     }
 }
