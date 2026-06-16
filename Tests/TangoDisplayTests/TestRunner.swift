@@ -2962,6 +2962,75 @@ func runGenrePositionOverrideTests() {
             try expectNil(p.positionOverride(forGenre: "Tango", using: detector))
         }
     }
+
+    // Regression: the Position-tab preview resolves a scene by its exact key (e.g. "Tango"); the
+    // real presentation screen resolves by the *playing track's raw genre tag*. They must hit the
+    // same override entry, otherwise positioning shows in the preview but not on the main screen.
+    suite("AppearanceProfile — live-tag == preview-key parity") {
+        func tangoProfile() -> AppearanceProfile {
+            var p = base()
+            p.genreBackgroundsEnabled = true
+            let set = PositionSet(placements: ["title": ElementPlacement(offsetX: 33)])
+            p.genreBackgrounds = [GenreBackground(genreKey: "Tango", positions: set)]
+            return p
+        }
+        test("case-insensitive and whitespace-tolerant: raw tag matches preview key") {
+            let p = tangoProfile()
+            let viaPreviewKey = p.positionOverride(forGenre: "Tango", using: detector)
+            try expectNotNil(viaPreviewKey)
+            // Real track tags with different case / surrounding whitespace must resolve identically.
+            try expectEqual(p.positionOverride(forGenre: "tango", using: detector), viaPreviewKey)
+            try expectEqual(p.positionOverride(forGenre: "  TANGO ", using: detector), viaPreviewKey)
+        }
+        test("denylist-partial genre tag matches the base genre entry") {
+            // Denylist marks "tango" as a dance (partial) genre → "Tango Argentino" is still a dance
+            // track AND resolves to the "Tango" override entry, mirroring background-image matching.
+            let det = CortinaDetector(useAllowlist: false, allowlistGenres: [],
+                                      useDenylist: true, denylistGenres: ["tango"],
+                                      denylistPartialGenres: ["tango"])
+            let p = tangoProfile()
+            try expect(!det.isCortina(genre: "Tango Argentino"))
+            try expectEqual(p.positionOverride(forGenre: "Tango Argentino", using: det),
+                            p.positionOverride(forGenre: "Tango", using: det))
+        }
+        test("cortina sentinel resolves for a cortina-classified tag") {
+            // Denylist lists "tango" as the only dance genre → "Cortina" classifies as a cortina.
+            let det = CortinaDetector(useAllowlist: false, allowlistGenres: [],
+                                      useDenylist: true, denylistGenres: ["tango"])
+            var p = base()
+            p.genreBackgroundsEnabled = true
+            let cortinaSet = PositionSet(placements: ["cortinaLabel": ElementPlacement(offsetY: -20)])
+            p.genreBackgrounds = [GenreBackground(genreKey: "", positions: cortinaSet)]  // cortina sentinel
+            try expect(det.isCortina(genre: "Cortina"))
+            try expectEqual(p.positionOverride(forGenre: "Cortina", using: det), cortinaSet)
+        }
+        test("PositionSetExporter round-trips a scene override") {
+            let set = PositionSet(
+                placements: ["title": ElementPlacement(offsetX: 12, offsetY: -8, boxWidth: 40, hAlign: .leading),
+                             "singer": ElementPlacement(offsetY: 15)],
+                artwork: ArtworkPlacement(offsetX: 5, scale: 1.3, opacity: 0.9))
+            let data = try PositionSetExporter.exportData(set)
+            try expectEqual(try PositionSetExporter.importPositionSet(from: data), set)
+        }
+        test("PositionSetExporter rejects non-position-set JSON") {
+            let garbage = Data("{\"nope\":true}".utf8)
+            var threw = false
+            do { _ = try PositionSetExporter.importPositionSet(from: garbage) }
+            catch { threw = true }
+            try expect(threw)
+        }
+        test("cortina override is gated by genreBackgroundsEnabled (preview must match runtime)") {
+            // The preview/mirror gate the cortina override on genreBackgroundsEnabled exactly like
+            // positionOverride does, so a disabled gate yields no override in either path.
+            let det = CortinaDetector(useAllowlist: false, allowlistGenres: [],
+                                      useDenylist: true, denylistGenres: ["tango"])
+            var p = base()
+            p.genreBackgroundsEnabled = false
+            p.genreBackgrounds = [GenreBackground(genreKey: "",
+                                                  positions: PositionSet(placements: ["cortinaLabel": ElementPlacement(offsetY: -20)]))]
+            try expectNil(p.positionOverride(forGenre: "Cortina", using: det))
+        }
+    }
 }
 
 // MARK: - Auto-gap planning
