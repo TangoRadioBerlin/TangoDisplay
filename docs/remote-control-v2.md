@@ -1,4 +1,4 @@
-# TangoDisplay Remote Control — Protocol v2 (Slice 1)
+# TangoDisplay Remote Control — Protocol v2 (Slices 1–2)
 
 TangoDisplay exposes a small LAN WebSocket remote on **port 4747** (`ws://<host>:4747/ws`, also
 discoverable via Bonjour `_http._tcp` as "TangoDisplay Remote"). v1 drives volume / cortina volume /
@@ -6,8 +6,9 @@ ReplayGain and reads now-playing state. **v2** adds, backward-compatibly, capabi
 full setlist broadcast, and transport control so an external planner (e.g. MilongaForge) can drive a
 milonga that TangoDisplay plays with its own engine (fades, EQ, ReplayGain, auto-gap, cortinas).
 
-This document specifies **Slice 1**. `loadSetlist` and ordering edits (`setlist.insert/remove/move`)
-are **deferred** to later slices (see *Deferred* below).
+This document specifies **Slice 1** (capability negotiation, setlist broadcast, transport —
+implemented) and **Slice 2** (`loadSetlist` + ordering edits `setlist.insert/remove/move` —
+proposed; see *Slice 2* below).
 
 > All messages are JSON text frames with a `type` field. No TLS — intended for trusted LANs only.
 
@@ -111,10 +112,129 @@ Every controller command is answered with `ack{ id?, ok }`. Rejections carry
 - `unknownEntry` — `playEntry.entryId` not found in the current setlist.
 - `malformed` — the command body failed to parse (e.g. unknown `action`).
 
-## Deferred (later slices)
+## Slice 2 — setlist loading & ordering edits
 
-- `loadSetlist { mode: replace|append, entries:[{clientRef, path, title, artist, kind, tandaRef}] }`
-  — introduces the local-file-path surface (needs path validation + audio-type checks);
-  `clientRef` will then be echoed in `state.setlist[]`.
-- Ordering edits `setlist.insert | setlist.remove | setlist.move` over the **future** (queued) part;
-  playing/played entries are immutable and edits to them are rejected.
+> **Status:** proposed (design for the next slice; Slice 1 above is implemented). Motivated by the
+> MilongaForge planner (its ADR-033 / US-EXP-07): hand a planned milonga to TangoDisplay and then
+> reconcile the running order. Adds **one capability** (`setlist.write`) and **four command types**;
+> everything in Slice 1 is unchanged.
+
+### Capability
+
+When this slice is implemented **and** controller scope is on, `hello.capabilities` additionally
+includes `"setlist.write"`:
+
+```json
+{ "type": "hello", "needsAuth": true, "protocolVersion": 2,
+  "capabilities": ["transport", "setlist.read", "setlist.write"] }
+```
+
+A controller MUST check for `"setlist.write"` before sending the commands below; its absence means
+the server is Slice-1-only (or controller scope is off), and these commands would be rejected with
+`controllerDisabled`.
+
+### Load entry (controller → server)
+
+`loadSetlist` and `setlist.insert` carry **load entries** — the only place file paths enter the
+protocol:
+
+```json
+{
+  "clientRef": "recording:abc#t1",            // opaque, required; echoed verbatim in state.setlist[]
+  "path": "/Users/dj/Music/.../track.flac",   // absolute local file path on the TangoDisplay host
+  "title": "La cumparsita",                    // optional; falls back to the file's tags
+  "artist": "Carlos Di Sarli",                 // optional; falls back to the file's tags
+  "isCortina": false,                          // optional, default false; maps to state.setlist[].isCortina
+  "tandaRef": "t1"                             // optional opaque grouping hint, echoed
+}
+```
+
+- `path` is validated server-side: it must be an existing, readable, regular file of a supported
+  audio type. Directories, URLs, and unsupported types are refused (per entry).
+- `title`/`artist`/`isCortina` are display hints; if omitted the server uses the file's own tags
+  (the same path as drag-and-drop import).
+- The server assigns a stable `entryId` (UUID) per loaded entry and echoes the `clientRef` in
+  subsequent `state.setlist[]` broadcasts (replacing the `null` carried by drag-and-drop entries).
+
+### loadSetlist
+
+```json
+→ { "type": "loadSetlist", "id": "c-20", "mode": "replace",
+    "entries": [ { "clientRef": "recording:abc#t1", "path": "/Users/dj/Music/a.flac",
+                   "title": "La cumparsita", "artist": "Di Sarli", "isCortina": false, "tandaRef": "t1" } ] }
+← { "type": "ack", "id": "c-20", "ok": true,
+    "resolved": [ { "clientRef": "recording:abc#t1", "entryId": "9F0A…" } ],
+    "failed":   [ { "clientRef": "recording:xyz#t1", "reason": "fileNotFound" } ] }
+```
+
+- `mode`:
+  - `"append"` — add `entries` to the **end** of the setlist.
+  - `"replace"` — clear the **future (queued)** part and load `entries` after the playing/played
+    region. The playing entry and all played entries are **never** touched.
+- **Partial success:** entries whose path fails validation appear in `failed[]` (each with a
+  `reason`); all valid entries still load and appear in `resolved[]` paired with their `entryId`.
+  `ack.ok` is `true` when the request was well-formed and authorized (an empty `resolved[]` with a
+  populated `failed[]` is allowed).
+- A fresh `state` broadcast follows on success.
+
+### Ordering edits (queued region only)
+
+All three edit the **queued** region; the playing entry and played entries are immutable.
+
+```json
+→ { "type": "setlist.insert", "id": "c-21", "at": 5, "entry": { "...": "a load entry (see above)" } }
+← { "type": "ack", "id": "c-21", "ok": true, "resolved": [ { "clientRef": "…", "entryId": "…" } ] }
+
+→ { "type": "setlist.remove", "id": "c-22", "entryId": "9F0A…" }
+← { "type": "ack", "id": "c-22", "ok": true }
+
+→ { "type": "setlist.move",   "id": "c-23", "entryId": "9F0A…", "toIndex": 9 }
+← { "type": "ack", "id": "c-23", "ok": true }
+```
+
+- `at` / `toIndex` are 0-based indices into the **full** setlist but must address a position **inside
+  the queued region** (after the playing entry). An index in the playing/played region is rejected
+  with `immutablePosition`.
+- `setlist.remove` / `setlist.move` targeting a `playing` or `played` entry → `entryImmutable`.
+- `setlist.insert.entry` is a load entry, so it can also produce a path `reason` (e.g. `fileNotFound`).
+- Each successful edit is followed by a `state` broadcast; controllers reconcile against
+  `state.setlist[]` (matching on `entryId`/`clientRef`) rather than assuming their local order won.
+
+### Optional: bulk replace of the queued region
+
+For a one-shot reconcile a controller MAY send the desired future order and let the server compute the
+minimal diff:
+
+```json
+→ { "type": "setlist.replaceFuture", "id": "c-24", "entries": [ { "...": "load entries, in order" } ] }
+← { "type": "ack", "id": "c-24", "ok": true, "resolved": [ … ], "failed": [ … ] }
+```
+
+The server keeps the playing/played region intact and rewrites only the queued part. Servers that do
+not implement this MAY reject it with `malformed`; the controller then falls back to
+insert/remove/move.
+
+### Additional rejection reasons (extending the Slice-1 list)
+
+- `entryImmutable` — target entry is currently playing or already played.
+- `immutablePosition` — `at`/`toIndex` falls in the playing/played region.
+- `fileNotFound` — `path` does not exist.
+- `unreadable` — `path` exists but is not a readable regular file.
+- `unsupportedType` — `path` is not a supported audio file.
+- `pathNotAllowed` — `path` rejected by the server's path policy (e.g. not absolute).
+
+(`controllerDisabled`, `unknownEntry`, and `malformed` are as defined for Slice 1.)
+
+### Ordering / source-of-truth (recap)
+
+The playing+played region is authoritative on the TangoDisplay side and immutable to the controller.
+The queued region is controller-led, but if the DJ reorders it locally the next `state` broadcast
+reflects that; a controller diffs and surfaces a hint instead of blindly re-pushing. This mirrors
+Slice 1's "no paths in `state`, stable `entryId`" contract.
+
+### Security / platform notes
+
+- Paths are **local absolute paths on the TangoDisplay host**; the simplest deployment is the planner
+  and TangoDisplay on the **same Mac**. No cross-host path translation or streaming in this slice.
+- Path validation MUST reject anything that is not an existing, readable audio file. The remote stays
+  **LAN-only, PIN-gated**, and the controller-scope toggle continues to apply.
