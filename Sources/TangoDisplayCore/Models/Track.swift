@@ -10,11 +10,12 @@ public struct Track: Equatable, Hashable, Codable {
     public let albumArtist: String? // nil when unavailable or empty
     public let grouping: String?    // nil when unavailable or empty
     public let replayGainInfo: ReplayGainInfo? // nil when not present or not a built-in player track
+    public let bpm: Int?            // beats per minute from file tags; nil when absent/zero
 
     public init(title: String, artist: String, genre: String,
                 persistentID: String, year: Int? = nil, comment: String? = nil,
                 albumArtist: String? = nil, grouping: String? = nil,
-                replayGainInfo: ReplayGainInfo? = nil) {
+                replayGainInfo: ReplayGainInfo? = nil, bpm: Int? = nil) {
         self.title = title
         self.artist = artist
         self.genre = genre
@@ -24,5 +25,6 @@ public struct Track: Equatable, Hashable, Codable {
         self.albumArtist = albumArtist
         self.grouping = grouping
         self.replayGainInfo = replayGainInfo
+        self.bpm = bpm
     }
 }

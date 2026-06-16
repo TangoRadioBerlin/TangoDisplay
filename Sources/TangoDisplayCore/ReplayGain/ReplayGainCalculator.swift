@@ -23,13 +23,19 @@ public struct ReplayGainSettings {
     public var preampDb: Double
     public var preventClipping: Bool
     public var targetLoudnessLufs: Double
+    /// In `.auto`: when true, ignore file ReplayGain tags and use our own loudness analysis instead
+    /// (analysis is preferred; while it is still pending no gain is applied). When false, trust the
+    /// tag gain if present and only analyse when it is missing.
+    public var alwaysAnalyze: Bool
 
     public init(mode: ReplayGainMode = .off, preampDb: Double = 0,
-                preventClipping: Bool = true, targetLoudnessLufs: Double = -18.0) {
+                preventClipping: Bool = true, targetLoudnessLufs: Double = -18.0,
+                alwaysAnalyze: Bool = false) {
         self.mode = mode
         self.preampDb = preampDb
         self.preventClipping = preventClipping
         self.targetLoudnessLufs = targetLoudnessLufs
+        self.alwaysAnalyze = alwaysAnalyze
     }
 }
 
@@ -89,7 +95,17 @@ public func calculateReplayGain(
         source = (gainDb != nil) ? .metadataAlbum : .none
         integratedLufs = nil
     case .auto:
-        if let trackGain = info?.trackGainDb {
+        if settings.alwaysAnalyze {
+            // Trust our analysis over the file tags; if it hasn't finished yet, apply no gain.
+            if let a = analysis {
+                gainDb = a.calculatedReplayGainDb
+                peak = a.truePeak ?? a.samplePeak
+                source = .analysed
+                integratedLufs = a.integratedLoudnessLufs
+            } else {
+                return noChange
+            }
+        } else if let trackGain = info?.trackGainDb {
             gainDb = trackGain
             peak = info?.trackPeak
             source = .metadataTrack
