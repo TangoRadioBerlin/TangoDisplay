@@ -26,6 +26,14 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     @Published private(set) var isCurrentEntryMarkedAsPlayed: Bool = false
     @Published private(set) var isActivePlaying: Bool = false
 
+    /// Full, untrimmed file duration of the current track (seconds). Lets the waveform place the
+    /// auto-gap cut markers as fractions of the whole file. 0 when no track is loaded.
+    @Published private(set) var fileDuration: Double = 0
+    /// Leading/trailing silence actually trimmed by auto-gap force mode for the current track
+    /// (seconds, already net of the safety margin). 0 when nothing is trimmed.
+    @Published private(set) var autoGapLeadingTrim: Double = 0
+    @Published private(set) var autoGapTrailingTrim: Double = 0
+
     var volume: Float {
         get { playerNode.volume }
         set { playerNode.volume = max(0, min(1, newValue)) }
@@ -380,7 +388,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             mode: settings.replayGainMode,
             preampDb: Double(settings.replayGainPreampDb),
             preventClipping: settings.replayGainPreventClipping,
-            targetLoudnessLufs: Double(settings.replayGainTargetLufs)
+            targetLoudnessLufs: Double(settings.replayGainTargetLufs),
+            alwaysAnalyze: settings.replayGainAlwaysAnalyze
         )
         let info = entry.track.replayGainInfo
         let cacheKey = loudnessCacheKey(for: entry)
@@ -418,8 +427,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                                                    analysisInFlight: analysisInFlight)
 
         if settings.replayGainMode == .auto,
-           info?.trackGainDb == nil,
-           analysis == nil {
+           analysis == nil,
+           settings.replayGainAlwaysAnalyze || info?.trackGainDb == nil {
             queueLoudnessAnalysis(for: entry, isCurrentTrack: true)
         }
     }
@@ -506,7 +515,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
     private func preAnalyseIfNeeded(_ entry: SetlistEntry) {
         guard settings.replayGainMode == .auto,
-              entry.track.replayGainInfo?.trackGainDb == nil else { return }
+              settings.replayGainAlwaysAnalyze || entry.track.replayGainInfo?.trackGainDb == nil
+        else { return }
         if let key = loudnessCacheKey(for: entry),
            loudnessCache.result(for: key) != nil { return }
         queueLoudnessAnalysis(for: entry, isCurrentTrack: false)
@@ -664,6 +674,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         audioFile = nil
         elapsed = 0
         duration = 0
+        fileDuration = 0
+        autoGapLeadingTrim = 0
+        autoGapTrailingTrim = 0
         seekOffset = 0
         currentPaddingFrames = 0
         silencePending = false
@@ -813,6 +826,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             seekOffset = 0
             elapsed = 0
             duration = Double(file.length) / file.fileFormat.sampleRate
+            fileDuration = duration
+            autoGapLeadingTrim = 0
+            autoGapTrailingTrim = 0
             // scheduleFile requires the file format to exactly match the output bus format.
             // Stop the engine before reconnecting so the graph is in a clean state; a mono
             // AIFF scheduled against the stereo-defaulted startup connection produces silence.
@@ -863,6 +879,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                             seekOffset = plan.skipLeading
                             elapsed = plan.skipLeading
                             duration = Double(file.length - trail) / sr
+                            autoGapLeadingTrim = plan.skipLeading
+                            autoGapTrailingTrim = plan.trimTrailing
                         }
                     }
                     if plan.insert > 0 {
@@ -1604,6 +1622,11 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             .sink { [weak self] _ in self?.reapplyReplayGainIfLoaded() }
             .store(in: &cancellables)
         settings.$replayGainTargetLufs
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reapplyReplayGainIfLoaded() }
+            .store(in: &cancellables)
+        settings.$replayGainAlwaysAnalyze
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.reapplyReplayGainIfLoaded() }

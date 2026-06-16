@@ -1,16 +1,22 @@
 import Accelerate
 import AVFoundation
+import CoreMedia
 import Foundation
 import os
 
 /// Monitors the built-in microphone and publishes room level as an integer on 0–140.
 ///
-/// Threading contract (identical to AudioLevelMeter):
-///   • processBuffer(_:) fires on the real-time audio I/O thread.
+/// Uses an `AVCaptureSession` (input-only) rather than `AVAudioEngine`: starting an
+/// `AVAudioEngine` after touching its `inputNode` also activates an **output** node, which forces
+/// a reconfiguration of the shared audio device and interrupts other apps' playback (and headphone
+/// pre-listen). A capture session only opens the input device, so playback output is left alone.
+///
+/// Threading contract:
+///   • captureOutput(_:didOutput:from:) fires on a private serial queue (the audio I/O thread).
 ///     It only writes to rawLock — never touches @Published properties.
 ///   • A 30 fps Timer on RunLoop.main reads the lock and updates @Published properties.
-///   • start() / stop() / startEngine() must be called on the main thread.
-final class MicrophoneMonitor: ObservableObject {
+///   • start() / stop() must be called on the main thread.
+final class MicrophoneMonitor: NSObject, ObservableObject {
 
     // MARK: - Published state (main-thread only)
 
@@ -31,10 +37,12 @@ final class MicrophoneMonitor: ObservableObject {
 
     // MARK: - Private state
 
-    private var audioEngine: AVAudioEngine?
+    private let session = AVCaptureSession()
+    private let output = AVCaptureAudioDataOutput()
+    private let sampleQueue = DispatchQueue(label: "TangoDisplay.micMeter")
     private let rawLock = OSAllocatedUnfairLock(initialState: RawRMS())
     private var displayTimer: Timer?
-    private var configChangeObserver: NSObjectProtocol?
+    private var runtimeErrorObserver: NSObjectProtocol?
     private var isRunning = false
 
     // MARK: - Public API
@@ -50,74 +58,73 @@ final class MicrophoneMonitor: ObservableObject {
         tearDown()
     }
 
-    // MARK: - Permission + engine lifecycle
+    // MARK: - Permission + session lifecycle
 
     private func requestPermissionAndStart() {
         if #available(macOS 14, *) {
             switch AVAudioApplication.shared.recordPermission {
             case .granted:
-                startEngine()
+                startSession()
             case .denied:
                 permissionDenied = true
             case .undetermined:
                 AVAudioApplication.requestRecordPermission { [weak self] granted in
                     DispatchQueue.main.async {
-                        if granted { self?.startEngine() }
+                        if granted { self?.startSession() }
                         else       { self?.permissionDenied = true }
                     }
                 }
             @unknown default:
-                startEngine()
+                startSession()
             }
         } else {
             switch AVCaptureDevice.authorizationStatus(for: .audio) {
             case .authorized:
-                startEngine()
+                startSession()
             case .denied, .restricted:
                 permissionDenied = true
             case .notDetermined:
                 AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                     DispatchQueue.main.async {
-                        if granted { self?.startEngine() }
+                        if granted { self?.startSession() }
                         else       { self?.permissionDenied = true }
                     }
                 }
             @unknown default:
-                startEngine()
+                startSession()
             }
         }
     }
 
-    private func startEngine() {
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        let format = input.inputFormat(forBus: 0)
-
-        guard format.sampleRate > 0 else { return }
-
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.processBuffer(buffer)
-        }
-
-        do {
-            try engine.start()
-        } catch {
-            input.removeTap(onBus: 0)
+    private func startSession() {
+        guard let device = AVCaptureDevice.default(for: .audio),
+              let input = try? AVCaptureDeviceInput(device: device) else {
+            permissionDenied = true
             return
         }
 
-        audioEngine = engine
+        session.beginConfiguration()
+        for existing in session.inputs { session.removeInput(existing) }
+        for existing in session.outputs { session.removeOutput(existing) }
+        if session.canAddInput(input) { session.addInput(input) }
+        output.setSampleBufferDelegate(self, queue: sampleQueue)
+        if session.canAddOutput(output) { session.addOutput(output) }
+        session.commitConfiguration()
+
+        runtimeErrorObserver = NotificationCenter.default.addObserver(
+            forName: .AVCaptureSessionRuntimeError, object: session, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isRunning else { return }
+            self.sampleQueue.async { [weak self] in
+                guard let self, self.isRunning, !self.session.isRunning else { return }
+                self.session.startRunning()
+            }
+        }
+
         isRunning = true
         permissionDenied = false
-
-        configChangeObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: .main
-        ) { [weak self] _ in
-            self?.tearDown()
-            self?.startEngine()
-        }
+        // startRunning blocks; keep it off the main thread.
+        sampleQueue.async { [weak self] in self?.session.startRunning() }
 
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             self?.updateDisplay()
@@ -130,33 +137,16 @@ final class MicrophoneMonitor: ObservableObject {
         isRunning = false
         displayTimer?.invalidate()
         displayTimer = nil
-        if let obs = configChangeObserver {
+        if let obs = runtimeErrorObserver {
             NotificationCenter.default.removeObserver(obs)
-            configChangeObserver = nil
+            runtimeErrorObserver = nil
         }
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        audioEngine = nil
+        sampleQueue.async { [weak self] in
+            guard let self else { return }
+            if self.session.isRunning { self.session.stopRunning() }
+        }
         rawLock.withLock { $0 = RawRMS() }
         level = 0
-    }
-
-    // MARK: - Real-time callback (audio I/O thread — no main-thread work here)
-
-    private func processBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else { return }
-        let frameCount = vDSP_Length(buffer.frameLength)
-        guard frameCount > 0 else { return }
-
-        let channelCount = Int(buffer.format.channelCount)
-        var totalRMS: Float = 0
-        for ch in 0 ..< max(1, channelCount) {
-            var chRMS: Float = 0
-            vDSP_rmsqv(channelData[ch], 1, &chRMS, frameCount)
-            totalRMS += chRMS
-        }
-        let rms = totalRMS / Float(max(1, channelCount))
-        rawLock.withLock { $0 = RawRMS(value: rms) }
     }
 
     // MARK: - Main-thread display update (30 fps)
@@ -171,10 +161,65 @@ final class MicrophoneMonitor: ObservableObject {
 
     deinit {
         displayTimer?.invalidate()
-        if let obs = configChangeObserver {
+        if let obs = runtimeErrorObserver {
             NotificationCenter.default.removeObserver(obs)
         }
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
+        if session.isRunning { session.stopRunning() }
+    }
+}
+
+// MARK: - Sample delegate (audio I/O thread — no main-thread work here)
+
+extension MicrophoneMonitor: AVCaptureAudioDataOutputSampleBufferDelegate {
+    func captureOutput(_ output: AVCaptureOutput,
+                       didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        guard let fmt = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt)?.pointee else { return }
+
+        var blockBuffer: CMBlockBuffer?
+        var abl = AudioBufferList()
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: &abl,
+            bufferListSize: MemoryLayout<AudioBufferList>.size,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: &blockBuffer)
+        guard status == noErr else { return }
+
+        let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        let bits = asbd.mBitsPerChannel
+        var sumSquares: Double = 0
+        var sampleCount = 0
+
+        for buf in UnsafeMutableAudioBufferListPointer(&abl) {
+            guard let data = buf.mData, buf.mDataByteSize > 0 else { continue }
+            if isFloat && bits == 32 {
+                let n = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
+                guard n > 0 else { continue }
+                var rms: Float = 0
+                vDSP_rmsqv(data.bindMemory(to: Float.self, capacity: n), 1, &rms, vDSP_Length(n))
+                sumSquares += Double(rms) * Double(rms) * Double(n)
+                sampleCount += n
+            } else if !isFloat && bits == 16 {
+                let n = Int(buf.mDataByteSize) / MemoryLayout<Int16>.size
+                guard n > 0 else { continue }
+                var floats = [Float](repeating: 0, count: n)
+                vDSP_vflt16(data.bindMemory(to: Int16.self, capacity: n), 1, &floats, 1, vDSP_Length(n))
+                var scale: Float = 1.0 / 32768.0
+                vDSP_vsmul(floats, 1, &scale, &floats, 1, vDSP_Length(n))
+                var rms: Float = 0
+                vDSP_rmsqv(floats, 1, &rms, vDSP_Length(n))
+                sumSquares += Double(rms) * Double(rms) * Double(n)
+                sampleCount += n
+            }
+        }
+
+        guard sampleCount > 0 else { return }
+        let rms = Float((sumSquares / Double(sampleCount)).squareRoot())
+        rawLock.withLock { $0 = RawRMS(value: rms) }
     }
 }

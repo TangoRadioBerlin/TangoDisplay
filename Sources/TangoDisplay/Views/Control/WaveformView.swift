@@ -9,6 +9,11 @@ struct WaveformView: View {
     @State private var samples: [Float] = []
     @State private var leadingSilence: Double = 0
     @State private var trailingSilence: Double = 0
+    /// Full untrimmed file length and the auto-gap force-mode trims actually applied (seconds),
+    /// mirrored from the player so the cut markers show the real cut and its kept safety margin.
+    @State private var fullDuration: Double = 0
+    @State private var leadingTrim: Double = 0
+    @State private var trailingTrim: Double = 0
     @State private var loadedURL: URL?
     @State private var loading = false
     @State private var progress: Double = 0
@@ -105,15 +110,8 @@ struct WaveformView: View {
         let n = samples.count
         guard n > 0, w > 0 else { return }
 
-        // Detected silence regions (behind the bars).
-        if leadingSilence > 0 {
-            let lx = w * CGFloat(leadingSilence)
-            ctx.fill(Path(CGRect(x: 0, y: 0, width: lx, height: h)), with: .color(.orange.opacity(0.10)))
-        }
-        if trailingSilence > 0 {
-            let tx = w * CGFloat(trailingSilence)
-            ctx.fill(Path(CGRect(x: w - tx, y: 0, width: tx, height: h)), with: .color(.orange.opacity(0.10)))
-        }
+        // Silence / cut regions (behind the bars).
+        drawSilenceRegions(ctx, w: w, h: h)
 
         let playedX = w * CGFloat(progress)
         let columns = max(1, Int(w))
@@ -130,12 +128,51 @@ struct WaveformView: View {
                      with: .color(color))
         }
 
-        // Silence boundary lines.
-        if leadingSilence > 0 { strokeV(ctx, x: w * CGFloat(leadingSilence), h: h, color: .orange.opacity(0.55)) }
-        if trailingSilence > 0 { strokeV(ctx, x: w * CGFloat(1 - trailingSilence), h: h, color: .orange.opacity(0.55)) }
+        // Silence boundary / cut lines.
+        if isForceTrimming {
+            if leadingTrim > 0 { strokeV(ctx, x: w * CGFloat(leadingTrim / fullDuration), h: h, color: .red.opacity(0.8), lineWidth: 1.5) }
+            if trailingTrim > 0 { strokeV(ctx, x: w * CGFloat(1 - trailingTrim / fullDuration), h: h, color: .red.opacity(0.8), lineWidth: 1.5) }
+        } else {
+            if leadingSilence > 0 { strokeV(ctx, x: w * CGFloat(leadingSilence), h: h, color: .orange.opacity(0.55)) }
+            if trailingSilence > 0 { strokeV(ctx, x: w * CGFloat(1 - trailingSilence), h: h, color: .orange.opacity(0.55)) }
+        }
 
         // Playhead.
         strokeV(ctx, x: playedX, h: h, color: .white, lineWidth: 1.5)
+    }
+
+    /// True when auto-gap force mode actually trimmed this track (so we draw the real cut + the
+    /// kept safety-margin band rather than the coarse detected-silence overlay).
+    private var isForceTrimming: Bool {
+        fullDuration > 0 && (leadingTrim > 0 || trailingTrim > 0)
+    }
+
+    /// Behind the bars: in force mode, the **removed** region (red) and the kept safety-margin band
+    /// (orange) derived from the real trim points; otherwise the coarse detected-silence overlay.
+    private func drawSilenceRegions(_ ctx: GraphicsContext, w: CGFloat, h: CGFloat) {
+        if isForceTrimming {
+            let margin = AutoGapPlan.defaultSafetyMargin
+            if leadingTrim > 0 {
+                let cut = CGFloat(leadingTrim / fullDuration)
+                let sil = CGFloat(min(1, (leadingTrim + margin) / fullDuration))
+                ctx.fill(Path(CGRect(x: 0, y: 0, width: w * cut, height: h)), with: .color(.red.opacity(0.14)))
+                ctx.fill(Path(CGRect(x: w * cut, y: 0, width: w * (sil - cut), height: h)), with: .color(.orange.opacity(0.10)))
+            }
+            if trailingTrim > 0 {
+                let cut = CGFloat(trailingTrim / fullDuration)
+                let sil = CGFloat(min(1, (trailingTrim + margin) / fullDuration))
+                ctx.fill(Path(CGRect(x: w * (1 - cut), y: 0, width: w * cut, height: h)), with: .color(.red.opacity(0.14)))
+                ctx.fill(Path(CGRect(x: w * (1 - sil), y: 0, width: w * (sil - cut), height: h)), with: .color(.orange.opacity(0.10)))
+            }
+        } else {
+            if leadingSilence > 0 {
+                ctx.fill(Path(CGRect(x: 0, y: 0, width: w * CGFloat(leadingSilence), height: h)), with: .color(.orange.opacity(0.10)))
+            }
+            if trailingSilence > 0 {
+                let tx = w * CGFloat(trailingSilence)
+                ctx.fill(Path(CGRect(x: w - tx, y: 0, width: tx, height: h)), with: .color(.orange.opacity(0.10)))
+            }
+        }
     }
 
     private func drawTimeline(_ ctx: GraphicsContext, _ size: CGSize) {
@@ -201,11 +238,18 @@ struct WaveformView: View {
     // MARK: - Data
 
     private func refreshTimes() {
-        guard let p = player else { elapsed = 0; duration = 0; progress = 0; replayGain = 1.0; return }
+        guard let p = player else {
+            elapsed = 0; duration = 0; progress = 0; replayGain = 1.0
+            fullDuration = 0; leadingTrim = 0; trailingTrim = 0
+            return
+        }
         elapsed = p.elapsed
         duration = p.duration
         progress = duration > 0 ? min(1, max(0, elapsed / duration)) : 0
         replayGain = p.appliedReplayGainLinear
+        fullDuration = p.fileDuration
+        leadingTrim = p.autoGapLeadingTrim
+        trailingTrim = p.autoGapTrailingTrim
     }
 
     private func resetTrack() {
@@ -213,6 +257,9 @@ struct WaveformView: View {
         loadedURL = nil
         leadingSilence = 0
         trailingSilence = 0
+        fullDuration = 0
+        leadingTrim = 0
+        trailingTrim = 0
     }
 
     private func reload() {

@@ -71,6 +71,10 @@ final class SetlistManager: ObservableObject {
     @Published var stopAfterEntryID: UUID?
     private(set) var duplicateSessionDecision: DuplicateSessionDecision? = nil
 
+    /// Optional hook: when set, each newly inserted entry is offered to this closure and adopts the
+    /// returned tag colour (used to auto-colour added tracks by genre). Returning nil leaves it as-is.
+    var newEntryTagColorProvider: ((Track) -> TagColor?)? = nil
+
     func setDuplicateSessionDecision(_ decision: DuplicateSessionDecision?) {
         duplicateSessionDecision = decision
     }
@@ -114,7 +118,13 @@ final class SetlistManager: ObservableObject {
         let index = anchorID
             .flatMap { id in entries.firstIndex(where: { $0.id == id }) }
             ?? entries.count
-        entries.insert(contentsOf: newEntries, at: index)
+        var toInsert = newEntries
+        if let provider = newEntryTagColorProvider {
+            for i in toInsert.indices {
+                if let color = provider(toInsert[i].track) { toInsert[i].tagColor = color }
+            }
+        }
+        entries.insert(contentsOf: toInsert, at: index)
         save()
         loadMissingDurations()
     }
@@ -455,6 +465,18 @@ final class SetlistManager: ObservableObject {
         let grouping = groupingFromID3 ?? groupingFromiTunes ?? groupingOldiTunes ?? groupingVorbis ?? groupingRawTit1
             ?? SetlistManager.iTunesLibrary[SetlistManager.iTunesMediaRelativeKey(url.path)]?.grouping
 
+        // BPM: ID3 TBPM (string), iTunes tmpo (integer atom), Vorbis/FLAC "bpm". Zero/absent → nil.
+        func intNumber(for id: AVMetadataIdentifier) async -> Int? {
+            guard let item = AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: id).first else { return nil }
+            if let n = try? await item.load(.numberValue), n.intValue > 0 { return n.intValue }
+            if let s = try? await item.load(.stringValue), let v = Int(s.trimmingCharacters(in: .whitespaces)), v > 0 { return v }
+            return nil
+        }
+        let bpmID3    = (await string(for: .id3MetadataBeatsPerMinute)).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        let bpmiTunes = await intNumber(for: .iTunesMetadataBeatsPerMin)
+        let bpmVorbis = (await string(forRawKey: "bpm")).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        let bpm: Int? = [bpmID3, bpmiTunes, bpmVorbis].compactMap { $0 }.first { $0 > 0 }
+
         // ID3 TXXX frame lookup (MP3 ReplayGain). The description/tag-name lives in extraAttributes[.info].
         func txxx(key: String) async -> String? {
             let items = AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: .id3MetadataUserText)
@@ -498,7 +520,8 @@ final class SetlistManager: ObservableObject {
             comment: comment,
             albumArtist: albumArtist,
             grouping: grouping,
-            replayGainInfo: replayGainInfo
+            replayGainInfo: replayGainInfo,
+            bpm: bpm
         )
     }
 

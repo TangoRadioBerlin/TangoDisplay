@@ -181,7 +181,9 @@ struct PlayerSettingsView: View {
                         }
                     }
                     .disabled(settings.replayGainMode != .auto)
-                    Text("ReplayGain adjusts playback volume using loudness metadata stored in the audio file. Auto mode uses metadata when available; when absent it analyses the file and calculates a gain against the target loudness.")
+                    Toggle("Always analyse (ignore file tags)", isOn: $settings.replayGainAlwaysAnalyze)
+                        .disabled(settings.replayGainMode != .auto)
+                    Text("ReplayGain adjusts playback volume using loudness metadata stored in the audio file. Auto mode uses metadata when available; when absent it analyses the file and calculates a gain against the target loudness. Turn on \u{201C}Always analyse\u{201D} for libraries whose tags are wrong or missing — TangoDisplay then ignores the tags and uses its own analysis.")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
@@ -337,6 +339,10 @@ struct PlayerSettingsView: View {
                         .foregroundColor(.secondary)
                     if settings.genreColorsEnabled {
                         Toggle("Include song title", isOn: $settings.genreColorTitleEnabled)
+                        Toggle("Set track tag colour from genre", isOn: $settings.genreColorAsTrackColorEnabled)
+                        Text("Applies the genre colour as each track's tag colour when switched on and to newly added tracks (mapped to the nearest tag colour). You can still change a track's tag colour manually afterwards.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                         GenreColourRulesEditor(rules: $settings.genreColorRules)
                     }
 
@@ -349,6 +355,7 @@ struct PlayerSettingsView: View {
                     Toggle("Comments", isOn: $settings.showComments)
                     Toggle("Album Artist", isOn: $settings.showAlbumArtist)
                     Toggle("Grouping", isOn: $settings.showGrouping)
+                    Toggle("BPM", isOn: $settings.showBpm)
                     Text("Controls which fields are shown in the setlist rows.")
                         .font(.caption)
                         .foregroundColor(.secondary)

@@ -162,6 +162,13 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(replayGainTargetLufs, forKey: kPrefix + "replayGainTargetLufs") }
     }
 
+    /// In Auto mode: when on, always run our own loudness analysis and ignore any ReplayGain tags in
+    /// the file (for libraries whose tags are wrong/missing). Off → trust tag gain, analyse only when
+    /// absent. Default off.
+    @Published var replayGainAlwaysAnalyze: Bool {
+        didSet { UserDefaults.standard.set(replayGainAlwaysAnalyze, forKey: kPrefix + "replayGainAlwaysAnalyze") }
+    }
+
     @Published var markAsPlayedAfterCompletion: Bool {
         didSet { UserDefaults.standard.set(markAsPlayedAfterCompletion, forKey: kPrefix + "markAsPlayedAfterCompletion") }
     }
@@ -237,6 +244,9 @@ final class AppSettings: ObservableObject {
     @Published var showGrouping: Bool {
         didSet { UserDefaults.standard.set(showGrouping, forKey: kPrefix + "showGrouping") }
     }
+    @Published var showBpm: Bool {
+        didSet { UserDefaults.standard.set(showBpm, forKey: kPrefix + "showBpm") }
+    }
     @Published var genreColorsEnabled: Bool {
         didSet { UserDefaults.standard.set(genreColorsEnabled, forKey: kPrefix + "genreColorsEnabled") }
     }
@@ -249,6 +259,11 @@ final class AppSettings: ObservableObject {
     }
     @Published var genreColorTitleEnabled: Bool {
         didSet { UserDefaults.standard.set(genreColorTitleEnabled, forKey: kPrefix + "genreColorTitleEnabled") }
+    }
+    /// When on, a track's tag colour is set from its genre colour rule — applied to all entries when
+    /// switched on and to newly added tracks. Manual tag-colour changes are preserved afterwards.
+    @Published var genreColorAsTrackColorEnabled: Bool {
+        didSet { UserDefaults.standard.set(genreColorAsTrackColorEnabled, forKey: kPrefix + "genreColorAsTrackColorEnabled") }
     }
 
     // MARK: - Appearance / presentation
@@ -424,6 +439,7 @@ final class AppSettings: ObservableObject {
         replayGainPreampDb = ud.object(forKey: kPrefix + "replayGainPreampDb").flatMap { $0 as? Float } ?? 0.0
         replayGainPreventClipping = ud.object(forKey: kPrefix + "replayGainPreventClipping").flatMap { $0 as? Bool } ?? true
         replayGainTargetLufs = ud.object(forKey: kPrefix + "replayGainTargetLufs").flatMap { $0 as? Float } ?? -18.0
+        replayGainAlwaysAnalyze = ud.object(forKey: kPrefix + "replayGainAlwaysAnalyze").flatMap { $0 as? Bool } ?? false
         markAsPlayedAfterCompletion = ud.object(forKey: kPrefix + "markAsPlayedAfterCompletion")
             .flatMap { $0 as? Bool } ?? false
         let savedSeconds = ud.integer(forKey: kPrefix + "markAsPlayedAfterSeconds")
@@ -445,10 +461,12 @@ final class AppSettings: ObservableObject {
         showComments = ud.object(forKey: kPrefix + "showComments").flatMap { $0 as? Bool } ?? false
         showAlbumArtist = ud.object(forKey: kPrefix + "showAlbumArtist").flatMap { $0 as? Bool } ?? false
         showGrouping = ud.object(forKey: kPrefix + "showGrouping").flatMap { $0 as? Bool } ?? false
+        showBpm = ud.object(forKey: kPrefix + "showBpm").flatMap { $0 as? Bool } ?? false
         genreColorsEnabled = ud.object(forKey: kPrefix + "genreColorsEnabled").flatMap { $0 as? Bool } ?? false
         genreColorRules = AppSettings.decodeOrQuarantine(
             [GenreColorRule].self, key: kPrefix + "genreColorRules") ?? []
         genreColorTitleEnabled = ud.object(forKey: kPrefix + "genreColorTitleEnabled").flatMap { $0 as? Bool } ?? false
+        genreColorAsTrackColorEnabled = ud.object(forKey: kPrefix + "genreColorAsTrackColorEnabled").flatMap { $0 as? Bool } ?? false
         if let idString = ud.string(forKey: kPrefix + "activeProfileID") {
             activeProfileID = UUID(uuidString: idString)
         } else {

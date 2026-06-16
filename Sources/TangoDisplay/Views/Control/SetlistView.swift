@@ -477,6 +477,10 @@ struct SetlistView: View {
     @State private var scrollTrigger: UUID? = nil
     @State private var showLastTandaWarning = false
     @State private var pasteMonitor: Any? = nil
+    // Option-hover over a row shows the running time up to that track in the status bar.
+    @State private var hoveredEntryID: UUID? = nil
+    @State private var optionDown: Bool = false
+    @State private var flagsMonitor: Any? = nil
     @State private var hogConflictWarning = false
     @State private var hogDeviceStolenAlertShown = false
 
@@ -543,13 +547,20 @@ struct SetlistView: View {
 
             if !setlist.entries.isEmpty {
                 Divider()
-                StatusBarView(player: player, setlist: setlist, selectedIDs: selectedIDs)
+                StatusBarView(player: player, setlist: setlist, selectedIDs: selectedIDs,
+                              hoveredEntryID: optionDown ? hoveredEntryID : nil)
             }
         }
         .onAppear {
             activeEntryID = player.currentEntryID
             isPlayerActive = player.isActivePlaying
             hogConflictWarning = player.hogModeConflict
+            if flagsMonitor == nil {
+                flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+                    optionDown = event.modifierFlags.contains(.option)
+                    return event
+                }
+            }
             guard pasteMonitor == nil else { return }
             pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -561,6 +572,8 @@ struct SetlistView: View {
         }
         .onDisappear {
             if let m = pasteMonitor { NSEvent.removeMonitor(m); pasteMonitor = nil }
+            if let m = flagsMonitor { NSEvent.removeMonitor(m); flagsMonitor = nil }
+            optionDown = false
         }
         .background(
             MusicAppWindowDropInstaller(isTargeted: $isDragTargeted) { urls in
@@ -689,6 +702,7 @@ struct SetlistView: View {
             showComments: settings.showComments,
             showAlbumArtist: settings.showAlbumArtist,
             showGrouping: settings.showGrouping,
+            showBpm: settings.showBpm,
             wouldSkipAutoGap: wouldSkipAutoGap,
             autoFadeCortinasEnabled: settings.autoFadeCortinasEnabled,
             isLastTanda: entry.isLastTanda,
@@ -697,7 +711,11 @@ struct SetlistView: View {
             genreColorRules: settings.genreColorRules,
             genreColorTitleEnabled: settings.genreColorTitleEnabled,
             isCortina: detector.isCortina(genre: entry.track.genre),
-            player: activeEntryID == entry.id && isPlayerActive ? player : nil
+            player: activeEntryID == entry.id && isPlayerActive ? player : nil,
+            onHover: { hovering in
+                if hovering { hoveredEntryID = entry.id }
+                else if hoveredEntryID == entry.id { hoveredEntryID = nil }
+            }
         )
         .tag(entry.id)
         .moveDisabled(entry.state == .playing)
@@ -1177,6 +1195,8 @@ private struct StatusBarView: View {
     @ObservedObject var player: LocalPlayerSource
     @ObservedObject var setlist: SetlistManager
     var selectedIDs: Set<UUID>
+    /// Set while Option-hovering a row: the status bar shows the running time up to that track.
+    var hoveredEntryID: UUID? = nil
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var settings: AppSettings
     @Environment(\.openWindow) var openWindow
@@ -1242,11 +1262,16 @@ private struct StatusBarView: View {
                         .foregroundColor(.secondary)
 
                         HStack(spacing: 4) {
-                            Text("Ends at:")
-                            Text(formattedEndTime)
+                            if let end = hoverEndTime {
+                                Text("To here:")
+                                Text(clockString(end)).monospacedDigit()
+                            } else {
+                                Text("Ends at:")
+                                Text(formattedEndTime)
+                            }
                         }
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(hoverEndTime != nil ? .accentColor : .secondary)
                     }
                 }
                 .buttonStyle(.plain)
@@ -1335,12 +1360,45 @@ private struct StatusBarView: View {
         return Date().addingTimeInterval(remaining)
     }
 
-    private var formattedEndTime: String {
-        guard let end = setEndTime else { return "play to calculate" }
+    /// Projected clock time when the set will have played through `targetID` (Option-hover).
+    /// nil when stopped or the target isn't found.
+    private func endTime(through targetID: UUID) -> Date? {
+        guard appState.currentPlayerState != .stopped else { return nil }
+        guard setlist.entries.contains(where: { $0.id == targetID }) else { return nil }
+        var remaining: TimeInterval = 0
+        let detector = settings.makeDetector()
+        for entry in setlist.entries {
+            switch entry.state {
+            case .playing:
+                remaining += max(0, effectiveDuration(for: entry, detector: detector) - player.elapsed)
+            case .paused, .queued:
+                remaining += effectiveDuration(for: entry, detector: detector)
+            case .played:
+                if entry.id == player.currentEntryID {
+                    remaining += max(0, effectiveDuration(for: entry, detector: detector) - player.elapsed)
+                }
+            }
+            if entry.id == targetID { break }
+        }
+        return Date().addingTimeInterval(remaining)
+    }
+
+    private func clockString(_ date: Date) -> String {
         let f = DateFormatter()
         f.timeStyle = .short
         f.dateStyle = .none
-        return f.string(from: end)
+        return f.string(from: date)
+    }
+
+    private var formattedEndTime: String {
+        guard let end = setEndTime else { return "play to calculate" }
+        return clockString(end)
+    }
+
+    /// When Option-hovering a row, the projected clock time through that track (else nil).
+    private var hoverEndTime: Date? {
+        guard let id = hoveredEntryID else { return nil }
+        return endTime(through: id)
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -1418,6 +1476,20 @@ extension TagColor {
     }
 
     var displayName: String { rawValue.capitalized }
+
+    /// Representative hex per selectable tag colour (matches `swiftUIColor`), for mapping a
+    /// free-form genre colour onto the fixed palette.
+    static let matchingPalette: [(TagColor, String)] = [
+        (.red, "#FF3B30"), (.orange, "#FF9500"), (.yellow, "#F2CC00"),
+        (.green, "#34C759"), (.blue, "#007AFF"), (.purple, "#AF52DE")
+    ]
+
+    /// The selectable tag colour nearest to a free-form hex (e.g. a genre colour rule). nil on bad input.
+    static func nearest(toHex hex: String) -> TagColor? {
+        guard let idx = ColorMatching.nearestIndex(toHex: hex, palette: matchingPalette.map { $0.1 })
+        else { return nil }
+        return matchingPalette[idx].0
+    }
 }
 
 // MARK: - Row
@@ -1432,6 +1504,7 @@ struct SetlistRowView: View {
     var showComments: Bool = false
     var showAlbumArtist: Bool = false
     var showGrouping: Bool = false
+    var showBpm: Bool = false
     var wouldSkipAutoGap: Bool = false
     var autoFadeCortinasEnabled: Bool = false
     var isLastTanda: Bool = false
@@ -1441,6 +1514,7 @@ struct SetlistRowView: View {
     var genreColorTitleEnabled: Bool = false
     var isCortina: Bool = false
     var player: LocalPlayerSource? = nil
+    var onHover: ((Bool) -> Void)? = nil
 
     private var isCurrent: Bool { entry.state == .playing || entry.state == .paused || isActivelyPlaying }
     private var isCurrentPlaying: Bool { entry.state == .playing || isActivelyPlaying }
@@ -1483,6 +1557,12 @@ struct SetlistRowView: View {
                 }
 
                 Spacer(minLength: 4)
+
+                if showBpm, let bpm = entry.track.bpm {
+                    Text("\(bpm) BPM")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
 
                 if showTime, let dur = entry.duration {
                     Text(setlistFormatDuration(dur))
@@ -1556,6 +1636,7 @@ struct SetlistRowView: View {
         }
         .contentShape(Rectangle())
         .listRowBackground(rowBackground)
+        .onHover { onHover?($0) }
     }
 
     private var genreTagColor: Color {

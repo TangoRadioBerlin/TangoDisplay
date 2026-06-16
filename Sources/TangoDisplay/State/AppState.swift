@@ -108,6 +108,39 @@ final class AppState: ObservableObject {
         observeJRiverZone()
         observeMicrophoneMonitor()
         observeRemoteControlEnabled()
+        observeGenreTrackColors()
+    }
+
+    // MARK: - Genre → track tag colour
+
+    /// The tag colour a track should adopt from its matching genre colour rule, or nil when the
+    /// feature is off or no rule matches. Mirrors the genre-keyword matching used for row colours.
+    private func genreTrackColor(forGenre genre: String) -> TagColor? {
+        guard settings.genreColorAsTrackColorEnabled else { return nil }
+        guard let rule = settings.genreColorRules.first(where: {
+            !$0.keyword.isEmpty && genre.localizedCaseInsensitiveContains($0.keyword)
+        }) else { return nil }
+        return TagColor.nearest(toHex: rule.colorHex)
+    }
+
+    private func observeGenreTrackColors() {
+        // Auto-colour newly added tracks (the provider re-checks the setting on each insert).
+        setlist.newEntryTagColorProvider = { [weak self] track in
+            self?.genreTrackColor(forGenre: track.genre)
+        }
+        // One-time bulk apply when the feature is switched on.
+        settings.$genreColorAsTrackColorEnabled
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self, enabled else { return }
+                for entry in self.setlist.entries {
+                    if let color = self.genreTrackColor(forGenre: entry.track.genre) {
+                        self.setlist.setTagColor(color, for: [entry.id])
+                    }
+                }
+            }
+            .store(in: &cancellables)
     }
 
     private func observeRemoteControlEnabled() {
@@ -752,8 +785,10 @@ final class AppState: ObservableObject {
             await self.performFade(player: player)
             guard !Task.isCancelled, self.fadeMode == .fadeAndStop else { return }
             self.fadeMode = .none
-            player.volume = self.preFadeVolume
+            // Stop while still silent, then restore the volume setting for the next playback —
+            // restoring before the stop briefly replays the faded-out cortina at full volume (click).
             self.localPlayer?.stopTrack()
+            player.volume = self.preFadeVolume
         }
     }
 
@@ -770,10 +805,25 @@ final class AppState: ObservableObject {
             try? await Task.sleep(for: .seconds(1.0))
             guard !Task.isCancelled, self.fadeMode == .fadeAndContinue else { return }
             self.fadeMode = .none
-            player.volume = self.preFadeVolume
             self.cancelPauseArm()
+            // Switch while still silent so the old cortina isn't briefly replayed at full volume and
+            // the engine's stop/restart in loadEntry is masked, then ramp the new track up.
             self.activeSource.skipNext()
+            await self.rampVolumeUp(player: player, to: self.preFadeVolume)
         }
+    }
+
+    /// Quick fade-in used after a fade-and-continue switch so the next track doesn't hard-jump
+    /// from silence to full volume (which can click).
+    private func rampVolumeUp(player: LocalPlayerSource, to target: Float, over seconds: Double = 0.12) async {
+        let steps = 24
+        let interval = seconds / Double(steps)
+        for i in 1...steps {
+            try? await Task.sleep(for: .seconds(interval))
+            if Task.isCancelled { player.volume = target; return }
+            player.volume = target * Float(i) / Float(steps)
+        }
+        player.volume = target
     }
 
     private func performFade(player: LocalPlayerSource) async {
