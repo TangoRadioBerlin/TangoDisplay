@@ -252,6 +252,11 @@ final class AppState: ObservableObject {
     }
 
     private func switchSource(to choice: MusicPlayerChoice) {
+        // The built-in player has no sub-configuration to rebuild for, so ignore a redundant
+        // switch to it (e.g. ensureBuiltInPlayerActive switches synchronously and then updates the
+        // published selection, which would otherwise trigger a second teardown/rebuild). Other
+        // sources (e.g. a JRiver zone change) intentionally rebuild on re-selection.
+        if choice == .builtIn, localPlayer != nil { return }
         activeSource.stop()
         resetTransientState()
         let newSource = makeSource(for: choice)
@@ -725,6 +730,16 @@ final class AppState: ObservableObject {
     func transportSkipNext()       { cancelFade(); cancelPauseArm(); activeSource.skipNextImmediate() }
     func transportSkipPrevious()   { cancelFade(); cancelPauseArm(); activeSource.skipPrevious() }
     func transportSeek(to s: Double) { activeSource.seek(to: s) }
+
+    /// Controller commands only work with the built-in player. If another source is active, switch
+    /// to it synchronously (so a transport command issued right after lands on the new source) and
+    /// reflect the choice in the UI. The `selectedPlayer` observer would fire a second, redundant
+    /// switch — `switchSource` ignores that (see its built-in guard).
+    func ensureBuiltInPlayerActive() {
+        guard localPlayer == nil else { return }
+        switchSource(to: .builtIn)
+        settings.selectedPlayer = .builtIn
+    }
 
     func transportFadeAndStop() {
         if fadeMode == .fadeAndStop { cancelFade(); rescheduleAutoFadeIfNeeded(); return }

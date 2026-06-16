@@ -203,6 +203,13 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(remoteControlEnabled, forKey: kPrefix + "remoteControlEnabled") }
     }
 
+    /// Opt-in controller scope (v2): when on, authenticated clients may also drive transport and
+    /// (later) load/reorder the setlist, and the full setlist is broadcast. Off → the remote keeps
+    /// the v1 read + volume/ReplayGain surface only. Default off.
+    @Published var remoteControlAllowSetlistControl: Bool {
+        didSet { UserDefaults.standard.set(remoteControlAllowSetlistControl, forKey: kPrefix + "remoteControlAllowSetlistControl") }
+    }
+
     /// Regenerated on every app launch — not persisted.
     @Published private(set) var remoteControlPin: String = ""
 
@@ -429,6 +436,7 @@ final class AppSettings: ObservableObject {
         cortinaPlayTime = ud.object(forKey: kPrefix + "cortinaPlayTime").flatMap { $0 as? Double } ?? 30.0
         cortinaVolumeReductionDb = ud.object(forKey: kPrefix + "cortinaVolumeReductionDb").flatMap { $0 as? Double } ?? 0.0
         remoteControlEnabled = ud.object(forKey: kPrefix + "remoteControlEnabled").flatMap { $0 as? Bool } ?? false
+        remoteControlAllowSetlistControl = ud.object(forKey: kPrefix + "remoteControlAllowSetlistControl").flatMap { $0 as? Bool } ?? false
         remoteControlPin = String(format: "%04d", Int.random(in: 0...9999))
         duplicateTrackProtection = ud.object(forKey: kPrefix + "duplicateTrackProtection")
             .flatMap { $0 as? Bool } ?? false

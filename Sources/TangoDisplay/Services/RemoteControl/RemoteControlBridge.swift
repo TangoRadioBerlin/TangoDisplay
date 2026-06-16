@@ -127,6 +127,10 @@ final class RemoteControlBridge: NSObject, ObservableObject {
         appState.$displayState.dropFirst().sink { [weak self] _ in self?.stateChangeSubject.send() }.store(in: &stateCancellables)
         appState.$currentPlayerState.dropFirst().sink { [weak self] _ in self?.stateChangeSubject.send() }.store(in: &stateCancellables)
 
+        // v2: re-broadcast when the setlist changes or the controller scope is toggled.
+        settings.$remoteControlAllowSetlistControl.dropFirst().sink { [weak self] _ in self?.stateChangeSubject.send() }.store(in: &stateCancellables)
+        appState.setlist.$entries.dropFirst().sink { [weak self] _ in self?.stateChangeSubject.send() }.store(in: &stateCancellables)
+
         stateChangeSubject
             .throttle(for: .milliseconds(100), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] in self?.broadcastSnapshot() }
@@ -139,6 +143,28 @@ final class RemoteControlBridge: NSObject, ObservableObject {
         for clientID in authenticatedClients {
             transport.send(json, to: clientID)
         }
+    }
+
+    // MARK: - Handshake
+
+    /// v2 `hello`: advertises the protocol version and capabilities. Controller capabilities are
+    /// only offered when the DJ has enabled remote setlist control. v1 clients ignore the extra
+    /// fields. Falls back to the v1 shape if serialization ever fails.
+    private func helloJSON() -> String {
+        let caps: [String] = settings.remoteControlAllowSetlistControl
+            ? [RemoteCapability.transport.rawValue, RemoteCapability.setlistRead.rawValue]
+            : []
+        let dict: [String: Any] = [
+            "type": "hello",
+            "needsAuth": true,
+            "protocolVersion": RemoteProtocol.version,
+            "capabilities": caps
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: dict, options: []),
+           let s = String(data: data, encoding: .utf8) {
+            return s
+        }
+        return #"{"type":"hello","needsAuth":true}"#
     }
 
     // MARK: - JSON snapshot
@@ -172,7 +198,7 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             nowPlaying["overrideText"] = override
         }
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "type": "state",
             "mainVolume": s.builtInVolume,
             "cortinaVolumeDb": s.cortinaVolumeReductionDb,
@@ -185,10 +211,39 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             "nowPlaying": nowPlaying
         ]
 
+        // v2 additive: broadcast the full setlist only under the opt-in controller scope.
+        // Carries no file paths; entryId is the stable SetlistEntry UUID.
+        if s.remoteControlAllowSetlistControl, let setlist = setlistArrayJSON() {
+            payload["setlist"] = setlist
+        }
+
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
             return nil
         }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// Builds `state.setlist[]` from the shared SetlistManager as JSON-object array (for splicing
+    /// into the JSONSerialization payload). The wire shape is defined by the Core DTO.
+    private func setlistArrayJSON() -> [[String: Any]]? {
+        let detector = settings.makeDetector()
+        let dtos = appState.setlist.entries.map { e in
+            RemoteSetlistEntryDTO(
+                entryId: e.id.uuidString,
+                clientRef: nil,
+                title: e.track.title,
+                artist: e.track.artist,
+                genre: e.track.genre,
+                isCortina: detector.isCortina(genre: e.track.genre),
+                state: e.state.rawValue,
+                durationSec: e.duration,
+                isPerformance: e.isPerformance)
+        }
+        guard let data = try? JSONEncoder().encode(dtos),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return nil
+        }
+        return arr
     }
 
     private func displayModeString(_ mode: DisplayMode) -> String {
@@ -216,8 +271,72 @@ final class RemoteControlBridge: NSObject, ObservableObject {
         case "set":
             guard isAcceptingClients, authenticatedClients.contains(clientID) else { return }
             handleSet(field: json["field"] as? String, value: json["value"], from: clientID)
+        case "transport":
+            handleTransport(data: data, from: clientID)
+        case "playEntry":
+            handlePlayEntry(data: data, from: clientID)
         default:
             break
+        }
+    }
+
+    // MARK: - Controller commands (v2, gated by remoteControlAllowSetlistControl)
+
+    /// Runs a controller command on the built-in player, auto-switching to it if another source is
+    /// active (the switch is synchronous, so `apply` lands on the new source).
+    private func applyOnBuiltIn(_ apply: () -> Void) {
+        appState.ensureBuiltInPlayerActive()
+        apply()
+    }
+
+    private func handleTransport(data: Data, from clientID: UUID) {
+        guard isAcceptingClients, authenticatedClients.contains(clientID) else { return }
+        guard let cmd = RemoteCommandDecoder.transport(from: data) else {
+            sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID)
+            return
+        }
+        guard settings.remoteControlAllowSetlistControl else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.controllerDisabled, to: clientID)
+            return
+        }
+        applyOnBuiltIn {
+            switch cmd.action {
+            case .play, .resume:   appState.transportPlay()
+            case .pause:           appState.transportPause()
+            case .next:            appState.transportSkipNext()
+            case .previous:        appState.transportSkipPrevious()
+            case .stop:            appState.transportStop()
+            case .fadeAndStop:     appState.transportFadeAndStop()
+            case .fadeAndContinue: appState.transportFadeAndContinue()
+            }
+        }
+        sendAck(id: cmd.id, ok: true, to: clientID)
+    }
+
+    private func handlePlayEntry(data: Data, from clientID: UUID) {
+        guard isAcceptingClients, authenticatedClients.contains(clientID) else { return }
+        guard let cmd = RemoteCommandDecoder.playEntry(from: data) else {
+            sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID)
+            return
+        }
+        guard settings.remoteControlAllowSetlistControl else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.controllerDisabled, to: clientID)
+            return
+        }
+        guard let uuid = UUID(uuidString: cmd.entryId),
+              let entry = appState.setlist.entries.first(where: { $0.id == uuid }) else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.unknownEntry, to: clientID)
+            return
+        }
+        applyOnBuiltIn { appState.localPlayer?.jumpTo(entry) }
+        sendAck(id: cmd.id, ok: true, to: clientID)
+    }
+
+    private func sendAck(id: String?, ok: Bool, reason: String? = nil, to clientID: UUID) {
+        guard let transport else { return }
+        let ack = RemoteAck(id: id, ok: ok, rejectedReason: reason)
+        if let s = RemoteJSON.encodeToString(ack) {
+            transport.send(s, to: clientID)
         }
     }
 
@@ -299,8 +418,7 @@ extension RemoteControlBridge: RemoteTransportDelegate {
                 transport.disconnect(clientID)
                 return
             }
-            let hello = #"{"type":"hello","needsAuth":true}"#
-            transport.send(hello, to: clientID)
+            transport.send(self.helloJSON(), to: clientID)
         }
     }
 

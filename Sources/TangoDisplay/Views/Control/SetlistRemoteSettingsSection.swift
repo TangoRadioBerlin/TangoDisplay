@@ -49,6 +49,14 @@ struct SetlistRemoteSettingsSection: View {
         let hostnameURL = hostnameURLString
 
         VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Allow remote setlist control", isOn: $settings.remoteControlAllowSetlistControl)
+                Text("Lets a connected controller (e.g. a planning app) drive transport — play/pause, next/previous, fade — and broadcasts the full setlist. Leave off for the read-only phone remote.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if primaryURL.isEmpty {
                 Label("No network address available — connect to Wi-Fi and reopen this tab.",
                       systemImage: "wifi.exclamationmark")
