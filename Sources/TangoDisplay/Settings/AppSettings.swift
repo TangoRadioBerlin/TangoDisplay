@@ -217,6 +217,13 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(remoteControlAllowSetlistControl, forKey: kPrefix + "remoteControlAllowSetlistControl") }
     }
 
+    /// Opt-in write scope (v2 Slice 2): when on (and controller scope is on), authenticated clients
+    /// may load and reorder the setlist — including loading local files by absolute path. Separate,
+    /// more sensitive switch than transport control. Default off.
+    @Published var remoteControlAllowSetlistLoad: Bool {
+        didSet { UserDefaults.standard.set(remoteControlAllowSetlistLoad, forKey: kPrefix + "remoteControlAllowSetlistLoad") }
+    }
+
     /// Regenerated on every app launch — not persisted.
     @Published private(set) var remoteControlPin: String = ""
 
@@ -453,6 +460,7 @@ final class AppSettings: ObservableObject {
         cortinaVolumeReductionDb = ud.object(forKey: kPrefix + "cortinaVolumeReductionDb").flatMap { $0 as? Double } ?? 0.0
         remoteControlEnabled = ud.object(forKey: kPrefix + "remoteControlEnabled").flatMap { $0 as? Bool } ?? false
         remoteControlAllowSetlistControl = ud.object(forKey: kPrefix + "remoteControlAllowSetlistControl").flatMap { $0 as? Bool } ?? false
+        remoteControlAllowSetlistLoad = ud.object(forKey: kPrefix + "remoteControlAllowSetlistLoad").flatMap { $0 as? Bool } ?? false
         remoteControlPin = String(format: "%04d", Int.random(in: 0...9999))
         duplicateTrackProtection = ud.object(forKey: kPrefix + "duplicateTrackProtection")
             .flatMap { $0 as? Bool } ?? false

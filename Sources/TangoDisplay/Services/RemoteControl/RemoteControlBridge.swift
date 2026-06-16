@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import TangoDisplayCore
+import UniformTypeIdentifiers
 
 /// Mediates between the TangoDisplay app state and a `RemoteTransport`.
 ///
@@ -151,9 +152,13 @@ final class RemoteControlBridge: NSObject, ObservableObject {
     /// only offered when the DJ has enabled remote setlist control. v1 clients ignore the extra
     /// fields. Falls back to the v1 shape if serialization ever fails.
     private func helloJSON() -> String {
-        let caps: [String] = settings.remoteControlAllowSetlistControl
-            ? [RemoteCapability.transport.rawValue, RemoteCapability.setlistRead.rawValue]
-            : []
+        var caps: [String] = []
+        if settings.remoteControlAllowSetlistControl {
+            caps = [RemoteCapability.transport.rawValue, RemoteCapability.setlistRead.rawValue]
+            if settings.remoteControlAllowSetlistLoad {
+                caps.append(RemoteCapability.setlistWrite.rawValue)
+            }
+        }
         let dict: [String: Any] = [
             "type": "hello",
             "needsAuth": true,
@@ -230,7 +235,8 @@ final class RemoteControlBridge: NSObject, ObservableObject {
         let dtos = appState.setlist.entries.map { e in
             RemoteSetlistEntryDTO(
                 entryId: e.id.uuidString,
-                clientRef: nil,
+                clientRef: e.clientRef,
+                tandaRef: e.tandaRef,
                 title: e.track.title,
                 artist: e.track.artist,
                 genre: e.track.genre,
@@ -275,6 +281,16 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             handleTransport(data: data, from: clientID)
         case "playEntry":
             handlePlayEntry(data: data, from: clientID)
+        case "loadSetlist":
+            handleLoadSetlist(data: data, from: clientID)
+        case "setlist.insert":
+            handleSetlistInsert(data: data, from: clientID)
+        case "setlist.remove":
+            handleSetlistRemove(data: data, from: clientID)
+        case "setlist.move":
+            handleSetlistMove(data: data, from: clientID)
+        case "setlist.replaceFuture":
+            handleSetlistReplaceFuture(data: data, from: clientID)
         default:
             break
         }
@@ -332,12 +348,177 @@ final class RemoteControlBridge: NSObject, ObservableObject {
         sendAck(id: cmd.id, ok: true, to: clientID)
     }
 
-    private func sendAck(id: String?, ok: Bool, reason: String? = nil, to clientID: UUID) {
+    private func sendAck(id: String?, ok: Bool, reason: String? = nil,
+                         resolved: [RemoteAck.Resolved]? = nil, failed: [RemoteAck.Failed]? = nil,
+                         to clientID: UUID) {
         guard let transport else { return }
-        let ack = RemoteAck(id: id, ok: ok, rejectedReason: reason)
+        let ack = RemoteAck(id: id, ok: ok, rejectedReason: reason, resolved: resolved, failed: failed)
         if let s = RemoteJSON.encodeToString(ack) {
             transport.send(s, to: clientID)
         }
+    }
+
+    // MARK: - Controller setlist write (v2 Slice 2, gated by remoteControlAllowSetlistLoad)
+
+    /// Validates a controller-supplied path: absolute, existing, readable regular file, audio type.
+    /// Returns a rejection reason, or nil when the path is acceptable.
+    private func validateLoadPath(_ path: String) -> String? {
+        guard path.hasPrefix("/") else { return RemoteRejectReason.pathNotAllowed }
+        let url = URL(fileURLWithPath: path)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            return RemoteRejectReason.fileNotFound
+        }
+        if isDir.boolValue { return RemoteRejectReason.unsupportedType }
+        guard FileManager.default.isReadableFile(atPath: url.path) else {
+            return RemoteRejectReason.unreadable
+        }
+        guard let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .audio) else {
+            return RemoteRejectReason.unsupportedType
+        }
+        return nil
+    }
+
+    /// Builds a SetlistEntry from a validated load entry (path already checked). Reads file tags,
+    /// applying the controller's optional title/artist overrides, and stamps the client refs.
+    private func buildEntry(from le: RemoteLoadEntry) async -> SetlistEntry {
+        let url = URL(fileURLWithPath: le.path)
+        let base = await SetlistManager.readMetadata(from: url)
+        let title = (le.title?.isEmpty == false) ? le.title! : base.title
+        let artist = (le.artist?.isEmpty == false) ? le.artist! : base.artist
+        let track = Track(title: title, artist: artist, genre: base.genre,
+                          persistentID: base.persistentID, year: base.year, comment: base.comment,
+                          albumArtist: base.albumArtist, grouping: base.grouping,
+                          replayGainInfo: base.replayGainInfo, bpm: base.bpm)
+        var entry = SetlistEntry(fileURL: url, track: track)
+        entry.clientRef = le.clientRef
+        entry.tandaRef = le.tandaRef
+        return entry
+    }
+
+    /// Common gate for write commands: accepting, authenticated, and the load scope is enabled.
+    /// Returns true when the command may proceed; otherwise sends the appropriate ack/skip.
+    private func authorizeWrite(id: String?, from clientID: UUID) -> Bool {
+        guard isAcceptingClients, authenticatedClients.contains(clientID) else { return false }
+        guard settings.remoteControlAllowSetlistLoad else {
+            sendAck(id: id, ok: false, reason: RemoteRejectReason.controllerDisabled, to: clientID)
+            return false
+        }
+        return true
+    }
+
+    private func handleLoadSetlist(data: Data, from clientID: UUID) {
+        guard isAcceptingClients, authenticatedClients.contains(clientID) else { return }
+        guard let cmd = RemoteCommandDecoder.loadSetlist(from: data) else {
+            sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
+        }
+        guard authorizeWrite(id: cmd.id, from: clientID) else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.appState.ensureBuiltInPlayerActive()
+            let (built, resolved, failed) = await self.buildEntries(cmd.entries)
+            switch cmd.mode {
+            case .append:  self.appState.setlist.insert(built, before: nil)
+            case .replace: self.appState.setlist.replaceQueuedRegion(with: built)
+            }
+            self.sendAck(id: cmd.id, ok: true, resolved: resolved, failed: failed, to: clientID)
+        }
+    }
+
+    private func handleSetlistReplaceFuture(data: Data, from clientID: UUID) {
+        guard isAcceptingClients, authenticatedClients.contains(clientID) else { return }
+        guard let cmd = RemoteCommandDecoder.replaceFuture(from: data) else {
+            sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
+        }
+        guard authorizeWrite(id: cmd.id, from: clientID) else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.appState.ensureBuiltInPlayerActive()
+            let (built, resolved, failed) = await self.buildEntries(cmd.entries)
+            self.appState.setlist.replaceQueuedRegion(with: built)
+            self.sendAck(id: cmd.id, ok: true, resolved: resolved, failed: failed, to: clientID)
+        }
+    }
+
+    private func handleSetlistInsert(data: Data, from clientID: UUID) {
+        guard isAcceptingClients, authenticatedClients.contains(clientID) else { return }
+        guard let cmd = RemoteCommandDecoder.insert(from: data) else {
+            sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
+        }
+        guard authorizeWrite(id: cmd.id, from: clientID) else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.appState.ensureBuiltInPlayerActive()
+            let count = self.appState.setlist.entries.count
+            guard cmd.at >= self.appState.setlist.firstQueuedIndex, cmd.at <= count else {
+                self.sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.immutablePosition, to: clientID); return
+            }
+            if let reason = self.validateLoadPath(cmd.entry.path) {
+                self.sendAck(id: cmd.id, ok: false, reason: reason, to: clientID); return
+            }
+            let entry = await self.buildEntry(from: cmd.entry)
+            self.appState.setlist.insert([entry], atIndex: cmd.at)
+            self.sendAck(id: cmd.id, ok: true,
+                         resolved: [.init(clientRef: cmd.entry.clientRef, entryId: entry.id.uuidString)],
+                         to: clientID)
+        }
+    }
+
+    private func handleSetlistRemove(data: Data, from clientID: UUID) {
+        guard isAcceptingClients, authenticatedClients.contains(clientID) else { return }
+        guard let cmd = RemoteCommandDecoder.remove(from: data) else {
+            sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
+        }
+        guard authorizeWrite(id: cmd.id, from: clientID) else { return }
+        guard let uuid = UUID(uuidString: cmd.entryId),
+              appState.setlist.entries.contains(where: { $0.id == uuid }) else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.unknownEntry, to: clientID); return
+        }
+        guard appState.setlist.isQueuedEntry(uuid) else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.entryImmutable, to: clientID); return
+        }
+        appState.setlist.remove(ids: [uuid])
+        sendAck(id: cmd.id, ok: true, to: clientID)
+    }
+
+    private func handleSetlistMove(data: Data, from clientID: UUID) {
+        guard isAcceptingClients, authenticatedClients.contains(clientID) else { return }
+        guard let cmd = RemoteCommandDecoder.move(from: data) else {
+            sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
+        }
+        guard authorizeWrite(id: cmd.id, from: clientID) else { return }
+        guard let uuid = UUID(uuidString: cmd.entryId),
+              appState.setlist.entries.contains(where: { $0.id == uuid }) else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.unknownEntry, to: clientID); return
+        }
+        guard appState.setlist.isQueuedEntry(uuid) else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.entryImmutable, to: clientID); return
+        }
+        let count = appState.setlist.entries.count
+        guard cmd.toIndex >= appState.setlist.firstQueuedIndex, cmd.toIndex < count else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.immutablePosition, to: clientID); return
+        }
+        appState.setlist.moveEntry(id: uuid, toIndex: cmd.toIndex)
+        sendAck(id: cmd.id, ok: true, to: clientID)
+    }
+
+    /// Validates + builds a batch of load entries (used by loadSetlist/replaceFuture). Returns the
+    /// built entries plus the resolved/failed lists for the ack.
+    private func buildEntries(_ entries: [RemoteLoadEntry]) async
+        -> (built: [SetlistEntry], resolved: [RemoteAck.Resolved], failed: [RemoteAck.Failed]) {
+        var built: [SetlistEntry] = []
+        var resolved: [RemoteAck.Resolved] = []
+        var failed: [RemoteAck.Failed] = []
+        for le in entries {
+            if let reason = validateLoadPath(le.path) {
+                failed.append(.init(clientRef: le.clientRef, reason: reason))
+                continue
+            }
+            let entry = await buildEntry(from: le)
+            built.append(entry)
+            resolved.append(.init(clientRef: le.clientRef, entryId: entry.id.uuidString))
+        }
+        return (built, resolved, failed)
     }
 
     private func handleAuth(pin: String?, from clientID: UUID) {

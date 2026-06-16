@@ -28,9 +28,11 @@ struct SetlistEntry: Identifiable, Codable {
     var isPerformance: Bool = false    // track is part of a guest performance
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
     var autoGapSkipped: Bool = false   // transient: true when the first-track setting automatically skips the gap
+    var clientRef: String? = nil       // opaque id from a remote controller (echoed in state.setlist[])
+    var tandaRef: String? = nil        // opaque grouping hint from a remote controller (echoed)
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance
+        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, clientRef, tandaRef
         // autoGapApplied and autoGapSkipped are intentionally excluded — reset each playback session
     }
 
@@ -59,6 +61,8 @@ struct SetlistEntry: Identifiable, Codable {
             tagColor = .none
         }
         isPerformance = try c.decodeIfPresent(Bool.self, forKey: .isPerformance) ?? false
+        clientRef = try c.decodeIfPresent(String.self, forKey: .clientRef)
+        tandaRef = try c.decodeIfPresent(String.self, forKey: .tandaRef)
         autoGapApplied = false
         autoGapSkipped = false
     }
@@ -148,6 +152,43 @@ final class SetlistManager: ObservableObject {
         })
         guard !movable.isEmpty else { return }
         entries.move(fromOffsets: movable, toOffset: destination)
+        save()
+    }
+
+    // MARK: - Remote controller edits (queued region only)
+
+    /// First index a remote controller may edit — just past the playing/played region.
+    var firstQueuedIndex: Int {
+        RemoteSetlistEditing.firstQueuedIndex(locked: entries.map { $0.state == .playing || $0.state == .played })
+    }
+
+    /// True when `id` exists and is editable (queued) — i.e. not playing or already played.
+    func isQueuedEntry(_ id: UUID) -> Bool {
+        entries.first(where: { $0.id == id })?.state == .queued
+    }
+
+    /// Insert at an absolute index (clamped into the queued region); applies the tag-colour provider.
+    func insert(_ newEntries: [SetlistEntry], atIndex index: Int) {
+        let clamped = max(firstQueuedIndex, min(index, entries.count))
+        let anchorID = clamped < entries.count ? entries[clamped].id : nil
+        insert(newEntries, before: anchorID)
+    }
+
+    /// Replace the queued region with new entries; the playing/played region is untouched.
+    func replaceQueuedRegion(with newEntries: [SetlistEntry]) {
+        if let stopID = stopAfterEntryID, !entries.contains(where: { $0.id == stopID && $0.state != .queued }) {
+            stopAfterEntryID = nil
+        }
+        entries.removeAll { $0.state == .queued }
+        insert(newEntries, before: nil)   // append after the surviving playing/played region
+    }
+
+    /// Move a queued entry so it ends up at `toIndex` in the full list (clamped to the queued region).
+    func moveEntry(id: UUID, toIndex: Int) {
+        guard let from = entries.firstIndex(where: { $0.id == id }) else { return }
+        let entry = entries.remove(at: from)
+        let dest = max(firstQueuedIndex, min(toIndex, entries.count))
+        entries.insert(entry, at: dest)
         save()
     }
 

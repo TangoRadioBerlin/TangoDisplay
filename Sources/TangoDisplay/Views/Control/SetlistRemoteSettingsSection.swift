@@ -55,6 +55,14 @@ struct SetlistRemoteSettingsSection: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if settings.remoteControlAllowSetlistControl {
+                    Toggle("Allow remote setlist loading & editing",
+                           isOn: $settings.remoteControlAllowSetlistLoad)
+                    Text("Additionally lets the controller load and reorder the setlist — including loading local audio files by absolute path on this Mac. More sensitive than transport; keep off unless you trust the controller. LAN-only and PIN-gated.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             if primaryURL.isEmpty {
