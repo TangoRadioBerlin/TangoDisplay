@@ -780,6 +780,27 @@ func runAutoReplayGainTests() {
             try expectEqual(result.linearGain, 1.0)
         }
 
+        test("alwaysAnalyze prefers analysis over present track metadata") {
+            let info = ReplayGainInfo(trackGainDb: -7.0, trackPeak: nil, albumGainDb: nil, albumPeak: nil)
+            let analysis = makeAnalysis(gainDb: -3.0, lufs: -15.0)
+            let settings = ReplayGainSettings(mode: .auto, preampDb: 0, preventClipping: false,
+                                              targetLoudnessLufs: -18.0, alwaysAnalyze: true)
+            let result = calculateReplayGain(info: info, analysis: analysis, settings: settings)
+            try expectEqual(result.source, .analysed)
+            let expected = Float(pow(10.0, -3.0 / 20.0))
+            try expect(abs(result.linearGain - expected) < 0.0001,
+                       "Expected ~\(expected), got \(result.linearGain)")
+        }
+
+        test("alwaysAnalyze ignores tags while analysis is still pending") {
+            let info = ReplayGainInfo(trackGainDb: -7.0, trackPeak: nil, albumGainDb: nil, albumPeak: nil)
+            let settings = ReplayGainSettings(mode: .auto, preampDb: 0, preventClipping: false,
+                                              targetLoudnessLufs: -18.0, alwaysAnalyze: true)
+            let result = calculateReplayGain(info: info, analysis: nil, settings: settings)
+            try expectEqual(result.source, .none)
+            try expectEqual(result.linearGain, 1.0)
+        }
+
         test("integratedLoudnessLufs populated for analysed source") {
             let info = ReplayGainInfo(trackGainDb: nil, trackPeak: nil, albumGainDb: nil, albumPeak: nil)
             let analysis = makeAnalysis(gainDb: -7.1, lufs: -10.9)
@@ -3138,6 +3159,7 @@ runRemoteServerLimitsTests()
 runQueryEncodingTests()
 runExternalInputLimitsTests()
 runWaveformMathTests()
+runColorMatchingTests()
 runRemoteProtocolV2Tests()
 
 print("\n════════════════════════════════")
@@ -3147,6 +3169,38 @@ print("════════════════════════�
 
 if totalFailed > 0 {
     exit(1)
+}
+
+// MARK: - Colour matching (genre → tag colour)
+
+func runColorMatchingTests() {
+    suite("ColorMatching.rgb(fromHex:)") {
+        test("parses #RRGGBB and bare RRGGBB") {
+            let a = ColorMatching.rgb(fromHex: "#FF9500")
+            try expectEqual(a?.r, 255); try expectEqual(a?.g, 149); try expectEqual(a?.b, 0)
+            let b = ColorMatching.rgb(fromHex: "34C759")
+            try expectEqual(b?.r, 52); try expectEqual(b?.g, 199); try expectEqual(b?.b, 89)
+        }
+        test("rejects malformed hex") {
+            try expectNil(ColorMatching.rgb(fromHex: "#FFF"))
+            try expectNil(ColorMatching.rgb(fromHex: "nope"))
+            try expectNil(ColorMatching.rgb(fromHex: ""))
+        }
+    }
+    suite("ColorMatching.nearestIndex") {
+        let palette = ["#FF3B30", "#FF9500", "#F2CC00", "#34C759", "#007AFF", "#AF52DE"] // red…purple
+        test("picks the exact palette entry") {
+            try expectEqual(ColorMatching.nearestIndex(toHex: "#007AFF", palette: palette), 4)
+        }
+        test("snaps a near colour to the closest entry") {
+            try expectEqual(ColorMatching.nearestIndex(toHex: "#1188EE", palette: palette), 4) // ~blue
+            try expectEqual(ColorMatching.nearestIndex(toHex: "#22AA44", palette: palette), 3) // ~green
+        }
+        test("nil for bad input or empty palette") {
+            try expectNil(ColorMatching.nearestIndex(toHex: "bad", palette: palette))
+            try expectNil(ColorMatching.nearestIndex(toHex: "#007AFF", palette: []))
+        }
+    }
 }
 
 // MARK: - Remote control protocol v2
