@@ -36,6 +36,10 @@ final class AppState: ObservableObject {
     /// Which scene the Position-tab preview simulates (dance / a specific genre / cortina).
     /// Transient; drives `PresentationView`'s preview sample state and override. Never persisted.
     @Published var previewScene: PreviewScene = .dance
+    /// When true (and an Appearance draft is active), the real presentation screen mirrors the
+    /// selected `previewScene` instead of the live playback state, so positioning is WYSIWYG on the
+    /// actual second display while editing. Transient; never persisted.
+    @Published var mirrorPreviewSceneOnPresentation: Bool = false
     /// Album artwork for the current dance track. Nil during cortinas and idle.
     @Published private(set) var currentArtwork: NSImage? = nil
     /// persistentID of the track whose artwork is currently displayed; drives transition identity.

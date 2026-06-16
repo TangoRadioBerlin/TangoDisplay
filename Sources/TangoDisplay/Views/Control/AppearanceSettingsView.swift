@@ -145,7 +145,8 @@ struct AppearanceSettingsView: View {
             Text("Preview")
                 .font(.caption)
                 .foregroundColor(.secondary)
-            scenePicker
+            // The preview always follows the Scene selection in the Position tab (left); no
+            // separate scene control here.
             PreviewPane()
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
@@ -156,26 +157,6 @@ struct AppearanceSettingsView: View {
         .padding(8)
     }
 
-    /// Lets the DJ preview each scene (dance default, a configured genre, or the cortina)
-    /// exactly as it renders at runtime — including that scene's per-genre position override.
-    private var scenePicker: some View {
-        Picker("Scene", selection: $appState.previewScene) {
-            Text("Dance (default)").tag(PreviewScene.dance)
-            ForEach(working.genreBackgrounds.filter { !$0.isCortinaEntry }) { entry in
-                Text(entry.genreKey + (entry.positions != nil ? "  ✓" : ""))
-                    .tag(PreviewScene.genre(entry.genreKey))
-            }
-            if working.genreBackgrounds.contains(where: { $0.isCortinaEntry }) {
-                let cortinaSet = working.genreBackgrounds.first { $0.isCortinaEntry }?.positions
-                Text(settings.cortinaLabel + (cortinaSet != nil ? "  ✓" : ""))
-                    .tag(PreviewScene.cortina)
-            } else {
-                Text(settings.cortinaLabel).tag(PreviewScene.cortina)
-            }
-        }
-        .pickerStyle(.menu)
-        .font(.caption)
-    }
 
     // MARK: - Tab content
 

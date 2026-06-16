@@ -36,6 +36,7 @@ extension AppearanceProfile {
     var yearSwiftUIColor: Color          { Color(hex: yearColor) }
     var trackCounterSwiftUIColor: Color  { Color(hex: trackCounterColor) }
     var singerSwiftUIColor: Color        { Color(hex: singerColor) }
+    var albumArtworkBackingSwiftUIColor: Color { Color(hex: albumArtworkBackingColor) }
 
     func font(name: String, size: Double, bold: Bool, italic: Bool) -> Font {
         let weight: Font.Weight = bold ? .bold : .regular

@@ -1,5 +1,7 @@
+import AppKit
 import SwiftUI
 import TangoDisplayCore
+import UniformTypeIdentifiers
 
 /// Per-element position editor. The sliders edit **the scene currently selected in the preview**
 /// (`appState.previewScene`): "Dance (default)" edits the profile's base offsets, a genre or the
@@ -10,6 +12,7 @@ struct AppearancePositionTab: View {
     @Binding var working: AppearanceProfile
     @EnvironmentObject var appState: AppState
     @State private var measuredCenters: [String: ElementCenter] = [:]
+    @State private var ioErrorMessage: String? = nil
 
     // MARK: - Scene resolution
 
@@ -118,8 +121,108 @@ struct AppearancePositionTab: View {
         working.genreBackgrounds[idx].positions = nil
     }
 
+    // MARK: - Save / load a scene's override to a file (back up or copy onto another genre)
+
+    private func saveSceneOverride() {
+        guard let idx = sceneOverrideIndex, let set = working.genreBackgrounds[idx].positions else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(sceneLabel) positions.json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try PositionSetExporter.exportData(set).write(to: url, options: .atomic)
+        } catch {
+            ioErrorMessage = "Could not write the file: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadSceneOverride() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose an exported TangoDisplay position set"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let set = try PositionSetExporter.importPositionSet(from: Data(contentsOf: url))
+            guard let idx = ensureSceneEntryIndex() else { return }
+            working.genreBackgrounds[idx].positions = set
+        } catch {
+            ioErrorMessage = "This file is not a valid TangoDisplay position set."
+        }
+    }
+
+    // MARK: - Scene section (central genre/scene selector + gate + mirror)
+
+    /// Central scene selector. Picks which scene the sliders below edit (and which scene the preview
+    /// and — when mirroring — the real presentation screen show). Genre/cortina scenes only take
+    /// effect at runtime when "Enable genre backgrounds" is on, so the toggle lives right here.
+    private var sceneSection: some View {
+        Section {
+            Toggle("Enable genre backgrounds", isOn: $working.genreBackgroundsEnabled)
+                .onChange(of: working.genreBackgroundsEnabled) { enabled in
+                    if !enabled { appState.previewScene = .dance }  // hide per-genre/cortina scenes
+                }
+            if working.genreBackgroundsEnabled {
+                scenePicker
+                HStack {
+                    Text("Editing scene:")
+                        .foregroundColor(.secondary)
+                    Text(sceneLabel).fontWeight(.semibold)
+                    Spacer()
+                    if !isDanceScene {
+                        Button("Clear override", role: .destructive) { clearSceneOverride() }
+                            .controlSize(.small)
+                            .disabled(!sceneHasOverride)
+                    }
+                }
+                if !isDanceScene {
+                    HStack {
+                        Button("Save…") { saveSceneOverride() }
+                            .disabled(!sceneHasOverride)
+                        Button("Load…") { loadSceneOverride() }
+                        Spacer()
+                    }
+                    .controlSize(.small)
+                }
+            }
+            Toggle("Mirror selected scene on presentation screen",
+                   isOn: $appState.mirrorPreviewSceneOnPresentation)
+        } header: {
+            Text("Scene")
+                .foregroundColor(ControlTheme.accent)
+        } footer: {
+            Label {
+                Text(working.genreBackgroundsEnabled
+                     ? "Pick the scene to position with **Scene**. The sliders below change that scene: \"Dance (default)\" sets the base layout; a genre or the cortina overrides only the elements you touch (others inherit Dance). **Save…/Load…** back up a scene's positions to a file or copy them onto another genre. Turn on **Mirror** to see the selected scene live on the real presentation screen while editing."
+                     : "Genre backgrounds are off — the sliders below edit the single base layout used for every track. Enable genre backgrounds to position individual genres and the cortina separately.")
+            } icon: {
+                Image(systemName: "info.circle")
+            }
+        }
+    }
+
+    /// Scene chooser: Dance default, each configured genre, and the cortina. Mirrors the picker in
+    /// the preview column (same `appState.previewScene` binding), so both stay in sync. Only shown
+    /// when genre backgrounds are enabled.
+    private var scenePicker: some View {
+        Picker("Scene", selection: $appState.previewScene) {
+            Text("Dance (default)").tag(PreviewScene.dance)
+            ForEach(working.genreBackgrounds.filter { !$0.isCortinaEntry }) { entry in
+                Text(entry.genreKey + (entry.positions != nil ? "  ✓" : ""))
+                    .tag(PreviewScene.genre(entry.genreKey))
+            }
+            let cortinaSet = working.genreBackgrounds.first { $0.isCortinaEntry }?.positions
+            Text(appState.settings.cortinaLabel + (cortinaSet != nil ? "  ✓" : ""))
+                .tag(PreviewScene.cortina)
+        }
+        .pickerStyle(.menu)
+    }
+
     var body: some View {
         Form {
+            sceneSection
+
             Section {
                 Picker("Mode", selection: $working.layoutMode) {
                     ForEach(LayoutMode.allCases, id: \.self) { mode in
@@ -144,35 +247,6 @@ struct AppearancePositionTab: View {
                     Text(working.layoutMode == .flow
                          ? "Stacked: elements flow vertically, so a track without e.g. a singer shifts the others. Convert keeps the current look but anchors every element independently — empty fields then never move their neighbours."
                          : "Absolute: every element is anchored at screen centre plus its offsets; empty fields never shift the others. Switching back to Stacked keeps the converted offsets, so positions will jump — usually you want to stay absolute.")
-                } icon: {
-                    Image(systemName: "info.circle")
-                }
-            }
-
-            Section {
-                HStack {
-                    Text("Editing scene:")
-                        .foregroundColor(.secondary)
-                    Text(sceneLabel).fontWeight(.semibold)
-                    Spacer()
-                    if !isDanceScene {
-                        Button("Clear override", role: .destructive) { clearSceneOverride() }
-                            .controlSize(.small)
-                            .disabled(!sceneHasOverride)
-                    }
-                }
-                if !isDanceScene && !working.genreBackgroundsEnabled {
-                    Label("Per-genre positions only take effect with Genre Backgrounds enabled (Artwork & Motion tab).",
-                          systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundColor(.orange)
-                }
-            } header: {
-                Text("Scene")
-                    .foregroundColor(ControlTheme.accent)
-            } footer: {
-                Label {
-                    Text("Pick the scene to position with the **Scene** menu above the preview. The sliders below change that scene: \"Dance (default)\" sets the base layout; a genre or the cortina overrides only the elements you touch (others inherit Dance). Clear override makes the scene inherit Dance again.")
                 } icon: {
                     Image(systemName: "info.circle")
                 }
@@ -217,7 +291,17 @@ struct AppearancePositionTab: View {
             appState.showElementBoundsInPreview = true
             validatePreviewScene()
         }
-        .onDisappear { appState.showElementBoundsInPreview = false }
+        .onDisappear {
+            appState.showElementBoundsInPreview = false
+            appState.mirrorPreviewSceneOnPresentation = false
+        }
+        .alert("Position set", isPresented: Binding(
+            get: { ioErrorMessage != nil },
+            set: { if !$0 { ioErrorMessage = nil } })) {
+            Button("OK", role: .cancel) { ioErrorMessage = nil }
+        } message: {
+            Text(ioErrorMessage ?? "")
+        }
     }
 
     // MARK: - Album artwork (scene-aware position/scale/opacity; global fade)
@@ -251,6 +335,45 @@ struct AppearancePositionTab: View {
         } footer: {
             Label {
                 Text("Position, size and opacity follow the selected scene; edge fade and style are profile-wide. A placeholder shows the artwork box in the preview while this tab is open.")
+            } icon: {
+                Image(systemName: "info.circle")
+            }
+        }
+
+        Section {
+            Toggle("Backing plate behind artwork", isOn: $working.albumArtworkBackingEnabled)
+            if working.albumArtworkBackingEnabled {
+                HStack {
+                    Text("Plate Colour").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
+                    ColorPicker("", selection: Binding(
+                        get: { Color(hex: working.albumArtworkBackingColor) },
+                        set: { working.albumArtworkBackingColor = $0.hexString }))
+                        .labelsHidden()
+                    Spacer()
+                }
+                artworkSlider("Plate Size", value: $working.albumArtworkBackingScale,
+                              range: 1.0...1.25, format: "%.0f%%", percent: true)
+                artworkSlider("Plate Opacity", value: $working.albumArtworkBackingOpacity,
+                              range: 0...1, format: "%.0f%%", percent: true)
+                artworkSlider("Plate Fade", value: $working.albumArtworkBackingEdgeFade,
+                              range: 0...1, format: "%.0f%%", percent: true)
+                HStack {
+                    Text("Plate Fade Style").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
+                    Picker("", selection: $working.albumArtworkBackingFadeStyle) {
+                        ForEach(AlbumArtFadeStyle.allCases, id: \.self) { s in
+                            Text(s.displayName).tag(s)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                }
+            }
+        } header: {
+            Text("Artwork Backing Plate")
+                .foregroundColor(ControlTheme.accent)
+        } footer: {
+            Label {
+                Text("A square coloured plate centred under the artwork, up to 25 % larger. Its edges and corners fade like the artwork. Profile-wide (not per scene).")
             } icon: {
                 Image(systemName: "info.circle")
             }

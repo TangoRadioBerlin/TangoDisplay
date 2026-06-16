@@ -25,7 +25,9 @@ struct PresentationView: View {
     private var shouldShowArtwork: Bool {
         // While editing positions in the preview, show a placeholder so artwork position/size is visible.
         if isPreview, appState.showElementBoundsInPreview { return activeProfile.showArtworkDance }
-        switch appState.displayState.mode {
+        // Mirrored presentation screen follows the simulated scene's mode.
+        let mode = isMirroring ? effectiveDisplayState.mode : appState.displayState.mode
+        switch mode {
         case .playing: return activeProfile.showArtworkDance
         case .cortina: return activeProfile.showArtworkCortina
         default:       return false
@@ -49,6 +51,20 @@ struct PresentationView: View {
                         // Artwork offsets are percentages of the resolution → resolve to points here.
                         let ax = renderProfile.albumArtworkOffsetX / 100 * geo.size.width
                         let ay = renderProfile.albumArtworkOffsetY / 100 * geo.size.height
+                        // Square backing plate: sized off the artwork's displayed square (min screen
+                        // dimension × artwork scale), up to 25% larger, centred on the same offset.
+                        let artworkSide = min(geo.size.width, geo.size.height) * renderProfile.albumArtworkScale
+                        let backingSide = artworkSide * renderProfile.albumArtworkBackingScale
+                        ZStack {
+                        if renderProfile.albumArtworkBackingEnabled {
+                            Rectangle()
+                                .fill(renderProfile.albumArtworkBackingSwiftUIColor)
+                                .frame(width: backingSide, height: backingSide)
+                                .mask(fadeMask(fade: renderProfile.albumArtworkBackingEdgeFade,
+                                               style: renderProfile.albumArtworkBackingFadeStyle))
+                                .opacity(renderProfile.albumArtworkBackingOpacity)
+                                .offset(x: ax, y: ay)
+                        }
                         Group {
                             if let art = appState.currentArtwork {
                                 Image(nsImage: art)
@@ -79,6 +95,7 @@ struct PresentationView: View {
                             }
                         }
                         .frame(width: geo.size.width, height: geo.size.height)
+                        }
                     }
                 }
             }
@@ -108,10 +125,11 @@ struct PresentationView: View {
                 activeProfile.backgroundSwiftUIColor
                     .ignoresSafeArea()
 
-                let showPerformanceBg = appState.displayState.mode == .performance
-                    || (appState.displayState.mode == .cortina
-                        && appState.displayState.nextTrackIsPerformance
-                        && settings.performanceBackgroundDuringCortina)
+                let showPerformanceBg = !isSimulatingScene
+                    && (appState.displayState.mode == .performance
+                        || (appState.displayState.mode == .cortina
+                            && appState.displayState.nextTrackIsPerformance
+                            && settings.performanceBackgroundDuringCortina))
                 if showPerformanceBg {
                     if let img = performanceBgImage {
                         Image(nsImage: img)
@@ -202,6 +220,20 @@ struct PresentationView: View {
         .onChange(of: appState.displayState.currentTrack?.genre ?? "") { _ in
             reloadGenreBgImage()
         }
+        // Scene simulation (preview pane / mirrored screen): reload backgrounds when the selected
+        // scene or the simulation state changes so the editor shows each scene's own background.
+        .onChange(of: appState.previewScene) { _ in
+            reloadGenreBgImage()
+            reloadArtistBgImage()
+        }
+        .onChange(of: appState.showElementBoundsInPreview) { _ in
+            reloadGenreBgImage()
+            reloadArtistBgImage()
+        }
+        .onChange(of: appState.mirrorPreviewSceneOnPresentation) { _ in
+            reloadGenreBgImage()
+            reloadArtistBgImage()
+        }
     }
 
     private func reloadPerformanceBgImage() {
@@ -257,6 +289,11 @@ struct PresentationView: View {
     }
 
     private func reloadArtistBgImage() {
+        // Scene simulation doesn't model per-artist backgrounds; the genre/cortina bg wins instead.
+        guard !isSimulatingScene else {
+            artistBgImage = nil
+            return
+        }
         guard appState.displayState.mode == .playing else {
             artistBgImage = nil
             return
@@ -271,17 +308,29 @@ struct PresentationView: View {
     }
 
     private func reloadGenreBgImage() {
-        // Active for both .playing (dance-genre matches) and .cortina (cortina-sentinel match).
-        // The detector itself decides which entry applies based on the current track's genre.
-        let mode = appState.displayState.mode
-        guard mode == .playing || mode == .cortina else {
-            genreBgImage = nil
-            return
+        let match: GenreBackground?
+        if isSimulatingScene {
+            // While editing, show the background that belongs to the scene being positioned, so the
+            // preview/mirror is WYSIWYG (Dance = profile default → no genre bg; a genre/cortina → its bg).
+            switch appState.previewScene {
+            case .dance:
+                match = nil
+            case .genre(let g):
+                match = activeProfile.matchingGenreBackground(for: g, using: settings.makeDetector())
+            case .cortina:
+                match = activeProfile.genreBackgrounds.first { $0.isCortinaEntry }
+            }
+        } else {
+            // Live: active for .playing (dance-genre matches) and .cortina (cortina-sentinel match).
+            let mode = appState.displayState.mode
+            guard mode == .playing || mode == .cortina else {
+                genreBgImage = nil
+                return
+            }
+            let genre = appState.displayState.currentTrack?.genre ?? ""
+            match = activeProfile.matchingGenreBackground(for: genre, using: settings.makeDetector())
         }
-        let genre = appState.displayState.currentTrack?.genre ?? ""
-        let detector = settings.makeDetector()
-        guard let match = activeProfile.matchingGenreBackground(for: genre, using: detector),
-              let filename = match.imageFilename else {
+        guard let match, let filename = match.imageFilename else {
             genreBgImage = nil
             return
         }
@@ -313,45 +362,69 @@ struct PresentationView: View {
                          grouping: "Sample Singer")
     )
 
-    /// While the Position tab is open and nothing real is playing, inject a sample for the
-    /// selected preview scene so positioning (and the bounds outlines) are visible.
-    private var effectiveDisplayState: DisplayState {
-        guard isPreview, appState.showElementBoundsInPreview,
-              appState.displayState.currentTrack == nil
-        else { return appState.displayState }
-        switch appState.previewScene {
-        case .dance:           return Self.previewDanceState(genre: "Tango")
-        case .genre(let g):    return Self.previewDanceState(genre: g)
-        case .cortina:         return Self.previewCortinaState
+    /// True while the real presentation screen should mirror the selected preview scene: the
+    /// Position tab is open (a draft is active) and the maintainer enabled mirroring.
+    private var isMirroring: Bool {
+        !isPreview && appState.mirrorPreviewSceneOnPresentation && appState.draftProfile != nil
+    }
+
+    /// True whenever the view is showing a simulated scene sample: the preview pane while the
+    /// Position tab is open (always follows the Scene selection, regardless of what is playing),
+    /// or the mirrored presentation screen. Drives scene-aware background selection.
+    private var isSimulatingScene: Bool {
+        if isMirroring { return true }
+        return isPreview && appState.showElementBoundsInPreview
+    }
+
+    private func sampleState(for scene: PreviewScene) -> DisplayState {
+        switch scene {
+        case .dance:        return Self.previewDanceState(genre: "Tango")
+        case .genre(let g): return Self.previewDanceState(genre: g)
+        case .cortina:      return Self.previewCortinaState
         }
+    }
+
+    /// In the preview pane (whenever the Position tab is open) and on the mirrored presentation
+    /// screen, inject a sample for the selected scene so positioning is visible. Otherwise live state.
+    private var effectiveDisplayState: DisplayState {
+        if isSimulatingScene { return sampleState(for: appState.previewScene) }
+        return appState.displayState
     }
 
     private static let previewSampleLastPlayed = Track(
         title: "Previous Title", artist: "Previous Artist", genre: "Tango", persistentID: "preview-last")
 
     private var effectiveLastPlayed: Track? {
-        if isPreview, appState.showElementBoundsInPreview, appState.displayState.currentTrack == nil {
-            return Self.previewSampleLastPlayed
-        }
+        if isSimulatingScene { return Self.previewSampleLastPlayed }
         return appState.lastPlayedTrack
     }
 
+    /// The active profile with the selected scene's position override applied (dance = base,
+    /// genre/cortina = that entry's sparse override). Shared by the preview pane and the mirror.
+    private func profileForScene(_ scene: PreviewScene) -> AppearanceProfile {
+        switch scene {
+        case .dance:
+            return activeProfile   // profile defaults, no override
+        case .genre(let g):
+            return activeProfile.applyingPositionOverride(
+                activeProfile.positionOverride(forGenre: g, using: appState.settings.makeDetector()))
+        case .cortina:
+            // Gate on genreBackgroundsEnabled so the preview/mirror match runtime, where the
+            // cortina override is only applied when genre backgrounds are enabled.
+            guard activeProfile.genreBackgroundsEnabled else { return activeProfile }
+            let set = activeProfile.genreBackgrounds.first { $0.isCortinaEntry }?.positions
+            return activeProfile.applyingPositionOverride(set)
+        }
+    }
+
     /// Profile with the per-genre / cortina position override applied. Used for both the artwork
-    /// layer and the text views. The preview now applies the SAME override as runtime for the
-    /// selected scene, so configuring positions is WYSIWYG for each genre and the cortina.
+    /// layer and the text views. The preview and the mirrored presentation screen apply the SAME
+    /// override as runtime for the selected scene, so configuring positions is WYSIWYG everywhere.
     private var renderProfile: AppearanceProfile {
+        if isMirroring { return profileForScene(appState.previewScene) }
         if isPreview {
             guard appState.showElementBoundsInPreview else { return activeProfile }
-            switch appState.previewScene {
-            case .dance:
-                return activeProfile   // profile defaults, no override
-            case .genre(let g):
-                return activeProfile.applyingPositionOverride(
-                    activeProfile.positionOverride(forGenre: g, using: appState.settings.makeDetector()))
-            case .cortina:
-                let set = activeProfile.genreBackgrounds.first { $0.isCortinaEntry }?.positions
-                return activeProfile.applyingPositionOverride(set)
-            }
+            return profileForScene(appState.previewScene)
         }
         return activeProfile.applyingPositionOverride(
             activeProfile.positionOverride(forGenre: effectiveDisplayState.currentTrack?.genre ?? "",
