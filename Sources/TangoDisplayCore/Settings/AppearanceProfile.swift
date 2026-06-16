@@ -196,6 +196,14 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     // Album-artwork edge-fade style (radial vs. edges)
     public var albumArtworkFadeStyle: AlbumArtFadeStyle
 
+    // Optional square backing plate rendered behind the album artwork (centred on the same offset).
+    public var albumArtworkBackingEnabled: Bool      // draw the backing plate at all
+    public var albumArtworkBackingColor: String      // hex colour of the plate
+    public var albumArtworkBackingScale: Double      // size relative to the artwork, 1.0–1.25
+    public var albumArtworkBackingOpacity: Double     // 0.0–1.0
+    public var albumArtworkBackingEdgeFade: Double    // 0.0 = no fade, 1.0 = max edge/corner fade
+    public var albumArtworkBackingFadeStyle: AlbumArtFadeStyle  // radial vs. edges
+
     // Track Counter font
     public var trackCounterFontName:   String
     public var trackCounterFontSize:   Double
@@ -337,6 +345,12 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
                 albumArtworkOffsetY: Double = 0.0,
                 albumArtworkEdgeFade: Double = 0.0,
                 albumArtworkFadeStyle: AlbumArtFadeStyle = .radial,
+                albumArtworkBackingEnabled: Bool = false,
+                albumArtworkBackingColor: String = "#000000",
+                albumArtworkBackingScale: Double = 1.0,
+                albumArtworkBackingOpacity: Double = 1.0,
+                albumArtworkBackingEdgeFade: Double = 0.0,
+                albumArtworkBackingFadeStyle: AlbumArtFadeStyle = .radial,
                 genreTextCase: GenreTextCase = .uppercase,
                 yearInParentheses: Bool = false,
                 lastPlayedFontName: String = "System", lastPlayedFontSize: Double = 3,
@@ -477,6 +491,12 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.albumArtworkOffsetY = albumArtworkOffsetY
         self.albumArtworkEdgeFade = albumArtworkEdgeFade
         self.albumArtworkFadeStyle = albumArtworkFadeStyle
+        self.albumArtworkBackingEnabled = albumArtworkBackingEnabled
+        self.albumArtworkBackingColor = albumArtworkBackingColor
+        self.albumArtworkBackingScale = albumArtworkBackingScale
+        self.albumArtworkBackingOpacity = albumArtworkBackingOpacity
+        self.albumArtworkBackingEdgeFade = albumArtworkBackingEdgeFade
+        self.albumArtworkBackingFadeStyle = albumArtworkBackingFadeStyle
         self.genreTextCase = genreTextCase
         self.yearInParentheses = yearInParentheses
         self.danceItemOrder = danceItemOrder
@@ -648,6 +668,12 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         albumArtworkOffsetY     = try c.decodeIfPresent(Double.self,  forKey: .albumArtworkOffsetY)     ?? 0.0
         albumArtworkEdgeFade    = try c.decodeIfPresent(Double.self,  forKey: .albumArtworkEdgeFade)    ?? 0.0
         albumArtworkFadeStyle   = try c.decodeIfPresent(AlbumArtFadeStyle.self, forKey: .albumArtworkFadeStyle) ?? .radial
+        albumArtworkBackingEnabled  = try c.decodeIfPresent(Bool.self,   forKey: .albumArtworkBackingEnabled)  ?? false
+        albumArtworkBackingColor    = try c.decodeIfPresent(String.self, forKey: .albumArtworkBackingColor)    ?? "#000000"
+        albumArtworkBackingScale    = try c.decodeIfPresent(Double.self, forKey: .albumArtworkBackingScale)    ?? 1.0
+        albumArtworkBackingOpacity  = try c.decodeIfPresent(Double.self, forKey: .albumArtworkBackingOpacity)  ?? 1.0
+        albumArtworkBackingEdgeFade = try c.decodeIfPresent(Double.self, forKey: .albumArtworkBackingEdgeFade) ?? 0.0
+        albumArtworkBackingFadeStyle = try c.decodeIfPresent(AlbumArtFadeStyle.self, forKey: .albumArtworkBackingFadeStyle) ?? .radial
         genreTextCase           = try c.decodeIfPresent(GenreTextCase.self,     forKey: .genreTextCase)           ?? .uppercase
         yearInParentheses       = try c.decodeIfPresent(Bool.self,              forKey: .yearInParentheses)       ?? false
         showSinger              = try c.decodeIfPresent(Bool.self,         forKey: .showSinger)              ?? false
