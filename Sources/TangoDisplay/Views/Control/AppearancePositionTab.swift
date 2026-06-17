@@ -12,6 +12,7 @@ struct AppearancePositionTab: View {
     @Binding var working: AppearanceProfile
     @EnvironmentObject var appState: AppState
     @State private var measuredCenters: [String: ElementCenter] = [:]
+    @State private var fallbackCenters: [String: ElementCenter] = [:]
     @State private var ioErrorMessage: String? = nil
 
     // MARK: - Scene resolution
@@ -234,6 +235,7 @@ struct AppearancePositionTab: View {
                     Button("Convert to absolute layout (keep current look)") {
                         working = working.convertedToAbsoluteLayout(
                             measuredCenters: measuredCenters,
+                            fallbackCenters: fallbackCenters,
                             containerWidth: LayoutMeasurementView.measurementSize.width,
                             containerHeight: LayoutMeasurementView.measurementSize.height)
                     }
@@ -395,8 +397,17 @@ struct AppearancePositionTab: View {
     @ViewBuilder
     private var measurementHost: some View {
         if working.layoutMode == .flow {
-            LayoutMeasurementView(profile: working, settings: appState.settings) {
-                measuredCenters = $0
+            ZStack {
+                // Actual-visibility pass: visible fields keep their current look.
+                LayoutMeasurementView(profile: working, settings: appState.settings) {
+                    measuredCenters = $0
+                }
+                // All-fields-visible pass: anchors fields that are currently hidden
+                // (year/singer) so the conversion never collapses them onto centre.
+                LayoutMeasurementView(profile: working.withAllDanceFieldsVisible(),
+                                      settings: appState.settings) {
+                    fallbackCenters = $0
+                }
             }
             .fixedSize()
             .opacity(0)

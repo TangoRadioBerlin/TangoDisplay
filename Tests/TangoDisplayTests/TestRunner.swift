@@ -2034,6 +2034,42 @@ func runLayoutModeTests() {
                 containerWidth: 1920, containerHeight: 1080)
             try expectEqual(converted, profile)
         }
+
+        // Regression for the "genre & year stacked on top of each other" bug: a field
+        // that is hidden at conversion time (year/singer default to hidden) is not in
+        // the actual-visibility measurement, so it used to keep offset (0,0) = screen
+        // centre and later collide with other centred fields once shown. It must now be
+        // seeded from the all-fields-visible fallback measurement instead.
+        test("hidden/unmeasured fields are seeded from fallback centres, not collapsed to centre") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["genre": ElementCenter(x: 960, y: 432),    // −10 %
+                                  "title": ElementCenter(x: 960, y: 756)],   // +20 %
+                fallbackCenters: ["year":  ElementCenter(x: 960, y: 648)],   // +10 %
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted.layoutMode, .absolute)
+            try expectEqual(converted.yearOffsetY, 10.0)                     // seeded, not 0
+            try expect(converted.yearOffsetY != converted.genreOffsetY)      // no collision
+        }
+
+        test("actual measurement wins over fallback for visible fields") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["title": ElementCenter(x: 960, y: 756)],   // +20 % (shown)
+                fallbackCenters: ["title": ElementCenter(x: 960, y: 540)],   // 0 % (full stack)
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted.titleOffsetY, 20.0)
+        }
+
+        test("withAllDanceFieldsVisible enables every dance text field") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            let all = profile.withAllDanceFieldsVisible()
+            try expect(all.showGenreDance)
+            try expect(all.showYearDance)
+            try expect(all.showSingerDance)
+            try expect(all.showTitleDance)
+            try expect(all.showArtistDance)
+        }
     }
 
     suite("AbsoluteLayoutMath — measured centre → offset percent") {
@@ -3118,8 +3154,42 @@ func runAutoGapTests() {
     }
 }
 
+func runSetlistOrderRulesTests() {
+    suite("SetlistOrderRules — played block stays a contiguous top prefix") {
+        test("firstUnplayedIndex finds the first not-played from the top") {
+            try expectEqual(SetlistOrderRules.firstUnplayedIndex(played: [true, true, false, true]), 2)
+            try expectEqual(SetlistOrderRules.firstUnplayedIndex(played: [false]), 0)
+            try expectNil(SetlistOrderRules.firstUnplayedIndex(played: [true, true]))
+        }
+
+        test("sanitizedUnplay allows only a contiguous run at the bottom of the played prefix") {
+            let played = [true, true, true, false, false]   // prefix length 3
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [2]), [2])
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [1, 2]), [1, 2])
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [0, 1, 2]), [0, 1, 2])
+            // Selecting a middle/top entry without the ones below it would punch a hole → nothing.
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [0]), [])
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [0, 2]), [2])
+            // A not-played target is never un-played.
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [3]), [])
+        }
+
+        test("sanitizedMarkPlayed allows only a contiguous extension of the played prefix") {
+            let played = [true, true, false, false, false]  // prefix length 2
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [2]), [2])
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [2, 3]), [2, 3])
+            // A gap below the boundary would create a played island → nothing.
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [3]), [])
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [3, 2]), [2, 3])
+            // An already-played target is never re-marked.
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [0]), [])
+        }
+    }
+}
+
 // MARK: - Main entry point
 
+runSetlistOrderRulesTests()
 runAutoGapTests()
 runCortinaDetectorTests()
 runTandaTrackerTests()
