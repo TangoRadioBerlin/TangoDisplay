@@ -3187,8 +3187,50 @@ func runSetlistOrderRulesTests() {
     }
 }
 
+func runSetTimingsCalculatorTests() {
+    typealias Item = SetTimingsCalculator.Item
+    suite("SetTimingsCalculator — remaining set time") {
+        test("cortina counts as min(length, 60); unknown length assumes 60") {
+            let short = Item(duration: 40, isCortina: true, contributes: true, addLeadingGap: false)
+            let long  = Item(duration: 180, isCortina: true, contributes: true, addLeadingGap: false)
+            let unk   = Item(duration: 0, isCortina: true, contributes: true, addLeadingGap: false)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(short, cortinaAssumedPlay: 60), 40)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(long, cortinaAssumedPlay: 60), 60)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(unk, cortinaAssumedPlay: 60), 60)
+        }
+
+        test("non-cortina uses full duration; elapsed is subtracted for the current entry") {
+            let track = Item(duration: 200, isCortina: false, contributes: true, addLeadingGap: false)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(track, cortinaAssumedPlay: 60), 200)
+            let current = Item(duration: 200, isCortina: false, elapsed: 50, contributes: true, addLeadingGap: false)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(current, cortinaAssumedPlay: 60), 150)
+            // Over-run never goes negative.
+            let overrun = Item(duration: 200, isCortina: false, elapsed: 250, contributes: true, addLeadingGap: false)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(overrun, cortinaAssumedPlay: 60), 0)
+        }
+
+        test("played (non-contributing) entries are skipped entirely, gap included") {
+            let played = Item(duration: 200, isCortina: false, contributes: false, addLeadingGap: true)
+            try expectEqual(SetTimingsCalculator.remainingSeconds(items: [played], autoGap: 4, cortinaAssumedPlay: 60), 0)
+        }
+
+        test("auto-gap is added per contributing entry flagged addLeadingGap") {
+            let items = [
+                Item(duration: 100, isCortina: false, elapsed: 30, contributes: true, addLeadingGap: false), // current, no gap → 70
+                Item(duration: 200, isCortina: false, contributes: true, addLeadingGap: true),               // 200 + 4
+                Item(duration: 120, isCortina: true,  contributes: true, addLeadingGap: true),               // min(120,60)=60 + 4
+            ]
+            // 70 + (200+4) + (60+4) = 338
+            try expectEqual(SetTimingsCalculator.remainingSeconds(items: items, autoGap: 4, cortinaAssumedPlay: 60), 338)
+            // autoGap = 0 drops the gaps → 70 + 200 + 60 = 330
+            try expectEqual(SetTimingsCalculator.remainingSeconds(items: items, autoGap: 0, cortinaAssumedPlay: 60), 330)
+        }
+    }
+}
+
 // MARK: - Main entry point
 
+runSetTimingsCalculatorTests()
 runSetlistOrderRulesTests()
 runAutoGapTests()
 runCortinaDetectorTests()

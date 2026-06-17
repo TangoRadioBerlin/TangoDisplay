@@ -47,8 +47,8 @@ struct SetTimingsView: View {
     private var gridBody: some View {
         Grid(horizontalSpacing: 12, verticalSpacing: 12) {
             GridRow {
-                timingCard(icon: "clock", title: "Total Set Time",
-                           value: formatDuration(setlist.totalPlaylistDuration))
+                timingCard(icon: "hourglass", title: "Remaining",
+                           value: formatDuration(remainingSetTime))
                 timingCard(icon: "list.bullet", title: "Tracks Remaining",
                            value: "\(unplayedCount)")
             }
@@ -68,8 +68,8 @@ struct SetTimingsView: View {
     private var horizontalBody: some View {
         VStack(spacing: 6) {
             HStack(spacing: 12) {
-                timingCard(icon: "clock", title: "Total Set Time",
-                           value: formatDuration(setlist.totalPlaylistDuration))
+                timingCard(icon: "hourglass", title: "Remaining",
+                           value: formatDuration(remainingSetTime))
                 timingCard(icon: "list.bullet", title: "Tracks Remaining",
                            value: "\(unplayedCount)")
                 timingCard(icon: "forward.end.fill", title: "Next Cortina",
@@ -89,8 +89,8 @@ struct SetTimingsView: View {
             VStack(spacing: 8) {
                 timingCard(icon: "waveform", title: "Current Track",
                            value: currentTrackCountdown)
-                timingCard(icon: "clock", title: "Total Set Time",
-                           value: formatDuration(setlist.totalPlaylistDuration))
+                timingCard(icon: "hourglass", title: "Remaining",
+                           value: formatDuration(remainingSetTime))
                 timingCard(icon: "list.bullet", title: "Tracks Remaining",
                            value: "\(unplayedCount)")
                 timingCard(icon: "forward.end.fill", title: "Next Cortina",
@@ -297,41 +297,62 @@ struct SetTimingsView: View {
         return 0
     }
 
-    private func effectiveDuration(for entry: SetlistEntry, detector: CortinaDetector) -> TimeInterval {
-        let duration = entry.duration ?? 0
-        guard settings.autoFadeCortinasEnabled,
-              !entry.ignoresAutoFade,
-              detector.isCortina(genre: entry.track.genre) else {
-            return duration
+    /// Cortinas count as at most one minute (DJs fade them after ~1 min).
+    private static let cortinaAssumedPlaySeconds: TimeInterval = 60
+
+    /// Per-entry remaining-time items: played (non-current) entries don't count, the current
+    /// entry has its elapsed subtracted, and upcoming queued/paused entries carry an auto-gap
+    /// (except the very first track of a not-yet-started set). Honours `stopAfterEntryID`.
+    private var remainingItems: [SetTimingsCalculator.Item] {
+        let detector = settings.makeDetector()
+        let stopAfterID = setlist.stopAfterEntryID
+        let autoGapOn = settings.autoGapEnabled
+        let setNotStarted = appState.currentPlayerState == .stopped
+        var items: [SetTimingsCalculator.Item] = []
+        var firstContributingSeen = false
+        for entry in setlist.entries {
+            let isCortina = detector.isCortina(genre: entry.track.genre)
+            let dur = entry.duration ?? 0
+            var contributes = false
+            var elapsed: TimeInterval? = nil
+            switch entry.state {
+            case .playing:
+                contributes = true; elapsed = player.elapsed
+            case .paused, .queued:
+                contributes = true
+            case .played:
+                if entry.id == player.currentEntryID { contributes = true; elapsed = player.elapsed }
+            }
+            var addLeadingGap = false
+            if contributes {
+                let isActive = (elapsed != nil)   // currently playing / current entry → no preceding gap
+                if !isActive {
+                    addLeadingGap = autoGapOn && !entry.ignoresAutoGap
+                    if !firstContributingSeen && setNotStarted && settings.autoGapIgnoreFirstTrack {
+                        addLeadingGap = false
+                    }
+                }
+                firstContributingSeen = true
+            }
+            items.append(.init(duration: dur, isCortina: isCortina, elapsed: elapsed,
+                               contributes: contributes, addLeadingGap: addLeadingGap))
+            if let stopID = stopAfterID, entry.id == stopID { break }
         }
-        let fade = settings.builtInFadeDuration
-        let play = settings.cortinaPlayTime
-        let delay: Double
-        if duration > play + fade { delay = play }
-        else if duration > fade   { delay = duration - fade }
-        else                      { delay = 0 }
-        return min(duration, delay + fade + 1.0)
+        return items
+    }
+
+    /// Remaining set time in seconds (auto-gaps + cortina-as-1-min applied). Always computed,
+    /// so "Remaining" is meaningful even before playback starts.
+    private var remainingSetTime: TimeInterval {
+        SetTimingsCalculator.remainingSeconds(
+            items: remainingItems,
+            autoGap: settings.autoGapEnabled ? settings.autoGapDuration : 0,
+            cortinaAssumedPlay: Self.cortinaAssumedPlaySeconds)
     }
 
     private var setEndTime: Date? {
         guard appState.currentPlayerState != .stopped else { return nil }
-        var remaining: TimeInterval = 0
-        let stopAfterID = setlist.stopAfterEntryID
-        let detector = settings.makeDetector()
-        for entry in setlist.entries {
-            switch entry.state {
-            case .playing:
-                remaining += max(0, effectiveDuration(for: entry, detector: detector) - player.elapsed)
-            case .paused, .queued:
-                remaining += effectiveDuration(for: entry, detector: detector)
-            case .played:
-                if entry.id == player.currentEntryID {
-                    remaining += max(0, effectiveDuration(for: entry, detector: detector) - player.elapsed)
-                }
-            }
-            if let stopID = stopAfterID, entry.id == stopID { break }
-        }
-        return Date().addingTimeInterval(remaining)
+        return Date().addingTimeInterval(remainingSetTime)
     }
 
     private var formattedEndTime: String {
