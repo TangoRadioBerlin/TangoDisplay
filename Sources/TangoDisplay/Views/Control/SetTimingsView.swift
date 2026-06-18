@@ -300,52 +300,20 @@ struct SetTimingsView: View {
     /// Cortinas count as at most one minute (DJs fade them after ~1 min).
     private static let cortinaAssumedPlaySeconds: TimeInterval = 60
 
-    /// Per-entry remaining-time items: played (non-current) entries don't count, the current
-    /// entry has its elapsed subtracted, and upcoming queued/paused entries carry an auto-gap
-    /// (except the very first track of a not-yet-started set). Honours `stopAfterEntryID`.
-    private var remainingItems: [SetTimingsCalculator.Item] {
-        let detector = settings.makeDetector()
-        let stopAfterID = setlist.stopAfterEntryID
-        let autoGapOn = settings.autoGapEnabled
-        let setNotStarted = appState.currentPlayerState == .stopped
-        var items: [SetTimingsCalculator.Item] = []
-        var firstContributingSeen = false
-        for entry in setlist.entries {
-            let isCortina = detector.isCortina(genre: entry.track.genre)
-            let dur = entry.duration ?? 0
-            var contributes = false
-            var elapsed: TimeInterval? = nil
-            switch entry.state {
-            case .playing:
-                contributes = true; elapsed = player.elapsed
-            case .paused, .queued:
-                contributes = true
-            case .played:
-                if entry.id == player.currentEntryID { contributes = true; elapsed = player.elapsed }
-            }
-            var addLeadingGap = false
-            if contributes {
-                let isActive = (elapsed != nil)   // currently playing / current entry → no preceding gap
-                if !isActive {
-                    addLeadingGap = autoGapOn && !entry.ignoresAutoGap
-                    if !firstContributingSeen && setNotStarted && settings.autoGapIgnoreFirstTrack {
-                        addLeadingGap = false
-                    }
-                }
-                firstContributingSeen = true
-            }
-            items.append(.init(duration: dur, isCortina: isCortina, elapsed: elapsed,
-                               contributes: contributes, addLeadingGap: addLeadingGap))
-            if let stopID = stopAfterID, entry.id == stopID { break }
-        }
-        return items
-    }
-
     /// Remaining set time in seconds (auto-gaps + cortina-as-1-min applied). Always computed,
     /// so "Remaining" is meaningful even before playback starts.
     private var remainingSetTime: TimeInterval {
-        SetTimingsCalculator.remainingSeconds(
-            items: remainingItems,
+        let items = SetTimingsItems.build(
+            entries: setlist.entries,
+            currentEntryID: player.currentEntryID,
+            elapsed: player.elapsed,
+            detector: settings.makeDetector(),
+            autoGapEnabled: settings.autoGapEnabled,
+            autoGapIgnoreFirstTrack: settings.autoGapIgnoreFirstTrack,
+            setNotStarted: appState.currentPlayerState == .stopped,
+            stopAfterID: setlist.stopAfterEntryID)
+        return SetTimingsCalculator.remainingSeconds(
+            items: items,
             autoGap: settings.autoGapEnabled ? settings.autoGapDuration : 0,
             cortinaAssumedPlay: Self.cortinaAssumedPlaySeconds)
     }
