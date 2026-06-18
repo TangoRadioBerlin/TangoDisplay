@@ -1,5 +1,6 @@
 import Accelerate
 import AVFoundation
+import CoreAudio
 import CoreMedia
 import Foundation
 import os
@@ -113,15 +114,57 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
     /// else the system default.
     private func resolveInputDevice() -> AVCaptureDevice? {
         if let uid = deviceUID, let d = AVCaptureDevice(uniqueID: uid) { return d }
-        // Default = the real built-in microphone. The legacy `.builtInMicrophone` type matches
-        // ONLY the physical built-in (e.g. "MacBook Pro Microphone") and excludes virtual /
-        // aggregate devices (MMAudio, Teams, NoMachine, …) that also advertise as `.microphone`
-        // and carry no room signal — picking the first `.microphone` could land on one of those.
-        if let builtIn = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInMicrophone],
-                                                          mediaType: .audio, position: .unspecified).devices.first {
-            return builtIn
-        }
+        // Default = the real built-in microphone, found via CoreAudio's transport type. The
+        // AVCaptureDevice `.builtInMicrophone`/`.microphone` discovery is unreliable here: the
+        // legacy type returns nothing on recent macOS, and virtual/aggregate devices (MMAudio,
+        // Teams, NoMachine, …) also advertise as `.microphone` with no room signal.
+        if let uid = Self.builtInInputDeviceUID(), let d = AVCaptureDevice(uniqueID: uid) { return d }
         return AVCaptureDevice.default(for: .audio)
+    }
+
+    /// CoreAudio UID of the physical built-in input device (transport type "built-in" with input
+    /// streams). AVCaptureDevice's `uniqueID` for audio equals this CoreAudio UID.
+    private static func builtInInputDeviceUID() -> String? {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var devicesAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &devicesAddr, 0, nil, &size) == noErr, size > 0 else { return nil }
+        var deviceIDs = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &devicesAddr, 0, nil, &size, &deviceIDs) == noErr else { return nil }
+
+        for id in deviceIDs {
+            // Require at least one input stream.
+            var streamsAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyStreams,
+                mScope: kAudioObjectPropertyScopeInput,
+                mElement: kAudioObjectPropertyElementMain)
+            var streamsSize: UInt32 = 0
+            guard AudioObjectGetPropertyDataSize(id, &streamsAddr, 0, nil, &streamsSize) == noErr, streamsSize > 0 else { continue }
+
+            // Transport type must be built-in.
+            var transport: UInt32 = 0
+            var transportSize = UInt32(MemoryLayout<UInt32>.size)
+            var transportAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyTransportType,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(id, &transportAddr, 0, nil, &transportSize, &transport) == noErr,
+                  transport == kAudioDeviceTransportTypeBuiltIn else { continue }
+
+            // Read the device UID.
+            var uid: CFString = "" as CFString
+            var uidSize = UInt32(MemoryLayout<CFString>.size)
+            var uidAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(id, &uidAddr, 0, nil, &uidSize, &uid) == noErr else { continue }
+            return uid as String
+        }
+        return nil
     }
 
     private func startSession() {
