@@ -2034,6 +2034,42 @@ func runLayoutModeTests() {
                 containerWidth: 1920, containerHeight: 1080)
             try expectEqual(converted, profile)
         }
+
+        // Regression for the "genre & year stacked on top of each other" bug: a field
+        // that is hidden at conversion time (year/singer default to hidden) is not in
+        // the actual-visibility measurement, so it used to keep offset (0,0) = screen
+        // centre and later collide with other centred fields once shown. It must now be
+        // seeded from the all-fields-visible fallback measurement instead.
+        test("hidden/unmeasured fields are seeded from fallback centres, not collapsed to centre") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["genre": ElementCenter(x: 960, y: 432),    // −10 %
+                                  "title": ElementCenter(x: 960, y: 756)],   // +20 %
+                fallbackCenters: ["year":  ElementCenter(x: 960, y: 648)],   // +10 %
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted.layoutMode, .absolute)
+            try expectEqual(converted.yearOffsetY, 10.0)                     // seeded, not 0
+            try expect(converted.yearOffsetY != converted.genreOffsetY)      // no collision
+        }
+
+        test("actual measurement wins over fallback for visible fields") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["title": ElementCenter(x: 960, y: 756)],   // +20 % (shown)
+                fallbackCenters: ["title": ElementCenter(x: 960, y: 540)],   // 0 % (full stack)
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted.titleOffsetY, 20.0)
+        }
+
+        test("withAllDanceFieldsVisible enables every dance text field") {
+            let profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            let all = profile.withAllDanceFieldsVisible()
+            try expect(all.showGenreDance)
+            try expect(all.showYearDance)
+            try expect(all.showSingerDance)
+            try expect(all.showTitleDance)
+            try expect(all.showArtistDance)
+        }
     }
 
     suite("AbsoluteLayoutMath — measured centre → offset percent") {
@@ -3118,8 +3154,84 @@ func runAutoGapTests() {
     }
 }
 
+func runSetlistOrderRulesTests() {
+    suite("SetlistOrderRules — played block stays a contiguous top prefix") {
+        test("firstUnplayedIndex finds the first not-played from the top") {
+            try expectEqual(SetlistOrderRules.firstUnplayedIndex(played: [true, true, false, true]), 2)
+            try expectEqual(SetlistOrderRules.firstUnplayedIndex(played: [false]), 0)
+            try expectNil(SetlistOrderRules.firstUnplayedIndex(played: [true, true]))
+        }
+
+        test("sanitizedUnplay allows only a contiguous run at the bottom of the played prefix") {
+            let played = [true, true, true, false, false]   // prefix length 3
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [2]), [2])
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [1, 2]), [1, 2])
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [0, 1, 2]), [0, 1, 2])
+            // Selecting a middle/top entry without the ones below it would punch a hole → nothing.
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [0]), [])
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [0, 2]), [2])
+            // A not-played target is never un-played.
+            try expectEqual(SetlistOrderRules.sanitizedUnplay(played: played, targets: [3]), [])
+        }
+
+        test("sanitizedMarkPlayed allows only a contiguous extension of the played prefix") {
+            let played = [true, true, false, false, false]  // prefix length 2
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [2]), [2])
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [2, 3]), [2, 3])
+            // A gap below the boundary would create a played island → nothing.
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [3]), [])
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [3, 2]), [2, 3])
+            // An already-played target is never re-marked.
+            try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [0]), [])
+        }
+    }
+}
+
+func runSetTimingsCalculatorTests() {
+    typealias Item = SetTimingsCalculator.Item
+    suite("SetTimingsCalculator — remaining set time") {
+        test("cortina counts as min(length, 60); unknown length assumes 60") {
+            let short = Item(duration: 40, isCortina: true, contributes: true, addLeadingGap: false)
+            let long  = Item(duration: 180, isCortina: true, contributes: true, addLeadingGap: false)
+            let unk   = Item(duration: 0, isCortina: true, contributes: true, addLeadingGap: false)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(short, cortinaAssumedPlay: 60), 40)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(long, cortinaAssumedPlay: 60), 60)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(unk, cortinaAssumedPlay: 60), 60)
+        }
+
+        test("non-cortina uses full duration; elapsed is subtracted for the current entry") {
+            let track = Item(duration: 200, isCortina: false, contributes: true, addLeadingGap: false)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(track, cortinaAssumedPlay: 60), 200)
+            let current = Item(duration: 200, isCortina: false, elapsed: 50, contributes: true, addLeadingGap: false)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(current, cortinaAssumedPlay: 60), 150)
+            // Over-run never goes negative.
+            let overrun = Item(duration: 200, isCortina: false, elapsed: 250, contributes: true, addLeadingGap: false)
+            try expectEqual(SetTimingsCalculator.effectiveRemaining(overrun, cortinaAssumedPlay: 60), 0)
+        }
+
+        test("played (non-contributing) entries are skipped entirely, gap included") {
+            let played = Item(duration: 200, isCortina: false, contributes: false, addLeadingGap: true)
+            try expectEqual(SetTimingsCalculator.remainingSeconds(items: [played], autoGap: 4, cortinaAssumedPlay: 60), 0)
+        }
+
+        test("auto-gap is added per contributing entry flagged addLeadingGap") {
+            let items = [
+                Item(duration: 100, isCortina: false, elapsed: 30, contributes: true, addLeadingGap: false), // current, no gap → 70
+                Item(duration: 200, isCortina: false, contributes: true, addLeadingGap: true),               // 200 + 4
+                Item(duration: 120, isCortina: true,  contributes: true, addLeadingGap: true),               // min(120,60)=60 + 4
+            ]
+            // 70 + (200+4) + (60+4) = 338
+            try expectEqual(SetTimingsCalculator.remainingSeconds(items: items, autoGap: 4, cortinaAssumedPlay: 60), 338)
+            // autoGap = 0 drops the gaps → 70 + 200 + 60 = 330
+            try expectEqual(SetTimingsCalculator.remainingSeconds(items: items, autoGap: 0, cortinaAssumedPlay: 60), 330)
+        }
+    }
+}
+
 // MARK: - Main entry point
 
+runSetTimingsCalculatorTests()
+runSetlistOrderRulesTests()
 runAutoGapTests()
 runCortinaDetectorTests()
 runTandaTrackerTests()

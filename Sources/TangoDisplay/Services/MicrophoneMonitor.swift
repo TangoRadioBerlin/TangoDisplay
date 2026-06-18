@@ -1,5 +1,6 @@
 import Accelerate
 import AVFoundation
+import CoreAudio
 import CoreMedia
 import Foundation
 import os
@@ -45,6 +46,24 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
     private var runtimeErrorObserver: NSObjectProtocol?
     private var isRunning = false
 
+    /// Unique ID of the input device to listen to. `nil` = built-in microphone.
+    private var deviceUID: String?
+
+    private let log = Logger(subsystem: "com.local.tangodisplay", category: "MicrophoneMonitor")
+
+    /// Audio input device types we enumerate (built-in + external interfaces).
+    private static var inputDeviceTypes: [AVCaptureDevice.DeviceType] {
+        if #available(macOS 14.0, *) { return [.microphone, .external] }
+        return [.builtInMicrophone]
+    }
+
+    /// Devices the user can pick from for the meter (uid + display name).
+    static func availableInputDevices() -> [(uid: String, name: String)] {
+        AVCaptureDevice.DiscoverySession(deviceTypes: inputDeviceTypes,
+                                         mediaType: .audio, position: .unspecified)
+            .devices.map { (uid: $0.uniqueID, name: $0.localizedName) }
+    }
+
     // MARK: - Public API
 
     func start() {
@@ -58,50 +77,104 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
         tearDown()
     }
 
+    /// Selects the input device (`nil` = built-in microphone) and restarts capture if running.
+    func configure(deviceUID: String?) {
+        guard deviceUID != self.deviceUID else { return }
+        self.deviceUID = deviceUID
+        guard isRunning else { return }
+        stop()
+        start()
+    }
+
     // MARK: - Permission + session lifecycle
 
     private func requestPermissionAndStart() {
-        if #available(macOS 14, *) {
-            switch AVAudioApplication.shared.recordPermission {
-            case .granted:
-                startSession()
-            case .denied:
-                permissionDenied = true
-            case .undetermined:
-                AVAudioApplication.requestRecordPermission { [weak self] granted in
-                    DispatchQueue.main.async {
-                        if granted { self?.startSession() }
-                        else       { self?.permissionDenied = true }
-                    }
+        // Use the AVCaptureDevice authorization that actually gates AVCaptureSession audio input.
+        // (AVAudioApplication.recordPermission is the AVAudioSession permission and does not
+        // reliably reflect the capture-device TCC grant on macOS.)
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            startSession()
+        case .denied, .restricted:
+            permissionDenied = true
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                DispatchQueue.main.async {
+                    if granted { self?.startSession() }
+                    else       { self?.permissionDenied = true }
                 }
-            @unknown default:
-                startSession()
             }
-        } else {
-            switch AVCaptureDevice.authorizationStatus(for: .audio) {
-            case .authorized:
-                startSession()
-            case .denied, .restricted:
-                permissionDenied = true
-            case .notDetermined:
-                AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
-                    DispatchQueue.main.async {
-                        if granted { self?.startSession() }
-                        else       { self?.permissionDenied = true }
-                    }
-                }
-            @unknown default:
-                startSession()
-            }
+        @unknown default:
+            startSession()
         }
     }
 
+    /// Resolves the input device: an explicitly selected UID, else the built-in microphone
+    /// (preferred over the system default, which may be a pro interface with no live signal),
+    /// else the system default.
+    private func resolveInputDevice() -> AVCaptureDevice? {
+        if let uid = deviceUID, let d = AVCaptureDevice(uniqueID: uid) { return d }
+        // Default = the real built-in microphone, found via CoreAudio's transport type. The
+        // AVCaptureDevice `.builtInMicrophone`/`.microphone` discovery is unreliable here: the
+        // legacy type returns nothing on recent macOS, and virtual/aggregate devices (MMAudio,
+        // Teams, NoMachine, …) also advertise as `.microphone` with no room signal.
+        if let uid = Self.builtInInputDeviceUID(), let d = AVCaptureDevice(uniqueID: uid) { return d }
+        return AVCaptureDevice.default(for: .audio)
+    }
+
+    /// CoreAudio UID of the physical built-in input device (transport type "built-in" with input
+    /// streams). AVCaptureDevice's `uniqueID` for audio equals this CoreAudio UID.
+    private static func builtInInputDeviceUID() -> String? {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var devicesAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &devicesAddr, 0, nil, &size) == noErr, size > 0 else { return nil }
+        var deviceIDs = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &devicesAddr, 0, nil, &size, &deviceIDs) == noErr else { return nil }
+
+        for id in deviceIDs {
+            // Require at least one input stream.
+            var streamsAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyStreams,
+                mScope: kAudioObjectPropertyScopeInput,
+                mElement: kAudioObjectPropertyElementMain)
+            var streamsSize: UInt32 = 0
+            guard AudioObjectGetPropertyDataSize(id, &streamsAddr, 0, nil, &streamsSize) == noErr, streamsSize > 0 else { continue }
+
+            // Transport type must be built-in.
+            var transport: UInt32 = 0
+            var transportSize = UInt32(MemoryLayout<UInt32>.size)
+            var transportAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyTransportType,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(id, &transportAddr, 0, nil, &transportSize, &transport) == noErr,
+                  transport == kAudioDeviceTransportTypeBuiltIn else { continue }
+
+            // Read the device UID.
+            var uid: CFString = "" as CFString
+            var uidSize = UInt32(MemoryLayout<CFString>.size)
+            var uidAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(id, &uidAddr, 0, nil, &uidSize, &uid) == noErr else { continue }
+            return uid as String
+        }
+        return nil
+    }
+
     private func startSession() {
-        guard let device = AVCaptureDevice.default(for: .audio),
+        guard let device = resolveInputDevice(),
               let input = try? AVCaptureDeviceInput(device: device) else {
+            log.error("Decibel meter: no usable audio input device (requested uid=\(self.deviceUID ?? "built-in", privacy: .public))")
             permissionDenied = true
             return
         }
+        log.info("Decibel meter input: \(device.localizedName, privacy: .public) [\(device.uniqueID, privacy: .public)]")
 
         session.beginConfiguration()
         for existing in session.inputs { session.removeInput(existing) }
@@ -124,7 +197,11 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
         isRunning = true
         permissionDenied = false
         // startRunning blocks; keep it off the main thread.
-        sampleQueue.async { [weak self] in self?.session.startRunning() }
+        sampleQueue.async { [weak self] in
+            guard let self else { return }
+            self.session.startRunning()
+            self.log.info("Decibel meter capture session running=\(self.session.isRunning, privacy: .public)")
+        }
 
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             self?.updateDisplay()

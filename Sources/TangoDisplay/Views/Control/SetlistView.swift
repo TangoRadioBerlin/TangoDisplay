@@ -711,18 +711,17 @@ struct SetlistView: View {
             genreColorRules: settings.genreColorRules,
             genreColorTitleEnabled: settings.genreColorTitleEnabled,
             isCortina: detector.isCortina(genre: entry.track.genre),
-            player: activeEntryID == entry.id && isPlayerActive ? player : nil,
-            onHover: { hovering in
-                if hovering { hoveredEntryID = entry.id }
-                else if hoveredEntryID == entry.id { hoveredEntryID = nil }
-            }
+            player: activeEntryID == entry.id && isPlayerActive ? player : nil
         )
         .tag(entry.id)
         .moveDisabled(entry.state == .playing)
-        // NSViewRepresentable overlay handles double-click without adding any
-        // SwiftUI gesture recognizer — keeping NSTableView's primary click
-        // handler free to process single/multi-selection.
-        .overlay(DoubleClickOverlay { player.jumpTo(entry) })
+        // NSViewRepresentable overlay handles double-click AND hover tracking. Hover lives here,
+        // not via SwiftUI .onHover on the row, because this top-most NSView would otherwise
+        // swallow the row's hover events (which is why Option-hover "To here" never appeared).
+        .overlay(DoubleClickOverlay(action: { player.jumpTo(entry) }, onHover: { hovering in
+            if hovering { hoveredEntryID = entry.id }
+            else if hoveredEntryID == entry.id { hoveredEntryID = nil }
+        }))
         .contextMenu {
             let targets: Set<UUID> = selectedIDs.contains(entry.id)
                 ? selectedIDs : [entry.id]
@@ -1323,41 +1322,31 @@ private struct StatusBarView: View {
         return 0
     }
 
-    private func effectiveDuration(for entry: SetlistEntry, detector: CortinaDetector) -> TimeInterval {
-        let duration = entry.duration ?? 0
-        guard settings.autoFadeCortinasEnabled,
-              !entry.ignoresAutoFade,
-              detector.isCortina(genre: entry.track.genre) else {
-            return duration
-        }
-        let fade = settings.builtInFadeDuration
-        let play = settings.cortinaPlayTime
-        let delay: Double
-        if duration > play + fade { delay = play }
-        else if duration > fade   { delay = duration - fade }
-        else                      { delay = 0 }
-        return min(duration, delay + fade + 1.0)
+    private static let cortinaAssumedPlaySeconds: TimeInterval = 60
+
+    /// Remaining seconds via the shared `SetTimingsItems` + `SetTimingsCalculator` (auto-gaps +
+    /// cortina-as-1-min), so the status bar matches the Set Timings window. `through` stops the
+    /// sum after that entry (Option-hover "to here").
+    private func remainingSeconds(through targetID: UUID? = nil) -> TimeInterval {
+        let items = SetTimingsItems.build(
+            entries: setlist.entries,
+            currentEntryID: player.currentEntryID,
+            elapsed: player.elapsed,
+            detector: settings.makeDetector(),
+            autoGapEnabled: settings.autoGapEnabled,
+            autoGapIgnoreFirstTrack: settings.autoGapIgnoreFirstTrack,
+            setNotStarted: appState.currentPlayerState == .stopped,
+            stopAfterID: setlist.stopAfterEntryID,
+            through: targetID)
+        return SetTimingsCalculator.remainingSeconds(
+            items: items,
+            autoGap: settings.autoGapEnabled ? settings.autoGapDuration : 0,
+            cortinaAssumedPlay: Self.cortinaAssumedPlaySeconds)
     }
 
     private var setEndTime: Date? {
         guard appState.currentPlayerState != .stopped else { return nil }
-        var remaining: TimeInterval = 0
-        let stopAfterID = setlist.stopAfterEntryID
-        let detector = settings.makeDetector()
-        for entry in setlist.entries {
-            switch entry.state {
-            case .playing:
-                remaining += max(0, effectiveDuration(for: entry, detector: detector) - player.elapsed)
-            case .paused, .queued:
-                remaining += effectiveDuration(for: entry, detector: detector)
-            case .played:
-                if entry.id == player.currentEntryID {
-                    remaining += max(0, effectiveDuration(for: entry, detector: detector) - player.elapsed)
-                }
-            }
-            if let stopID = stopAfterID, entry.id == stopID { break }
-        }
-        return Date().addingTimeInterval(remaining)
+        return Date().addingTimeInterval(remainingSeconds())
     }
 
     /// Projected clock time when the set will have played through `targetID` (Option-hover).
@@ -1365,22 +1354,7 @@ private struct StatusBarView: View {
     private func endTime(through targetID: UUID) -> Date? {
         guard appState.currentPlayerState != .stopped else { return nil }
         guard setlist.entries.contains(where: { $0.id == targetID }) else { return nil }
-        var remaining: TimeInterval = 0
-        let detector = settings.makeDetector()
-        for entry in setlist.entries {
-            switch entry.state {
-            case .playing:
-                remaining += max(0, effectiveDuration(for: entry, detector: detector) - player.elapsed)
-            case .paused, .queued:
-                remaining += effectiveDuration(for: entry, detector: detector)
-            case .played:
-                if entry.id == player.currentEntryID {
-                    remaining += max(0, effectiveDuration(for: entry, detector: detector) - player.elapsed)
-                }
-            }
-            if entry.id == targetID { break }
-        }
-        return Date().addingTimeInterval(remaining)
+        return Date().addingTimeInterval(remainingSeconds(through: targetID))
     }
 
     private func clockString(_ date: Date) -> String {
@@ -1413,9 +1387,11 @@ private struct StatusBarView: View {
 // while still detecting double-clicks to jump to a track.
 private struct DoubleClickOverlay: NSViewRepresentable {
     let action: () -> Void
+    var onHover: ((Bool) -> Void)? = nil
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+    func makeNSView(context: Context) -> HoverTrackingView {
+        let view = HoverTrackingView()
+        view.onHoverChange = { [weak coordinator = context.coordinator] in coordinator?.onHover?($0) }
         let gr = NSClickGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.fired)
@@ -1426,17 +1402,41 @@ private struct DoubleClickOverlay: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: HoverTrackingView, context: Context) {
         context.coordinator.action = action
+        context.coordinator.onHover = onHover
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+    func makeCoordinator() -> Coordinator { Coordinator(action: action, onHover: onHover) }
 
     class Coordinator: NSObject {
         var action: () -> Void
-        init(action: @escaping () -> Void) { self.action = action }
+        var onHover: ((Bool) -> Void)?
+        init(action: @escaping () -> Void, onHover: ((Bool) -> Void)?) {
+            self.action = action
+            self.onHover = onHover
+        }
         @objc func fired() { action() }
     }
+}
+
+/// Top-most per-row NSView: forwards double-clicks (gesture recognizer) and hover state. Because
+/// it sits above the SwiftUI row content it must own the hover tracking itself — a SwiftUI
+/// `.onHover` on the row beneath never fires.
+private final class HoverTrackingView: NSView {
+    var onHoverChange: ((Bool) -> Void)?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
+    override func mouseExited(with event: NSEvent)  { onHoverChange?(false) }
 }
 
 // MARK: - Tag colour

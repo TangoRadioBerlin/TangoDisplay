@@ -606,6 +606,19 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             skipNext()
             return
         }
+        // The topmost not-yet-played entry always wins. If a reorder dragged a queued track
+        // above the currently loaded/paused entry, discard the stale load and start the top one
+        // — the paused entry reverts to a normal queued track (its pause position is dropped).
+        if let id = currentEntryID, audioFile != nil,
+           let firstUnplayed = setlist.entries.first(where: { $0.state != .played }),
+           firstUnplayed.id != id {
+            setlist.markQueued(id: id)
+            playerNode.stop()
+            audioFile = nil
+            seekOffset = 0
+            elapsed = 0
+            currentEntryID = firstUnplayed.id
+        }
         if audioFile == nil {
             // Prefer currentEntryID if set (e.g. pause() advanced it to the next track);
             // fall back to first non-played entry for a fresh start.

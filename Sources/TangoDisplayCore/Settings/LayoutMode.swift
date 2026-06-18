@@ -34,20 +34,49 @@ public struct ElementCenter: Equatable {
 }
 
 extension AppearanceProfile {
+    /// A copy with every dance text field forced visible. Used to measure the flow
+    /// position of fields that are hidden in the live profile (year/singer default to
+    /// hidden) so the flow→absolute conversion can still anchor them — otherwise a
+    /// later-enabled field collapses onto screen centre. Does not touch the artwork.
+    public func withAllDanceFieldsVisible() -> AppearanceProfile {
+        var copy = self
+        copy.showGenreDance     = true
+        copy.showArtistDance    = true
+        copy.showYearDance      = true
+        copy.showTitleDance     = true
+        copy.showSingerDance    = true
+        copy.showLastPlayedDance = true
+        copy.showLastTandaLabel  = true
+        return copy
+    }
+
     /// Returns a copy of this profile switched to absolute layout, seeded so the
     /// presentation initially looks identical to the measured flow rendering:
     /// each measured element's flow centre (pre-offset) becomes part of its offset,
     /// anchoring it from screen centre. Genre position overrides shift by the same
     /// per-element delta (an approximation — their flow base may differ per track).
     /// Already-absolute profiles are returned unchanged.
+    /// - Parameters:
+    ///   - measuredCenters: each element's flow centre as rendered with the profile's
+    ///     *actual* field visibility — visible fields keep their current look.
+    ///   - fallbackCenters: each element's flow centre from an *all-fields-visible*
+    ///     measurement. Fields hidden at conversion time (year/singer default to hidden)
+    ///     are absent from `measuredCenters`; without a fallback they would keep offset
+    ///     (0,0) = screen centre and collide with other centred fields once shown. The
+    ///     fallback gives them a real anchor. Actual measurements take precedence.
     public func convertedToAbsoluteLayout(measuredCenters: [String: ElementCenter],
+                                          fallbackCenters: [String: ElementCenter] = [:],
                                           containerWidth: Double,
                                           containerHeight: Double) -> AppearanceProfile {
         guard layoutMode == .flow else { return self }
 
+        // Visible fields (actual measurement) win; hidden fields fall back to their
+        // all-visible position instead of collapsing to centre.
+        let effectiveCenters = fallbackCenters.merging(measuredCenters) { _, actual in actual }
+
         var deltas: [String: (dx: Double, dy: Double)] = [:]
         var adjusted: [String: ElementPlacement] = [:]
-        for (key, center) in measuredCenters {
+        for (key, center) in effectiveCenters {
             let dx = AbsoluteLayoutMath.offsetXPercent(centerX: center.x, containerWidth: containerWidth)
             let dy = AbsoluteLayoutMath.offsetYPercent(centerY: center.y, containerHeight: containerHeight)
             deltas[key] = (dx, dy)
