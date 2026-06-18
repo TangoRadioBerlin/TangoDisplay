@@ -531,6 +531,16 @@ private struct DecibelMeterSettingsContent: View {
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
+                Picker("Input device", selection: $settings.decibelMeterInputDeviceUID) {
+                    Text("Built-in microphone").tag(String?.none)
+                    ForEach(MicrophoneMonitor.availableInputDevices(), id: \.uid) { dev in
+                        Text(dev.name).tag(String?.some(dev.uid))
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("The decibel meter listens to this input. Pick the built-in microphone if your default input (e.g. an audio interface) carries no room sound.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 Text("Drag the handles to set band boundaries (0–140 dB)")
                     .font(.caption)
                     .foregroundColor(.secondary)

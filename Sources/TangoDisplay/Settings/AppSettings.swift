@@ -367,6 +367,11 @@ final class AppSettings: ObservableObject {
     @Published var decibelMeterHighThreshold: Int {
         didSet { UserDefaults.standard.set(decibelMeterHighThreshold, forKey: kPrefix + "decibelMeterHighThreshold") }
     }
+    /// Unique ID of the audio input device the decibel meter listens to. `nil` = built-in
+    /// microphone (the system default input may be a pro interface with no live signal).
+    @Published var decibelMeterInputDeviceUID: String? {
+        didSet { UserDefaults.standard.set(decibelMeterInputDeviceUID, forKey: kPrefix + "decibelMeterInputDeviceUID") }
+    }
 
     @Published var hidePlayed: Bool {
         didSet { UserDefaults.standard.set(hidePlayed, forKey: kPrefix + "hidePlayed") }
@@ -532,6 +537,7 @@ final class AppSettings: ObservableObject {
         decibelMeterEnabled = ud.object(forKey: kPrefix + "decibelMeterEnabled").flatMap { $0 as? Bool } ?? false
         decibelMeterLowThreshold  = ud.object(forKey: kPrefix + "decibelMeterLowThreshold").flatMap { $0 as? Int } ?? 60
         decibelMeterHighThreshold = ud.object(forKey: kPrefix + "decibelMeterHighThreshold").flatMap { $0 as? Int } ?? 80
+        decibelMeterInputDeviceUID = ud.object(forKey: kPrefix + "decibelMeterInputDeviceUID") as? String
         hidePlayed = ud.object(forKey: kPrefix + "hidePlayed").flatMap { $0 as? Bool } ?? false
         let rawStartup = ud.string(forKey: kPrefix + "startupMode") ?? ""
         startupMode = StartupMode(rawValue: rawStartup) ?? .fullExperience

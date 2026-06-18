@@ -192,7 +192,10 @@ final class AppState: ObservableObject {
         wireCallbacks(to: activeSource)
         activeSource.start()
         versionChecker.startPeriodicChecks()
-        if settings.decibelMeterEnabled { microphoneMonitor.start() }
+        if settings.decibelMeterEnabled {
+            microphoneMonitor.configure(deviceUID: settings.decibelMeterInputDeviceUID)
+            microphoneMonitor.start()
+        }
         if settings.remoteControlEnabled { handleRemoteControlEnabledChange(true) }
     }
 
@@ -279,7 +282,21 @@ final class AppState: ObservableObject {
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] enabled in
-                enabled ? self?.microphoneMonitor.start() : self?.microphoneMonitor.stop()
+                guard let self else { return }
+                if enabled {
+                    self.microphoneMonitor.configure(deviceUID: self.settings.decibelMeterInputDeviceUID)
+                    self.microphoneMonitor.start()
+                } else {
+                    self.microphoneMonitor.stop()
+                }
+            }
+            .store(in: &cancellables)
+
+        settings.$decibelMeterInputDeviceUID
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] uid in
+                self?.microphoneMonitor.configure(deviceUID: uid)
             }
             .store(in: &cancellables)
     }
