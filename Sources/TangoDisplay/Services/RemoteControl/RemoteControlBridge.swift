@@ -384,15 +384,17 @@ final class RemoteControlBridge: NSObject, ObservableObject {
     private func buildEntry(from le: RemoteLoadEntry) async -> SetlistEntry {
         let url = URL(fileURLWithPath: le.path)
         let base = await SetlistManager.readMetadata(from: url)
-        let title = (le.title?.isEmpty == false) ? le.title! : base.title
-        let artist = (le.artist?.isEmpty == false) ? le.artist! : base.artist
+        // B1: truncate controller-supplied strings — they are persisted and re-broadcast to all
+        // clients on every state change, so an outsized value would amplify without this cap.
+        let title = (le.title?.isEmpty == false) ? String(le.title!.prefix(512)) : base.title
+        let artist = (le.artist?.isEmpty == false) ? String(le.artist!.prefix(512)) : base.artist
         let track = Track(title: title, artist: artist, genre: base.genre,
                           persistentID: base.persistentID, year: base.year, comment: base.comment,
                           albumArtist: base.albumArtist, grouping: base.grouping,
                           replayGainInfo: base.replayGainInfo, bpm: base.bpm)
         var entry = SetlistEntry(fileURL: url, track: track)
-        entry.clientRef = le.clientRef
-        entry.tandaRef = le.tandaRef
+        entry.clientRef = String(le.clientRef.prefix(512))
+        entry.tandaRef = le.tandaRef.map { String($0.prefix(512)) }
         return entry
     }
 

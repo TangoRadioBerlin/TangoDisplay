@@ -509,8 +509,12 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     /// Cancels all in-flight loudness scans. Called when the playing track changes so a
     /// rapid skip doesn't leave several background scans running for tracks nobody is on (F8).
     /// Cancellation is cooperative — `LoudnessAnalyzer` checks it at chunk boundaries.
+    /// Both tracking sets are cleared immediately so a rapid re-queue isn't blocked by the
+    /// cancelled task's delayed cleanup (B2).
     private func cancelInFlightAnalyses() {
         for task in analysisTasks.values { task.cancel() }
+        analysisTasks.removeAll()
+        inFlightAnalysisURLs.removeAll()
     }
 
     private func preAnalyseIfNeeded(_ entry: SetlistEntry) {
