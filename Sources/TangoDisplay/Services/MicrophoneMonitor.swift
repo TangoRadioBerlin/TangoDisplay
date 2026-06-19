@@ -168,6 +168,15 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
     }
 
     private func startSession() {
+        // B3: guard against a second call (e.g. TCC prompt race) leaking the previous timer
+        // and notification observer — tear them down before recreating.
+        displayTimer?.invalidate()
+        displayTimer = nil
+        if let obs = runtimeErrorObserver {
+            NotificationCenter.default.removeObserver(obs)
+            runtimeErrorObserver = nil
+        }
+
         guard let device = resolveInputDevice(),
               let input = try? AVCaptureDeviceInput(device: device) else {
             log.error("Decibel meter: no usable audio input device (requested uid=\(self.deviceUID ?? "built-in", privacy: .public))")

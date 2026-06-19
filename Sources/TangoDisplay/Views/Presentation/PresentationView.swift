@@ -51,9 +51,17 @@ struct PresentationView: View {
                         // Artwork offsets are percentages of the resolution → resolve to points here.
                         let ax = renderProfile.albumArtworkOffsetX / 100 * geo.size.width
                         let ay = renderProfile.albumArtworkOffsetY / 100 * geo.size.height
-                        // Square backing plate: sized off the artwork's displayed square (min screen
-                        // dimension × artwork scale), up to 25% larger, centred on the same offset.
-                        let artworkSide = min(geo.size.width, geo.size.height) * renderProfile.albumArtworkScale
+                        // Square backing plate: match the artwork's shortest fitted dimension (B4).
+                        // scaledToFit constrains to min(w/imgW, h/imgH); for non-square covers
+                        // (landscape/portrait) this differs from min(containerW, containerH).
+                        let artworkSide: CGFloat = {
+                            guard let art = appState.currentArtwork,
+                                  art.size.width > 0, art.size.height > 0 else {
+                                return min(geo.size.width, geo.size.height) * renderProfile.albumArtworkScale
+                            }
+                            let ratio = min(geo.size.width / art.size.width, geo.size.height / art.size.height)
+                            return min(art.size.width, art.size.height) * ratio * renderProfile.albumArtworkScale
+                        }()
                         let backingSide = artworkSide * renderProfile.albumArtworkBackingScale
                         ZStack {
                         if renderProfile.albumArtworkBackingEnabled {
