@@ -2004,13 +2004,31 @@ func runLayoutModeTests() {
             try expectEqual(converted.titleOffsetX, 0.0)     // centred → no delta
         }
 
-        test("unmeasured elements keep their offsets unchanged") {
+        // B5 fix: a field that is absent from BOTH measuredCenters AND fallbackCenters (e.g. tdjName,
+        // which is controlled by AppSettings, not the profile, so withAllDanceFieldsVisible() can't
+        // force it into the fallback measurement) keeps its stale FLOW offset. In absolute mode that
+        // offset is relative to screen centre, not to the element's natural stack position, so keeping
+        // the flow value would place the element at a wrong position. Reset unmeasured keys to (0,0)
+        // so the DJ re-positions from a predictable neutral starting point.
+        test("unmeasured elements have stale flow offsets reset to neutral zero") {
             var profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
-            profile.singerOffsetY = 12
+            profile.singerOffsetY = 12  // a custom flow offset, meaningless once absolute
             let converted = profile.convertedToAbsoluteLayout(
                 measuredCenters: ["title": ElementCenter(x: 960, y: 540)],
                 containerWidth: 1920, containerHeight: 1080)
-            try expectEqual(converted.singerOffsetY, 12.0)
+            // offsetY reset to 0; in real usage singer IS in fallbackCenters via withAllDanceFieldsVisible
+            try expectEqual(converted.singerOffsetY, 0.0)
+        }
+
+        test("AppSettings-controlled fields absent from both passes get offset (0,0)") {
+            var profile = AppearanceProfile(id: UUID(), name: "X", isBuiltIn: false)
+            profile.tdjNameOffsetX = 10
+            profile.tdjNameOffsetY = -5
+            let converted = profile.convertedToAbsoluteLayout(
+                measuredCenters: ["title": ElementCenter(x: 960, y: 540)],
+                containerWidth: 1920, containerHeight: 1080)
+            try expectEqual(converted.tdjNameOffsetX, 0.0)
+            try expectEqual(converted.tdjNameOffsetY, 0.0)
         }
 
         test("genre position overrides shift by the same delta") {
@@ -3299,6 +3317,13 @@ func runColorMatchingTests() {
             try expectNil(ColorMatching.rgb(fromHex: "#FFF"))
             try expectNil(ColorMatching.rgb(fromHex: "nope"))
             try expectNil(ColorMatching.rgb(fromHex: ""))
+        }
+        test("trims surrounding whitespace and newlines") {
+            // B7: trailing newlines (from app-generated hex strings) must not break parsing.
+            let a = ColorMatching.rgb(fromHex: "#FF9500\n")
+            try expectEqual(a?.r, 255); try expectEqual(a?.g, 149); try expectEqual(a?.b, 0)
+            let b = ColorMatching.rgb(fromHex: "\t34C759\r\n")
+            try expectEqual(b?.r, 52); try expectEqual(b?.g, 199); try expectEqual(b?.b, 89)
         }
     }
     suite("ColorMatching.nearestIndex") {

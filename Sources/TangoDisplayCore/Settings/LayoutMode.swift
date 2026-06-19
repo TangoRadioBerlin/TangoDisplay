@@ -86,6 +86,18 @@ extension AppearanceProfile {
             adjusted[key] = p
         }
 
+        // Keys absent from both passes (e.g. tdjName, which is controlled by AppSettings rather
+        // than the profile, so withAllDanceFieldsVisible() cannot force it into the fallback
+        // measurement) keep their stale flow offsets. In absolute mode those offsets are relative
+        // to screen centre, not to the element's stacked position — semantically wrong. Reset them
+        // to (0,0) so the DJ re-positions from a predictable neutral starting point.
+        for key in AppearanceProfile.positionElementKeys where adjusted[key] == nil {
+            var p = placement(forKey: key)
+            p.offsetX = 0
+            p.offsetY = 0
+            adjusted[key] = p
+        }
+
         var copy = applyingPositionOverride(PositionSet(placements: adjusted, artwork: nil))
         for bgIdx in copy.genreBackgrounds.indices {
             guard var set = copy.genreBackgrounds[bgIdx].positions else { continue }

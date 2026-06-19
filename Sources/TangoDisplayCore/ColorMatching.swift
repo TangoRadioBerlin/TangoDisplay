@@ -6,7 +6,7 @@ public enum ColorMatching {
 
     /// Parses "#RRGGBB" or "RRGGBB" (case-insensitive) into 0…255 components. nil if unparseable.
     public static func rgb(fromHex hex: String) -> (r: Int, g: Int, b: Int)? {
-        var s = hex.trimmingCharacters(in: .whitespaces)
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.hasPrefix("#") { s.removeFirst() }
         guard s.count == 6, let value = Int(s, radix: 16) else { return nil }
         return (r: (value >> 16) & 0xFF, g: (value >> 8) & 0xFF, b: value & 0xFF)
