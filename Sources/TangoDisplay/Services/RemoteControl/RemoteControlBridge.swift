@@ -413,10 +413,18 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
         }
         guard authorizeWrite(id: cmd.id, from: clientID) else { return }
+        // A2: cap entry count before any async work (each entry costs a MainActor metadata read).
+        guard RemoteLoadLimits.isWithinLimit(cmd.entries.count) else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.tooManyEntries, to: clientID); return
+        }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            self.appState.ensureBuiltInPlayerActive()
+            // Build entries first; no side-effects yet (metadata read, no setlist/player mutation).
             let (built, resolved, failed) = await self.buildEntries(cmd.entries)
+            // A1: re-assert auth/accept after the await — the DJ may have toggled Remote off while
+            // entries were being loaded. authorizeWrite sends controllerDisabled on scope-off.
+            guard self.authorizeWrite(id: cmd.id, from: clientID) else { return }
+            self.appState.ensureBuiltInPlayerActive()
             switch cmd.mode {
             case .append:  self.appState.setlist.insert(built, before: nil)
             case .replace: self.appState.setlist.replaceQueuedRegion(with: built)
@@ -431,10 +439,17 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
         }
         guard authorizeWrite(id: cmd.id, from: clientID) else { return }
+        // A2: cap entry count before any async work.
+        guard RemoteLoadLimits.isWithinLimit(cmd.entries.count) else {
+            sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.tooManyEntries, to: clientID); return
+        }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            self.appState.ensureBuiltInPlayerActive()
+            // Build entries first; no side-effects yet.
             let (built, resolved, failed) = await self.buildEntries(cmd.entries)
+            // A1: re-assert auth/accept after the await.
+            guard self.authorizeWrite(id: cmd.id, from: clientID) else { return }
+            self.appState.ensureBuiltInPlayerActive()
             self.appState.setlist.replaceQueuedRegion(with: built)
             self.sendAck(id: cmd.id, ok: true, resolved: resolved, failed: failed, to: clientID)
         }
@@ -446,17 +461,22 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
         }
         guard authorizeWrite(id: cmd.id, from: clientID) else { return }
+        // validateLoadPath is pure (no I/O) — fail-fast before spawning the task.
+        if let reason = validateLoadPath(cmd.entry.path) {
+            sendAck(id: cmd.id, ok: false, reason: reason, to: clientID); return
+        }
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // Build the single entry (one metadata read).
+            let entry = await self.buildEntry(from: cmd.entry)
+            // A1: re-assert auth/accept after the await.
+            guard self.authorizeWrite(id: cmd.id, from: clientID) else { return }
             self.appState.ensureBuiltInPlayerActive()
+            // Check position against the current setlist state at mutation time.
             let count = self.appState.setlist.entries.count
             guard cmd.at >= self.appState.setlist.firstQueuedIndex, cmd.at <= count else {
                 self.sendAck(id: cmd.id, ok: false, reason: RemoteRejectReason.immutablePosition, to: clientID); return
             }
-            if let reason = self.validateLoadPath(cmd.entry.path) {
-                self.sendAck(id: cmd.id, ok: false, reason: reason, to: clientID); return
-            }
-            let entry = await self.buildEntry(from: cmd.entry)
             self.appState.setlist.insert([entry], atIndex: cmd.at)
             self.sendAck(id: cmd.id, ok: true,
                          resolved: [.init(clientRef: cmd.entry.clientRef, entryId: entry.id.uuidString)],

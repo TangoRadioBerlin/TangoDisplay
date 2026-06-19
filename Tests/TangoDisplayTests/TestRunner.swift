@@ -3270,6 +3270,7 @@ runPerformanceLookaheadTests()
 runRemoteServerLimitsTests()
 runQueryEncodingTests()
 runExternalInputLimitsTests()
+runRemoteLoadLimitsTests()
 runWaveformMathTests()
 runColorMatchingTests()
 runRemoteProtocolV2Tests()
@@ -3478,6 +3479,25 @@ func runRemoteProtocolV2Slice2Tests() {
             try expectEqual(RemoteRejectReason.unreadable, "unreadable")
             try expectEqual(RemoteRejectReason.unsupportedType, "unsupportedType")
             try expectEqual(RemoteRejectReason.pathNotAllowed, "pathNotAllowed")
+            try expectEqual(RemoteRejectReason.tooManyEntries, "tooManyEntries")
+        }
+    }
+}
+
+// MARK: - RemoteLoadLimits tests
+
+func runRemoteLoadLimitsTests() {
+    suite("RemoteLoadLimits") {
+        test("entry counts at or below the cap are accepted") {
+            try expect(RemoteLoadLimits.isWithinLimit(0))
+            try expect(RemoteLoadLimits.isWithinLimit(RemoteLoadLimits.maxSetlistEntries))
+        }
+        test("entry counts above the cap are rejected") {
+            try expect(!RemoteLoadLimits.isWithinLimit(RemoteLoadLimits.maxSetlistEntries + 1))
+        }
+        test("cap is a sane positive bound") {
+            try expect(RemoteLoadLimits.maxSetlistEntries > 0)
+            try expect(RemoteLoadLimits.maxSetlistEntries <= 10_000)
         }
     }
 }

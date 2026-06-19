@@ -31,6 +31,7 @@ public enum RemoteRejectReason {
     public static let unreadable = "unreadable"
     public static let unsupportedType = "unsupportedType"
     public static let pathNotAllowed = "pathNotAllowed"
+    public static let tooManyEntries = "tooManyEntries"
 }
 
 // MARK: - Inbound commands
