@@ -2929,6 +2929,25 @@ func runGenrePositionOverrideTests() {
     let detector = CortinaDetector(useAllowlist: false, allowlistGenres: [],
                                    useDenylist: false, denylistGenres: [])
 
+    suite("PositionSet.hasContent") {
+        test("empty PositionSet has no content") {
+            try expect(!PositionSet().hasContent)
+        }
+        test("PositionSet with a placement has content") {
+            try expect(PositionSet(placements: ["title": ElementPlacement(offsetX: 5)]).hasContent)
+        }
+        test("PositionSet with only artwork has content") {
+            try expect(PositionSet(artwork: ArtworkPlacement(offsetX: 10)).hasContent)
+        }
+        test("removing all placements and clearing artwork leaves no content") {
+            var set = PositionSet(placements: ["title": ElementPlacement(offsetX: 5)],
+                                  artwork: ArtworkPlacement(offsetX: 10))
+            set.placements.removeAll()
+            set.artwork = nil
+            try expect(!set.hasContent)
+        }
+    }
+
     suite("GenreBackground.positions coding") {
         test("legacy entry without positions decodes to nil") {
             let g = GenreBackground(genreKey: "Tango", imageFilename: "g.jpg")

@@ -43,6 +43,10 @@ public struct PositionSet: Codable, Equatable {
         self.placements = placements
         self.artwork = artwork
     }
+
+    /// True when the set contains at least one real override. An empty PositionSet
+    /// (all elements returned to base) should be treated as absent and set to nil (B6).
+    public var hasContent: Bool { !placements.isEmpty || artwork != nil }
 }
 
 extension AppearanceProfile {

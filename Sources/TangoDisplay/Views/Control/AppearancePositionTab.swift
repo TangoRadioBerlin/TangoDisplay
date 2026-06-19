@@ -42,8 +42,9 @@ struct AppearancePositionTab: View {
     }
 
     private var sceneHasOverride: Bool {
-        guard let idx = sceneOverrideIndex else { return false }
-        return working.genreBackgrounds[idx].positions != nil
+        guard let idx = sceneOverrideIndex,
+              let set = working.genreBackgrounds[idx].positions else { return false }
+        return set.hasContent
     }
 
     /// Ensures the backing GenreBackground entry for the selected scene exists (creating a cortina
@@ -85,8 +86,14 @@ struct AppearancePositionTab: View {
                     return
                 }
                 var set = working.genreBackgrounds[idx].positions ?? PositionSet()
-                set.placements[key] = newValue
-                working.genreBackgrounds[idx].positions = set
+                // Remove the entry when the value has been returned to the dance-scene base —
+                // it carries no information and keeps sceneHasOverride true incorrectly (B6).
+                if newValue == working.placement(forKey: key) {
+                    set.placements.removeValue(forKey: key)
+                } else {
+                    set.placements[key] = newValue
+                }
+                working.genreBackgrounds[idx].positions = set.hasContent ? set : nil
             }
         )
     }
@@ -210,7 +217,7 @@ struct AppearancePositionTab: View {
         Picker("Scene", selection: $appState.previewScene) {
             Text("Dance (default)").tag(PreviewScene.dance)
             ForEach(working.genreBackgrounds.filter { !$0.isCortinaEntry }) { entry in
-                Text(entry.genreKey + (entry.positions != nil ? "  ✓" : ""))
+                Text(entry.genreKey + (entry.positions?.hasContent == true ? "  ✓" : ""))
                     .tag(PreviewScene.genre(entry.genreKey))
             }
             let cortinaSet = working.genreBackgrounds.first { $0.isCortinaEntry }?.positions
