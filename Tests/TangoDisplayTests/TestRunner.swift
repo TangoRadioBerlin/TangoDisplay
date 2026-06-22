@@ -3221,6 +3221,44 @@ func runSetlistOrderRulesTests() {
             // An already-played target is never re-marked.
             try expectEqual(SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: [0]), [])
         }
+
+        test("allowedMarkPlayed with enforce:false returns all targets (upstream free behaviour)") {
+            // Island that sanitizedMarkPlayed would reject → freely returned when off.
+            let played = [true, false, false]  // prefix 1
+            try expectEqual(SetlistOrderRules.allowedMarkPlayed(played: played, targets: [2],
+                                                                enforceContiguousPrefix: false), [2])
+            // With enforce:on it delegates to sanitized (no contiguous boundary → empty).
+            try expectEqual(SetlistOrderRules.allowedMarkPlayed(played: played, targets: [2],
+                                                                enforceContiguousPrefix: true), [])
+        }
+
+        test("allowedUnplay with enforce:false returns all targets (upstream free behaviour)") {
+            // Middle hole that sanitizedUnplay would reject → freely returned when off.
+            let played = [true, true, false]  // prefix 2
+            try expectEqual(SetlistOrderRules.allowedUnplay(played: played, targets: [0],
+                                                            enforceContiguousPrefix: false), [0])
+            // With enforce:on delegates to sanitized (not the bottom edge → empty).
+            try expectEqual(SetlistOrderRules.allowedUnplay(played: played, targets: [0],
+                                                            enforceContiguousPrefix: true), [])
+        }
+
+        test("allowedMarkPlayed with enforce:on delegates to sanitizedMarkPlayed") {
+            let played = [true, true, false, false, false]
+            let targets: Set<Int> = [2, 3]
+            try expectEqual(
+                SetlistOrderRules.allowedMarkPlayed(played: played, targets: targets, enforceContiguousPrefix: true),
+                SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: targets)
+            )
+        }
+
+        test("allowedUnplay with enforce:on delegates to sanitizedUnplay") {
+            let played = [true, true, true, false, false]
+            let targets: Set<Int> = [1, 2]
+            try expectEqual(
+                SetlistOrderRules.allowedUnplay(played: played, targets: targets, enforceContiguousPrefix: true),
+                SetlistOrderRules.sanitizedUnplay(played: played, targets: targets)
+            )
+        }
     }
 }
 

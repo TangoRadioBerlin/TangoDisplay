@@ -236,6 +236,10 @@ final class AppSettings: ObservableObject {
     @Published var duplicateTrackProtection: Bool {
         didSet { UserDefaults.standard.set(duplicateTrackProtection, forKey: kPrefix + "duplicateTrackProtection") }
     }
+    @Published var enforceContiguousPlayedPrefix: Bool {
+        didSet { UserDefaults.standard.set(enforceContiguousPlayedPrefix,
+                                           forKey: kPrefix + "enforceContiguousPlayedPrefix") }
+    }
     @Published var showYear: Bool {
         didSet { UserDefaults.standard.set(showYear, forKey: kPrefix + "showYear") }
     }
@@ -468,6 +472,8 @@ final class AppSettings: ObservableObject {
         remoteControlAllowSetlistLoad = ud.object(forKey: kPrefix + "remoteControlAllowSetlistLoad").flatMap { $0 as? Bool } ?? false
         remoteControlPin = String(format: "%04d", Int.random(in: 0...9999))
         duplicateTrackProtection = ud.object(forKey: kPrefix + "duplicateTrackProtection")
+            .flatMap { $0 as? Bool } ?? false
+        enforceContiguousPlayedPrefix = ud.object(forKey: kPrefix + "enforceContiguousPlayedPrefix")
             .flatMap { $0 as? Bool } ?? false
         showYear = ud.object(forKey: kPrefix + "showYear").flatMap { $0 as? Bool } ?? true
         showTime = ud.object(forKey: kPrefix + "showTime").flatMap { $0 as? Bool } ?? true

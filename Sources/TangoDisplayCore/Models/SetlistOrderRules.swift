@@ -50,4 +50,21 @@ public enum SetlistOrderRules {
         }
         return allowed
     }
+
+    // MARK: - Opt-in gating wrappers
+
+    /// Gated version of `sanitizedMarkPlayed`: when `enforceContiguousPrefix` is `true`
+    /// the prefix rule is applied (only valid extensions qualify); when `false` all `targets`
+    /// are returned unchanged — matching Upstream's free mark-as-played behaviour.
+    public static func allowedMarkPlayed(played: [Bool], targets: Set<Int>,
+                                         enforceContiguousPrefix: Bool) -> Set<Int> {
+        enforceContiguousPrefix ? sanitizedMarkPlayed(played: played, targets: targets) : targets
+    }
+
+    /// Gated version of `sanitizedUnplay`: when `enforceContiguousPrefix` is `true`
+    /// the prefix rule is applied; when `false` all `targets` are returned unchanged.
+    public static func allowedUnplay(played: [Bool], targets: Set<Int>,
+                                     enforceContiguousPrefix: Bool) -> Set<Int> {
+        enforceContiguousPrefix ? sanitizedUnplay(played: played, targets: targets) : targets
+    }
 }

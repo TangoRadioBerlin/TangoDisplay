@@ -945,10 +945,14 @@ struct SetlistView: View {
             setlist.entries.first(where: { $0.id == id })?.state == .played
         }
         if allPlayed {
-            Button("Mark as Not Played") { setlist.markUnplayed(ids: targets) }
+            Button("Mark as Not Played") {
+                setlist.markUnplayed(ids: targets,
+                                     enforceContiguousPrefix: settings.enforceContiguousPlayedPrefix)
+            }
         } else {
             Button("Mark as Played") {
-                setlist.markPlayed(ids: targets)
+                setlist.markPlayed(ids: targets,
+                                   enforceContiguousPrefix: settings.enforceContiguousPlayedPrefix)
                 selectedIDs.subtract(targets)
             }
         }

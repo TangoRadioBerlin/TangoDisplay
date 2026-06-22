@@ -233,22 +233,20 @@ final class SetlistManager: ObservableObject {
         }
     }
 
-    func markPlayed(ids: Set<UUID>) {
-        // Keep the played block a contiguous top prefix: only entries that extend the
-        // prefix downward without leaving a gap may be marked played.
+    func markPlayed(ids: Set<UUID>, enforceContiguousPrefix: Bool = false) {
         let played = entries.map { $0.state == .played }
         let targets = Set(entries.indices.filter { ids.contains(entries[$0].id) })
-        let allowed = SetlistOrderRules.sanitizedMarkPlayed(played: played, targets: targets)
+        let allowed = SetlistOrderRules.allowedMarkPlayed(played: played, targets: targets,
+                                                          enforceContiguousPrefix: enforceContiguousPrefix)
         for i in allowed { entries[i].state = .played }
         save()
     }
 
-    func markUnplayed(ids: Set<UUID>) {
-        // Only un-play a contiguous run at the bottom of the played block — never punch a
-        // hole in the middle (a played entry must not end up below a queued one).
+    func markUnplayed(ids: Set<UUID>, enforceContiguousPrefix: Bool = false) {
         let played = entries.map { $0.state == .played }
         let targets = Set(entries.indices.filter { ids.contains(entries[$0].id) })
-        let allowed = SetlistOrderRules.sanitizedUnplay(played: played, targets: targets)
+        let allowed = SetlistOrderRules.allowedUnplay(played: played, targets: targets,
+                                                      enforceContiguousPrefix: enforceContiguousPrefix)
         for i in allowed { entries[i].state = .queued }
         save()
     }

@@ -319,6 +319,11 @@ struct PlayerSettingsView: View {
                     Text("Controls when a track is marked as played. Once marked, resuming playback skips to the next track.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                    Toggle("Keep played tracks grouped at the top",
+                           isOn: $settings.enforceContiguousPlayedPrefix)
+                    Text("When on, right-click Mark as Played / Not Played keeps the played block a contiguous group at the top with no gaps. When off, any track can be toggled freely.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
 
                     subgroupLabel("Duplicate Protection")
                     Toggle("Duplicate track protection", isOn: $settings.duplicateTrackProtection)
