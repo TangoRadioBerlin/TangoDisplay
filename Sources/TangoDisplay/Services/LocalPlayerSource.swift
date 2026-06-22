@@ -24,7 +24,24 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     @Published private(set) var duration: Double = 0
     @Published private(set) var currentEntryID: UUID?
     @Published private(set) var isCurrentEntryMarkedAsPlayed: Bool = false
-    @Published private(set) var isActivePlaying: Bool = false
+    @Published private(set) var isActivePlaying: Bool = false {
+        didSet {
+            guard isActivePlaying != oldValue else { return }
+            // Prevent idle-sleep while playing — the shorter battery idle-sleep timeout
+            // was suspending playback mid-track when unplugged. Assertion-only; not a
+            // full power-source watcher.
+            if isActivePlaying {
+                sleepAssertionToken = ProcessInfo.processInfo.beginActivity(
+                    options: .idleSystemSleepDisabled,
+                    reason: "TangoDisplay setlist playback"
+                )
+            } else if let token = sleepAssertionToken {
+                ProcessInfo.processInfo.endActivity(token)
+                sleepAssertionToken = nil
+            }
+        }
+    }
+    private var sleepAssertionToken: NSObjectProtocol?
 
     /// Full, untrimmed file duration of the current track (seconds). Lets the waveform place the
     /// auto-gap cut markers as fractions of the whole file. 0 when no track is loaded.
