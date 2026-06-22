@@ -2,7 +2,34 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
     <channel>
         <title>TangoDisplay</title>
-        <link>https://github.com/richardsladetdj-creator/TangoDisplay</link>
+        <link>https://github.com/TangoRadioBerlin/TangoDisplay</link>
+        <item>
+            <title>Version 3.26.5</title>
+            <pubDate>Sun, 22 Jun 2026 20:00:00 +0000</pubDate>
+            <sparkle:version>98</sparkle:version>
+            <sparkle:shortVersionString>3.26.5</sparkle:shortVersionString>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Setlist: tracks appear instantly on drop</strong> — rows show immediately with the filename while metadata loads in the background</li>
+                    <li><strong>Setlist: cloud-only iCloud tracks no longer dropped silently</strong> — mixed local + cloud-only drags now materialise all tracks correctly</li>
+                    <li><strong>Setlist: idle-sleep prevention during playback</strong> — the Mac no longer goes to sleep mid-track on battery</li>
+                    <li><strong>Improved duplicate prompt</strong> — plural wording, flags already-played tracks; brief banner confirms filtered count</li>
+                    <li><strong>Mark as Played opt-in mode</strong> — new toggle to keep played tracks in a contiguous block at the top</li>
+                    <li><strong>Waveform window</strong> — cut markers, AutoGain toggle, BPM, genre colour matching, hover previews, fade visualisation, mic level</li>
+                    <li><strong>Remote control v2</strong> — load setlist and reorder tracks from the web remote</li>
+                    <li><strong>Per-scene positioning</strong> — WYSIWYG preview for base / cortina / per-genre scenes</li>
+                    <li><strong>Set Timings</strong> — remaining time, auto-gap count, Option-hover end-time</li>
+                    <li><strong>Decibel meter</strong> — fixed built-in mic detection on Macs with multiple audio devices</li>
+                    <li><strong>Fixed wrong track after pause + reorder</strong></li>
+                    <li><strong>Security and reliability hardening</strong> — PIN rate-limiting, message size caps, async auth fixes</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/TangoRadioBerlin/TangoDisplay/releases/download/v3.26.5/TangoDisplay-v3.26.5-universal.zip"
+                sparkle:edSignature="xLUu2i2q8W/dBn5bMqN61CMdWG4Rrq6y78HolmRaxoe7uwbhY5fFe25xb2m8QGojsvr1hvY8IiqDTbRBKHJnBg=="
+                length="7496744"
+                type="application/zip"/>
+        </item>
         <item>
             <title>Version 3.24.3</title>
             <pubDate>Fri, 06 Jun 2026 12:00:00 +0000</pubDate>

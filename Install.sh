@@ -102,7 +102,7 @@ cat > "$CONTENTS/Info.plist" <<EOF
   <key>SUFeedURL</key>
   <string>https://raw.githubusercontent.com/richardsladetdj-creator/TangoDisplay/main/appcast.xml</string>
   <key>SUPublicEDKey</key>
-  <string>BUHKUUjLMvf3imY9/qbRJiES6Vq7/C3w94lkRB37CJw=</string>
+  <string>W7A56WCcU/aa4FsbKfBxN1jEq8wY8lWYyF7Y87VpBLs=</string>
 </dict>
 </plist>
 EOF
