@@ -49,7 +49,7 @@ A native macOS menu-bar app that shows a clean, fullscreen dancer display on an 
 ### Option A — Download pre-built app (easiest)
 
 1. Go to the [Releases](https://github.com/richardsladetdj-creator/TangoDisplay/releases) page
-2. Download `TangoDisplay-v3.24.3-universal.zip` (works on both Apple Silicon and Intel Macs)
+2. Download `TangoDisplay-v3.26.5-universal.zip` (works on both Apple Silicon and Intel Macs)
 3. Unzip and drag `TangoDisplay.app` to your `/Applications` folder
 4. **Right-click › Open** on first launch (required because the app is ad-hoc signed, not notarised)
 5. Grant the permissions macOS requests (see [Permissions](#permissions) below)
@@ -135,6 +135,20 @@ Key design decisions:
 ---
 
 ## Changelog
+
+### v3.26.5
+- **Setlist: tracks appear instantly on drop** — rows show immediately with the filename while metadata loads in the background; dragging tracks no longer looks like it failed
+- **Setlist: cloud-only iCloud tracks no longer dropped silently** — mixed local + cloud-only drags now materialise all tracks correctly
+- **Setlist: idle-sleep prevention during playback** — the Mac no longer goes to sleep mid-track when running on battery
+- **Setlist: improved duplicate prompt** — shows plural wording and flags tracks that were already played; a brief banner confirms how many tracks were filtered instead of silently skipping them
+- **Mark as Played opt-in mode** — new toggle in Player Settings › Mark as Played: "Keep played tracks grouped at the top" enforces a contiguous played block; off by default (free marking as before)
+- **Waveform window** — cut markers show auto-gap trim points; AutoGain toggle; BPM display; genre-based colour matching; hover previews; fade visualisation; integrated mic level
+- **Remote control v2** — load a setlist and reorder tracks from the web remote (⌘R)
+- **Per-scene positioning** — the Appearance preview is now scene-selectable (base / cortina / per-genre) and updates live; position changes are reflected on the dancer display immediately
+- **Set Timings** — shows remaining time and counts auto-gaps; cortinas counted as 1 min; Option-hover shows precise end-time
+- **Decibel meter** — fixed built-in microphone detection on Macs with multiple audio devices
+- **Fixed wrong track after pause + reorder** — the built-in player now plays the topmost unplayed entry after the setlist is reordered while paused
+- **Security and reliability hardening** — remote PIN rate-limiting, inbound message size caps, auth re-assertion after async setlist writes, and various edge-case fixes
 
 ### v3.24.3
 - **Fixed crash when playing a mono audio file with an AU plugin active** — mono audio is now automatically upmixed to stereo before reaching the plugin chain (via `AVAudioMixerNode`), so the plugin stays active and processes the track correctly. Previously the incompatible plugin was disabled as a workaround; it now works as expected.
