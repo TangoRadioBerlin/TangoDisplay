@@ -106,15 +106,30 @@ final class SetlistManager: ObservableObject {
     // Capturing a UUID (rather than an Int) prevents stale-index bugs when the
     // list mutates during the async metadata read.
     func insertURLs(_ urls: [URL], before anchorID: UUID?) {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            var collected: [SetlistEntry] = []
-            for url in urls {
-                guard isAudioURL(url) else { continue }
+        let audioURLs = urls.filter { isAudioURL($0) }
+        guard !audioURLs.isEmpty else { return }
+        // Insert filename placeholders immediately so rows appear at once;
+        // the async loop below fills real metadata. The old collect-then-insert
+        // pattern made drags look like they failed and prompted spurious re-drags.
+        let placeholders = audioURLs.map { url in
+            SetlistEntry(fileURL: url,
+                         track: Track(title: url.deletingPathExtension().lastPathComponent,
+                                      artist: "", genre: "", persistentID: url.path))
+        }
+        insert(placeholders, before: anchorID)   // calls save() + loadMissingDurations()
+        for p in placeholders {
+            let id = p.id, url = p.fileURL
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 let track = await SetlistManager.readMetadata(from: url)
-                collected.append(SetlistEntry(fileURL: url, track: track))
+                guard let i = self.entries.firstIndex(where: { $0.id == id }) else { return }
+                self.entries[i].track = track
+                // Re-apply genre-colour now that we have a real genre.
+                if let color = self.newEntryTagColorProvider?(track) {
+                    self.entries[i].tagColor = color
+                }
+                self.save()
             }
-            self.insert(collected, before: anchorID)
         }
     }
 
