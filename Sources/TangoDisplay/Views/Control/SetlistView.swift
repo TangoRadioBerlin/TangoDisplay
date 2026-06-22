@@ -504,6 +504,7 @@ struct SetlistView: View {
     @State private var flagsMonitor: Any? = nil
     @State private var hogConflictWarning = false
     @State private var hogDeviceStolenAlertShown = false
+    @State private var dropFeedback: String? = nil
 
     // Seed the @State mirrors from the player so the very first body render
     // after this view is (re-)created already reflects the live playing track.
@@ -671,19 +672,45 @@ struct SetlistView: View {
         case .neverAdd:
             shouldAddDuplicates = false
         case nil:
-            let (shouldAdd, remember) = promptForDuplicates()
+            let playedURLs = Set(setlist.entries.compactMap { $0.state == .played ? $0.fileURL : nil })
+            let dup = SetlistDropRules.duplicateSummary(incoming: urls, existing: existingURLs, played: playedURLs)
+            let (shouldAdd, remember) = promptForDuplicates(count: dup.duplicateCount,
+                                                            alreadyPlayed: dup.anyAlreadyPlayed)
             if remember { setlist.setDuplicateSessionDecision(shouldAdd ? .alwaysAdd : .neverAdd) }
             shouldAddDuplicates = shouldAdd
         }
 
         let toInsert = shouldAddDuplicates ? urls : urls.filter { !existingURLs.contains($0) }
         if !toInsert.isEmpty { setlist.insertURLs(toInsert, before: anchorID) }
+
+        let skipped = urls.count - toInsert.count
+        if skipped > 0 {
+            showDropFeedback("Added \(toInsert.count) — \(skipped) already in set")
+        }
     }
 
-    private func promptForDuplicates() -> (shouldAdd: Bool, remember: Bool) {
+    // Brief auto-dismissing note in the bottom drop-hint slot so silently
+    // filtered duplicates aren't misread as a failed drag.
+    private func showDropFeedback(_ message: String) {
+        withAnimation { dropFeedback = message }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            withAnimation { dropFeedback = nil }
+        }
+    }
+
+    private func promptForDuplicates(count: Int, alreadyPlayed: Bool) -> (shouldAdd: Bool, remember: Bool) {
         let alert = NSAlert()
-        alert.messageText = "Track Already in Setlist"
-        alert.informativeText = "This track already exists in this set. Add anyway?"
+        alert.messageText = count == 1 ? "Track Already in Setlist" : "Tracks Already in Setlist"
+        if count == 1 {
+            alert.informativeText = alreadyPlayed
+                ? "This track has already been played in this set. Add anyway?"
+                : "This track already exists in this set. Add anyway?"
+        } else {
+            alert.informativeText = alreadyPlayed
+                ? "\(count) tracks have already been played in this set. Add anyway?"
+                : "\(count) tracks are already in this set. Add anyway?"
+        }
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Don't Add")
@@ -799,7 +826,19 @@ struct SetlistView: View {
         }
         .listStyle(.plain)
         .overlay(alignment: .bottom) {
-            dropHint
+            if let dropFeedback {
+                Text(dropFeedback)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
+            } else {
+                dropHint
+            }
         }
         .toolbar {
             if settings.decibelMeterEnabled {

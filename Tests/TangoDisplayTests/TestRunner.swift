@@ -3350,6 +3350,7 @@ runWaveformMathTests()
 runColorMatchingTests()
 runRemoteProtocolV2Tests()
 runRemoteProtocolV2Slice2Tests()
+runSetlistDropRulesTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3580,6 +3581,54 @@ func runRemoteLoadLimitsTests() {
         test("cap is a sane positive bound") {
             try expect(RemoteLoadLimits.maxSetlistEntries > 0)
             try expect(RemoteLoadLimits.maxSetlistEntries <= 10_000)
+        }
+    }
+}
+
+// MARK: - SetlistDropRules tests
+
+func runSetlistDropRulesTests() {
+    suite("SetlistDropRules") {
+        let a = URL(fileURLWithPath: "/music/a.mp3")
+        let b = URL(fileURLWithPath: "/music/b.mp3")
+        let c = URL(fileURLWithPath: "/music/c.mp3")
+        let existing: Set<URL> = [a, b]
+        let played: Set<URL> = [a]
+
+        test("no duplicates — zero count, not played") {
+            let r = SetlistDropRules.duplicateSummary(incoming: [c], existing: existing, played: played)
+            try expectEqual(r.duplicateCount, 0)
+            try expect(!r.anyAlreadyPlayed)
+        }
+
+        test("one duplicate, not played") {
+            let r = SetlistDropRules.duplicateSummary(incoming: [b], existing: existing, played: played)
+            try expectEqual(r.duplicateCount, 1)
+            try expect(!r.anyAlreadyPlayed)
+        }
+
+        test("one duplicate, already played") {
+            let r = SetlistDropRules.duplicateSummary(incoming: [a], existing: existing, played: played)
+            try expectEqual(r.duplicateCount, 1)
+            try expect(r.anyAlreadyPlayed)
+        }
+
+        test("mixed incoming — two duplicates, one played") {
+            let r = SetlistDropRules.duplicateSummary(incoming: [a, b, c], existing: existing, played: played)
+            try expectEqual(r.duplicateCount, 2)
+            try expect(r.anyAlreadyPlayed)
+        }
+
+        test("empty incoming") {
+            let r = SetlistDropRules.duplicateSummary(incoming: [], existing: existing, played: played)
+            try expectEqual(r.duplicateCount, 0)
+            try expect(!r.anyAlreadyPlayed)
+        }
+
+        test("empty existing — no duplicates possible") {
+            let r = SetlistDropRules.duplicateSummary(incoming: [a, b], existing: [], played: [])
+            try expectEqual(r.duplicateCount, 0)
+            try expect(!r.anyAlreadyPlayed)
         }
     }
 }
