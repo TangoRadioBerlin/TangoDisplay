@@ -170,8 +170,17 @@ private class MusicAppDropView: NSView {
     private func acceptLegacyFilePromise(_ sender: NSDraggingInfo) -> Bool {
         let pb = sender.draggingPasteboard
 
+        let items = pb.pasteboardItems ?? []
+        // How many items advertise a file flavor — the count we expect to resolve.
+        // Cloud-only tracks advertise a file-url/promise but have no on-disk file,
+        // so they pass this filter yet fail per-item resolution below.
+        let advertisedCount = items.filter {
+            $0.string(forType: .fileURL) != nil
+                || $0.string(forType: Self.legacyPromiseURLType) != nil
+        }.count
+
         var urls: [URL] = []
-        for item in pb.pasteboardItems ?? [] {
+        for item in items {
             // Try public.file-url first, then the promise string. Per-item
             // fallback (not `??` on the strings) so a broken file-url doesn't
             // prevent us from trying the promise flavor on the same item —
@@ -189,22 +198,34 @@ private class MusicAppDropView: NSView {
                 break
             }
         }
-        if !urls.isEmpty {
+        // Fast path only when every advertised item resolved to an on-disk file.
+        // A partial resolve means the selection mixes local and cloud-only tracks —
+        // the unresolved ones would be silently dropped, so fall through to
+        // materialise the whole selection instead of returning a truncated set.
+        if !urls.isEmpty && urls.count >= advertisedCount {
             os_log("promise resolved %d url(s) from pasteboard string",
                    log: dropLog, type: .info, urls.count)
             onDrop(urls)
             return true
         }
 
-        // No on-disk URLs at all — ask Music.app to materialise the promised
-        // files. Blocking but only hit for pure cloud-only drags.
+        // Partial or zero local resolution — ask Music.app to materialise the
+        // promised files (writes cached copies of every track, cloud-only included).
+        // Blocking, but only hit when the drag isn't fully local on disk.
+        os_log("promise partial: resolved %d of %d advertised — materialising",
+               log: dropLog, type: .info, urls.count, advertisedCount)
         let destDir = Self.filePromiseDestination()
         let names = sender.namesOfPromisedFilesDropped(atDestination: destDir) ?? []
         let writtenURLs = names.map { destDir.appendingPathComponent($0) }
         os_log("promise materialised %d file(s) at %{public}@",
                log: dropLog, type: .info, names.count, destDir.path)
-        guard !writtenURLs.isEmpty else { return false }
-        onDrop(writtenURLs)
+        if !writtenURLs.isEmpty {
+            onDrop(writtenURLs)
+            return true
+        }
+        // Materialise yielded nothing — fall back to whatever local URLs resolved.
+        guard !urls.isEmpty else { return false }
+        onDrop(urls)
         return true
     }
 
