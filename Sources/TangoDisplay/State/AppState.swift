@@ -93,6 +93,12 @@ final class AppState: ObservableObject {
         try? profileStore.saveDraft(snap)
     }
 
+    func cancelPendingAppearanceDraftSave() {
+        pendingDraftSaveWork?.cancel()
+        pendingDraftSaveWork = nil
+        pendingDraftSnapshot = nil
+    }
+
     // MARK: - Internal state
 
     private var artworkCache: [String: NSImage] = [:]  // keyed by persistentID

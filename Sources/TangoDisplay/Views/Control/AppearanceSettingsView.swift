@@ -538,6 +538,7 @@ struct AppearanceSettingsView: View {
     }
 
     private func clearDraftState() {
+        appState.cancelPendingAppearanceDraftSave()
         appState.profileStore.clearDraft()
         didRestoreDraft = false
     }
