@@ -599,7 +599,8 @@ struct SetlistView: View {
         }
         .background(
             MusicAppWindowDropInstaller(isTargeted: $isDragTargeted) { urls in
-                handleIncomingURLs(urls, anchorID: nil)
+                // Defer past the drag-tracking run loop; NSAlert.runModal() inside performDragOperation deadlocks cross-process drags.
+                DispatchQueue.main.async { handleIncomingURLs(urls, anchorID: nil) }
             }
         )
         .onReceive(player.$currentEntryID) { activeEntryID = $0 }
