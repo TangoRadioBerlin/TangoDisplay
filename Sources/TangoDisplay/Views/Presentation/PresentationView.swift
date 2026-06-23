@@ -11,15 +11,17 @@ struct PresentationView: View {
     @State private var artistBgImage: NSImage? = nil
     @State private var genreBgImage: NSImage? = nil
     @State private var performanceBgImage: NSImage? = nil
+    @State private var lastResolvedProfile: AppearanceProfile = .classic
 
     private var activeProfile: AppearanceProfile {
         if let draft = appState.draftProfile { return draft }
         let all = appState.profileStore.allProfiles
-        if let id = appState.settings.activeProfileID,
-           let found = all.first(where: { $0.id == id }) {
-            return found
-        }
-        return AppearanceProfile.classic
+        let resolved = AppearanceProfileResolution.resolve(
+            activeID: appState.settings.activeProfileID,
+            in: all,
+            current: lastResolvedProfile
+        )
+        return resolved
     }
 
     private var shouldShowArtwork: Bool {
@@ -209,6 +211,10 @@ struct PresentationView: View {
             reloadArtistBgImage()
             reloadGenreBgImage()
             reloadPerformanceBgImage()
+            updateLastResolvedProfile()
+        }
+        .onChange(of: appState.settings.activeProfileID) { _ in
+            updateLastResolvedProfile()
         }
         .onChange(of: settings.performanceBackgroundImageFilename) { _ in
             reloadPerformanceBgImage()
@@ -241,6 +247,14 @@ struct PresentationView: View {
         .onChange(of: appState.mirrorPreviewSceneOnPresentation) { _ in
             reloadGenreBgImage()
             reloadArtistBgImage()
+        }
+    }
+
+    private func updateLastResolvedProfile() {
+        let all = appState.profileStore.allProfiles
+        if let id = appState.settings.activeProfileID,
+           let found = all.first(where: { $0.id == id }) {
+            lastResolvedProfile = found
         }
     }
 

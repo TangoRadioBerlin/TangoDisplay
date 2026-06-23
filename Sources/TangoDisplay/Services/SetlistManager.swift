@@ -94,6 +94,9 @@ final class SetlistManager: ObservableObject {
         return dir.appendingPathComponent("setlist.json")
     }()
 
+    private let saveQueue = DispatchQueue(label: "com.local.tangodisplay.setlist-save", qos: .utility)
+    private var pendingSaveWork: DispatchWorkItem?
+
     init() { load() }
 
     // MARK: - Queue mutations (all called on main)
@@ -346,8 +349,21 @@ final class SetlistManager: ObservableObject {
     // MARK: - Persistence
 
     private func save() {
+        pendingSaveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingSaveWork = nil
+            self?.flushPendingSave()
+        }
+        pendingSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    func flushPendingSave() {
+        pendingSaveWork?.cancel()
+        pendingSaveWork = nil
         guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: saveURL, options: .atomic)
+        let url = saveURL
+        saveQueue.async { try? data.write(to: url, options: .atomic) }
     }
 
     private func load() {
@@ -393,18 +409,17 @@ final class SetlistManager: ObservableObject {
     private func loadMissingDurations() {
         let needsLoad = entries.filter { $0.duration == nil }.map { $0.id }
         for id in needsLoad {
-            Task {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 guard let idx = self.entries.firstIndex(where: { $0.id == id }) else { return }
                 let url = self.entries[idx].fileURL
                 let asset = AVURLAsset(url: url)
                 guard let cmDuration = try? await asset.load(.duration) else { return }
                 let seconds = CMTimeGetSeconds(cmDuration)
                 guard seconds.isFinite && seconds > 0 else { return }
-                await MainActor.run {
-                    guard let i = self.entries.firstIndex(where: { $0.id == id }) else { return }
-                    self.entries[i].duration = seconds
-                    self.save()
-                }
+                guard let i = self.entries.firstIndex(where: { $0.id == id }) else { return }
+                self.entries[i].duration = seconds
+                self.save()
             }
         }
     }

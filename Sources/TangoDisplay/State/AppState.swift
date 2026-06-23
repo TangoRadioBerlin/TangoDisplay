@@ -67,6 +67,32 @@ final class AppState: ObservableObject {
 
     var localPlayer: LocalPlayerSource? { activeSource as? LocalPlayerSource }
 
+    // MARK: - Appearance draft debounce (owned here so applicationWillTerminate can flush it)
+
+    private var pendingDraftSaveWork: DispatchWorkItem?
+    private var pendingDraftSnapshot: AppearanceProfile?
+
+    func scheduleAppearanceDraftSave(_ profile: AppearanceProfile) {
+        pendingDraftSaveWork?.cancel()
+        pendingDraftSnapshot = profile
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let snap = self.pendingDraftSnapshot else { return }
+            self.pendingDraftSnapshot = nil
+            self.pendingDraftSaveWork = nil
+            try? self.profileStore.saveDraft(snap)
+        }
+        pendingDraftSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    func flushPendingAppearanceDraft() {
+        guard let snap = pendingDraftSnapshot else { return }
+        pendingDraftSaveWork?.cancel()
+        pendingDraftSaveWork = nil
+        pendingDraftSnapshot = nil
+        try? profileStore.saveDraft(snap)
+    }
+
     // MARK: - Internal state
 
     private var artworkCache: [String: NSImage] = [:]  // keyed by persistentID

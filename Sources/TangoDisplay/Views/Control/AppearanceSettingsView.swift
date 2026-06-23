@@ -35,7 +35,6 @@ struct AppearanceSettingsView: View {
     @State private var danceDragItem: DisplayTextItem? = nil
     @State private var cortinaTrackDragItem: DisplayTextItem? = nil
     @State private var cortinaUpDragItem: DisplayTextItem? = nil
-    @State private var draftSaveWork: DispatchWorkItem? = nil
     @State private var didRestoreDraft = false
 
     private var workingIsBuiltIn: Bool { working.isBuiltIn }
@@ -262,12 +261,11 @@ struct AppearanceSettingsView: View {
 
     private func loadWorkingCopy() {
         let all = appState.profileStore.allProfiles
-        if let id = appState.settings.activeProfileID,
-           let found = all.first(where: { $0.id == id }) {
-            working = found
-        } else {
-            working = .classic
-        }
+        working = AppearanceProfileResolution.resolve(
+            activeID: appState.settings.activeProfileID,
+            in: all,
+            current: working
+        )
         savedWorking = working
         appState.hasUnsavedAppearanceChanges = false
         appState.draftProfile = working
@@ -518,17 +516,13 @@ struct AppearanceSettingsView: View {
 
     /// Debounced write of the working copy to the on-disk draft, so unsaved
     /// position tweaks survive a quit or an update-forced relaunch.
+    /// Ownership lives in AppState so applicationWillTerminate can flush it.
     private func scheduleDraftSave() {
-        draftSaveWork?.cancel()
         guard isDirty else {
             appState.profileStore.clearDraft()
             return
         }
-        let snapshot = working
-        let store = appState.profileStore
-        let work = DispatchWorkItem { try? store.saveDraft(snapshot) }
-        draftSaveWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+        appState.scheduleAppearanceDraftSave(working)
     }
 
     /// Restores a persisted draft of the currently selected profile (drafts of
@@ -544,7 +538,6 @@ struct AppearanceSettingsView: View {
     }
 
     private func clearDraftState() {
-        draftSaveWork?.cancel()
         appState.profileStore.clearDraft()
         didRestoreDraft = false
     }

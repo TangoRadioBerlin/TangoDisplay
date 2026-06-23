@@ -146,10 +146,15 @@ private class MusicAppDropView: NSView {
         }
 
         // 5. AppleScript selection fallback — com.apple.itunes.drag only.
-        // Synchronous and slow (Music.app library query) — kept as a last resort.
+        // Deferred off-main: NSAppleScript.executeAndReturnError is a blocking
+        // cross-process call and must not run inside the live drag-tracking loop.
         if types.contains(Self.pasteboardType) {
-            let urls = resolveViaMusicSelection()
-            if !urls.isEmpty { onDrop(urls); return true }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                let urls = self.resolveViaMusicSelection()
+                if !urls.isEmpty { DispatchQueue.main.async { self.onDrop(urls) } }
+            }
+            return true
         }
 
         os_log("performDrag resolved zero urls", log: dropLog, type: .error)
@@ -211,7 +216,12 @@ private class MusicAppDropView: NSView {
 
         // Partial or zero local resolution — ask Music.app to materialise the
         // promised files (writes cached copies of every track, cloud-only included).
-        // Blocking, but only hit when the drag isn't fully local on disk.
+        // namesOfPromisedFilesDropped is synchronous and blocks the drag-tracking
+        // loop while Music.app writes each file. This is unavoidable: the deprecated
+        // promise API has no async equivalent and the destination URL is bound to
+        // `sender` so it cannot be deferred. Acceptable because this path is only
+        // reached for cloud-only Music.app tracks; JRiver and Finder always resolve
+        // all URLs via the fast path above and never reach this call.
         os_log("promise partial: resolved %d of %d advertised — materialising",
                log: dropLog, type: .info, urls.count, advertisedCount)
         let destDir = Self.filePromiseDestination()
@@ -360,10 +370,12 @@ private class MusicAppDropView: NSView {
 // SwiftUI rebuild that re-asserts the hosting hierarchy and guarantees the
 // drop view is always in AppKit's drag routing path.
 //
-// Type registration on MusicAppDropView is intentionally limited to
-// com.apple.music.metadata and com.apple.itunes.drag, so AppKit's drag walk-up
-// only stops here for Music.app drags. Drags carrying public.file-url (Finder,
-// Swinsian, AIFF from Music) flow past us to SwiftUI's .onDrop handler as today.
+// MusicAppDropView registers for public.file-url in addition to Music.app-
+// specific types (see registerForDraggedTypes). AppKit's drag walk-up offers
+// each drop to the deepest registered view first: drops over a List row go to
+// SwiftUI's .onInsert handler (already async-safe via Task); drops on empty
+// window chrome or when SwiftUI doesn't accept the drag fall through to
+// MusicAppDropView's performDragOperation.
 private struct MusicAppWindowDropInstaller: NSViewRepresentable {
     @Binding var isTargeted: Bool
     let onDrop: ([URL]) -> Void
@@ -588,7 +600,7 @@ struct SetlistView: View {
                 guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                       event.charactersIgnoringModifiers?.lowercased() == "v",
                       !(NSApp.keyWindow?.firstResponder is NSText) else { return event }
-                pasteFromClipboard()
+                DispatchQueue.main.async { pasteFromClipboard() }
                 return nil
             }
         }

@@ -3351,6 +3351,7 @@ runColorMatchingTests()
 runRemoteProtocolV2Tests()
 runRemoteProtocolV2Slice2Tests()
 runSetlistDropRulesTests()
+runAppearanceProfileResolutionTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3629,6 +3630,48 @@ func runSetlistDropRulesTests() {
             let r = SetlistDropRules.duplicateSummary(incoming: [a, b], existing: [], played: [])
             try expectEqual(r.duplicateCount, 0)
             try expect(!r.anyAlreadyPlayed)
+        }
+    }
+}
+
+// MARK: - AppearanceProfileResolution tests
+
+func runAppearanceProfileResolutionTests() {
+    suite("AppearanceProfileResolution") {
+        var profile = AppearanceProfile.classic
+        profile.id = UUID()
+        profile.name = "Test"
+        profile.isBuiltIn = false
+        let id = profile.id
+        let current = profile
+        let other: AppearanceProfile = {
+            var p = AppearanceProfile.classic
+            p.id = UUID()
+            p.name = "Other"
+            p.isBuiltIn = false
+            return p
+        }()
+
+        test("ID set and found — returns found profile") {
+            let result = AppearanceProfileResolution.resolve(activeID: id, in: [current, other], current: other)
+            try expectEqual(result.id, id)
+        }
+
+        test("ID set but not found — returns current unchanged") {
+            let missingID = UUID()
+            let result = AppearanceProfileResolution.resolve(activeID: missingID, in: [current, other], current: current)
+            try expectEqual(result.id, current.id)
+        }
+
+        test("ID nil — returns .classic") {
+            let result = AppearanceProfileResolution.resolve(activeID: nil, in: [current, other], current: current)
+            try expect(result.isBuiltIn)
+            try expectEqual(result.name, "Classic")
+        }
+
+        test("empty profiles list with set ID — returns current") {
+            let result = AppearanceProfileResolution.resolve(activeID: id, in: [], current: current)
+            try expectEqual(result.id, current.id)
         }
     }
 }

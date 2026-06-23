@@ -43,9 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkeyService.unregister()
-        // Turn Setlist Remote off on quit: cancels the listener cleanly and persists the
-        // toggle as off so the next launch starts quiet and the user opts back in.
         if let appState {
+            // Flush any pending debounced saves so work in progress is not lost on quit.
+            appState.setlist.flushPendingSave()
+            appState.flushPendingAppearanceDraft()
+            // Turn Setlist Remote off on quit: cancels the listener cleanly and persists the
+            // toggle as off so the next launch starts quiet and the user opts back in.
             appState.settings.remoteControlEnabled = false
             appState.setlistRemoteBridge.teardown()
         }
