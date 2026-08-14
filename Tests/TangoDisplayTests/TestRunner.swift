@@ -3360,6 +3360,7 @@ runPreparedAutoGapTests()
 runRepeatTrackRulesTests()
 runPlaybackWindowTests()
 runMusicTrimTests()
+runEffectiveSilenceTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3957,6 +3958,37 @@ func runMusicTrimTests() {
             let r = musicTrimSeconds(startMs: 0, stopMs: 0, totalMs: 180000)
             try expectNil(r.start)
             try expectNil(r.end)
+        }
+    }
+}
+
+// MARK: - Effective silence at trim points
+
+func runEffectiveSilenceTests() {
+    suite("AutoGap — trimmed silence never counts toward the gap") {
+        test("end trim swallows the whole trailing silence") {
+            // 4s of silence live in [176, 180]; a trim at 150 cuts all of it.
+            try expectEqual(effectiveTrailingSilence(trailing: 4, duration: 180, trimEnd: 150), 0)
+        }
+
+        test("end trim inside the silence leaves the remainder") {
+            // Trim at 178 leaves [176, 178] → 2s of the 4s still play.
+            try expectEqual(effectiveTrailingSilence(trailing: 4, duration: 180, trimEnd: 178), 2)
+        }
+
+        test("no end trim or trim at file end keeps the full trailing silence") {
+            try expectEqual(effectiveTrailingSilence(trailing: 4, duration: 180, trimEnd: nil), 4)
+            try expectEqual(effectiveTrailingSilence(trailing: 4, duration: 180, trimEnd: 180), 4)
+        }
+
+        test("end trim with unknown duration is conservatively zero") {
+            try expectEqual(effectiveTrailingSilence(trailing: 4, duration: nil, trimEnd: 150), 0)
+        }
+
+        test("start trim reduces the leading silence") {
+            try expectEqual(effectiveLeadingSilence(leading: 3, trimStart: 1), 2)
+            try expectEqual(effectiveLeadingSilence(leading: 3, trimStart: 5), 0)
+            try expectEqual(effectiveLeadingSilence(leading: 3, trimStart: nil), 3)
         }
     }
 }

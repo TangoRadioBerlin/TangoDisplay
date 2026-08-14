@@ -989,6 +989,11 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             let currentURL = entry.fileURL
             let nextURL = next?.fileURL
             let nextID = next?.id
+            // Trim clamps: silence past a trimmed end / before a trimmed start never plays,
+            // so it must not be credited against the auto-gap target (else the gap collapses).
+            let outTrimEnd = entry.trimEndSeconds
+            let outDuration = fullSeconds
+            let inTrimStart = next?.trimStartSeconds
             autoGapAnalysisTask = Task { [weak self] in
                 let cur = await AudioSilenceAnalyzer.shared.analyze(url: currentURL)
                 guard !Task.isCancelled else { return }
@@ -1003,14 +1008,18 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                     tail = 0
                 }
                 guard !Task.isCancelled, let nextID else { return }
+                let effPrevEnd = effectiveTrailingSilence(trailing: cur.silenceAtEnd,
+                                                          duration: outDuration,
+                                                          trimEnd: outTrimEnd)
+                let effLeading = effectiveLeadingSilence(leading: lead, trimStart: inTrimStart)
                 await MainActor.run { [weak self] in
                     // Discard results from a superseded load (e.g. user skipped before analysis finished).
                     guard let self, self.scheduleGeneration == gen else { return }
                     self.preparedAutoGap = PreparedAutoGap(
                         currentID: currentID,
                         nextID: nextID,
-                        prevEnd: cur.silenceAtEnd,
-                        leading: lead,
+                        prevEnd: effPrevEnd,
+                        leading: effLeading,
                         trailing: tail
                     )
                 }

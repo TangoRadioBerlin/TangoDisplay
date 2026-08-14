@@ -47,6 +47,22 @@ public func playbackWindow(duration: Double, trimStart: Double?, trimEnd: Double
     return (start, end)
 }
 
+/// Trailing silence still audible when a `duration`-long track is trimmed to
+/// end at `trimEnd`. Silence past the trim point never plays, so it must not
+/// be credited against the auto-gap target (else the gap collapses).
+/// Unknown duration with a trim set → conservatively 0.
+public func effectiveTrailingSilence(trailing: Double, duration: Double?, trimEnd: Double?) -> Double {
+    guard let trimEnd else { return trailing }
+    guard let duration else { return 0 }
+    return max(0, trailing - max(0, duration - trimEnd))
+}
+
+/// Leading silence still audible after skipping a trimmed start.
+public func effectiveLeadingSilence(leading: Double, trimStart: Double?) -> Double {
+    guard let trimStart else { return leading }
+    return max(0, leading - max(0, trimStart))
+}
+
 /// Silence analysis bound to a specific (current, next) transition.
 ///
 /// The background analysis for "track A ends, track B starts" finishes long
