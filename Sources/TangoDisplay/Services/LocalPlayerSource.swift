@@ -142,6 +142,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     private var currentPaddingFrames: AVAudioFrameCount = 0
     private var preparedAutoGap: PreparedAutoGap?     // silence analysis bound to a specific (current, next) transition
     private var autoGapAnalysisTask: Task<Void, Never>?
+    /// Playback window of the loaded entry (user trim × force-trim), in seconds into
+    /// the file; nil = whole file. Seek/early-mark/auto-fade compute against this.
+    private var activeWindow: (start: Double, end: Double)?
     private var audioStartSampleTime: AVAudioFramePosition = 0
     private var silencePending: Bool = false
 
@@ -595,6 +598,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         currentPaddingFrames = 0
         silencePending = false
         audioStartSampleTime = 0
+        activeWindow = nil
         autoGapAnalysisTask?.cancel()
         preparedAutoGap = nil
         teardownObservers()
@@ -714,6 +718,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         currentPaddingFrames = 0
         silencePending = false
         audioStartSampleTime = 0
+        activeWindow = nil
         autoGapAnalysisTask?.cancel()
         preparedAutoGap = nil
         reportCurrentState()
@@ -800,7 +805,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
     func skipPrevious() {
         if elapsed > 3 {
-            seek(to: 0)
+            // Restart the current track — at its trim start, not the file start.
+            seek(to: activeWindow?.start ?? 0)
             return
         }
         guard let id = currentEntryID else { return }
@@ -809,7 +815,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             loadEntry(prev)
             if wasPlaying { playerNode.play(); isActivePlaying = true; reportCurrentState() }
         } else {
-            seek(to: 0)
+            seek(to: activeWindow?.start ?? 0)
         }
     }
 
@@ -835,14 +841,21 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     private func seekTo(_ seconds: Double, completion: (() -> Void)? = nil) {
         guard let file = audioFile else { completion?(); return }
         let sampleRate = file.fileFormat.sampleRate
-        let startFrame = AVAudioFramePosition(max(0, seconds) * sampleRate)
         let totalFrames = file.length
-        guard startFrame < totalFrames else { completion?(); return }
-        let frameCount = AVAudioFrameCount(totalFrames - startFrame)
+        // Clamp into the active playback window (user trim × force-trim) so a seek
+        // can never resurrect trimmed-away audio past the window end.
+        let window = activeWindow ?? (start: 0, end: Double(totalFrames) / sampleRate)
+        guard let target = seekTarget(seconds: seconds,
+                                      windowStart: window.start,
+                                      windowEnd: window.end) else { completion?(); return }
+        let startFrame = AVAudioFramePosition(target * sampleRate)
+        let endFrame = min(totalFrames, AVAudioFramePosition(window.end * sampleRate))
+        guard startFrame < endFrame else { completion?(); return }
+        let frameCount = AVAudioFrameCount(endFrame - startFrame)
         let wasPlaying = playerNode.isPlaying
         playerNode.stop()
-        seekOffset = seconds
-        elapsed = seconds
+        seekOffset = target
+        elapsed = target
         currentPaddingFrames = 0
         silencePending = false
         audioStartSampleTime = 0
@@ -958,7 +971,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
             // Combine the user trim (Track Start & End Time) with the force-mode silence
             // trims into one playback window. elapsed/duration keep tracking real file
-            // positions via seekOffset; a degenerate window plays the full file instead.
+            // positions via seekOffset — `duration` stays the full file length (absolute-
+            // time model; updateTime reasserts it every tick), the scheduled segment and
+            // activeWindow enforce the trim. A degenerate window plays the full file.
             let fullSeconds = Double(file.length) / sr
             let window = playbackWindow(duration: fullSeconds,
                                         trimStart: entry.trimStartSeconds,
@@ -970,9 +985,11 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 segmentFrames = AVAudioFrameCount(AVAudioFramePosition(window.end * sr) - startFrame)
                 seekOffset = window.start
                 elapsed = window.start
-                duration = window.end
+                activeWindow = window
                 autoGapLeadingTrim = forceSkipLeading
                 autoGapTrailingTrim = forceTrimTrailing
+            } else {
+                activeWindow = nil
             }
 
             playerNode.scheduleSegment(file, startingFrame: startFrame, frameCount: segmentFrames,
@@ -1028,6 +1045,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             os_log(.error, "TangoDisplay: failed to load %{public}@: %{public}@",
                    entry.fileURL.path, error.localizedDescription)
             audioFile = nil
+            activeWindow = nil
         }
         currentEntryID = entry.id
         setlist.markPlaying(id: entry.id)

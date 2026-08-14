@@ -47,6 +47,15 @@ public func playbackWindow(duration: Double, trimStart: Double?, trimEnd: Double
     return (start, end)
 }
 
+/// Clamp a seek target into the active playback window: targets before the
+/// window snap to its start; targets at or past the window end are rejected
+/// (nil), mirroring the historical end-of-file guard. Playback beyond the
+/// window would resurrect trimmed-away audio.
+public func seekTarget(seconds: Double, windowStart: Double, windowEnd: Double) -> Double? {
+    guard seconds < windowEnd else { return nil }
+    return max(windowStart, seconds)
+}
+
 /// Trailing silence still audible when a `duration`-long track is trimmed to
 /// end at `trimEnd`. Silence past the trim point never plays, so it must not
 /// be credited against the auto-gap target (else the gap collapses).

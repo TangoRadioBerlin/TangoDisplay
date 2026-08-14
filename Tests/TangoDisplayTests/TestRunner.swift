@@ -3361,6 +3361,7 @@ runRepeatTrackRulesTests()
 runPlaybackWindowTests()
 runMusicTrimTests()
 runEffectiveSilenceTests()
+runSeekTargetTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3989,6 +3990,31 @@ func runEffectiveSilenceTests() {
             try expectEqual(effectiveLeadingSilence(leading: 3, trimStart: 1), 2)
             try expectEqual(effectiveLeadingSilence(leading: 3, trimStart: 5), 0)
             try expectEqual(effectiveLeadingSilence(leading: 3, trimStart: nil), 3)
+        }
+    }
+}
+
+// MARK: - Seek target clamped to the playback window
+
+func runSeekTargetTests() {
+    suite("seekTarget — seeks stay inside the playback window") {
+        test("seek before the window snaps to the window start") {
+            try expectEqual(seekTarget(seconds: 10, windowStart: 60, windowEnd: 120), 60)
+            try expectEqual(seekTarget(seconds: -5, windowStart: 0, windowEnd: 180), 0)
+        }
+
+        test("seek inside the window is unchanged") {
+            try expectEqual(seekTarget(seconds: 90, windowStart: 60, windowEnd: 120), 90)
+        }
+
+        test("seek at or past the window end is rejected") {
+            try expectNil(seekTarget(seconds: 120, windowStart: 60, windowEnd: 120))
+            try expectNil(seekTarget(seconds: 500, windowStart: 60, windowEnd: 120))
+        }
+
+        test("full-file window behaves like the old EOF guard") {
+            try expectEqual(seekTarget(seconds: 30, windowStart: 0, windowEnd: 180), 30)
+            try expectNil(seekTarget(seconds: 180, windowStart: 0, windowEnd: 180))
         }
     }
 }
