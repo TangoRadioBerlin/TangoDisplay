@@ -5,6 +5,7 @@ import TangoDisplayCore
 import UniformTypeIdentifiers
 
 private let dropLog = OSLog(subsystem: "com.tangodisplay", category: "musicdrop")
+private let diagLog = DiagnosticLog.shared
 
 private extension Array {
     subscript(safe index: Int) -> Element? {
@@ -113,34 +114,79 @@ private class MusicAppDropView: NSView {
         os_log("performDrag types=%{public}@", log: dropLog, type: .info,
                String(describing: types))
 
+        let diagEnabled = UserDefaults.standard.bool(forKey: "TangoDisplay.diagnosticLoggingEnabled")
+        let t0 = diagEnabled ? Date() : Date.distantFuture
+        let spid = diagLog.beginInterval("performDragOperation", enabled: diagEnabled)
+        defer {
+            diagLog.endInterval("performDragOperation", id: spid, enabled: diagEnabled)
+            if diagEnabled {
+                diagLog.logTiming("performDragOperation total", elapsed: -t0.timeIntervalSinceNow,
+                                  enabled: true)
+                // Any breadcrumb set below marks a synchronous section of this
+                // callout; reaching this defer means it completed without stall.
+                diagLog.clearBreadcrumb()
+            }
+        }
+
+        // Every pasteboard DATA read below (readObjects / string(forType:) /
+        // propertyList(forType:)) can force a lazily-declaring source app to
+        // provide the data synchronously — a cross-process wait inside this
+        // drop callout. Each read is therefore preceded by a breadcrumb so a
+        // FreezeWatchdog stall report identifies the exact blocking site.
+
         // 1. Modern NSFilePromiseReceiver — for future Music.app versions.
-        if let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self],
-                                                  options: nil) as? [NSFilePromiseReceiver],
-           !promises.isEmpty
-        {
-            return acceptFilePromises(promises)
+        // Cheap types check first: readObjects forces promise data, so don't
+        // touch it for drags that never advertised a promise flavor.
+        let advertisesModernPromise = NSFilePromiseReceiver.readableDraggedTypes
+            .contains { types.contains(NSPasteboard.PasteboardType($0)) }
+        if advertisesModernPromise {
+            if diagEnabled { diagLog.record("drop.branch1.readFilePromises") }
+            if let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self],
+                                                      options: nil) as? [NSFilePromiseReceiver],
+               !promises.isEmpty
+            {
+                return acceptFilePromises(promises)
+            }
         }
 
         // 2. Legacy file-promise — Music.app on Sequoia for iTunes-purchased AAC.
         if types.contains(Self.legacyPromiseURLType)
             || types.contains(Self.legacyPromiseContentsType)
         {
-            return acceptLegacyFilePromise(sender)
+            return acceptLegacyFilePromise(sender, diagEnabled: diagEnabled)
         }
 
         // 3. Legacy plist path — pre-Sequoia purchased AAC.
         if types.contains(Self.musicMetadataType) {
+            if diagEnabled { diagLog.record("drop.branch3.readMusicMetadata") }
             let urls = resolveViaMusicMetadata(pasteboard)
             if !urls.isEmpty { onDrop(urls); return true }
         }
 
         // 4. Plain file URL — Finder, Swinsian, AIFF-from-Music drags.
         if types.contains(Self.fileURLType) {
+            if diagEnabled { diagLog.record("drop.branch4.readFileURLs") }
             let pbURLs = pasteboard.readObjects(forClasses: [NSURL.self],
                                                  options: [.urlReadingFileURLsOnly: true]) as? [URL]
             if let pbURLs = pbURLs, !pbURLs.isEmpty {
                 os_log("file-url path resolved %d url(s)", log: dropLog, type: .info, pbURLs.count)
                 onDrop(pbURLs)
+                return true
+            }
+            // Per-item fallback: foobar2000 writes public.file-url as a bare
+            // POSIX path (readObjects yields nothing for those) — mirror the
+            // ⌘V paste path and parse each item string directly.
+            var itemURLs: [URL] = []
+            for item in pasteboard.pasteboardItems ?? [] {
+                guard let str = item.string(forType: .fileURL),
+                      let url = DropPasteboardRules.fileURL(fromPasteboardString: str)
+                else { continue }
+                itemURLs.append(url)
+            }
+            if !itemURLs.isEmpty {
+                os_log("file-url per-item fallback resolved %d url(s)",
+                       log: dropLog, type: .info, itemURLs.count)
+                onDrop(itemURLs)
                 return true
             }
         }
@@ -169,12 +215,18 @@ private class MusicAppDropView: NSView {
     // drags (e.g. an entire 108-track playlist) aren't truncated to the
     // few items that happen to advertise the promise flavor.
     //
-    // If none of the items resolve to an on-disk file, fall back to
-    // namesOfPromisedFilesDropped to ask Music.app to materialise the files
-    // in our app-support cache (the genuine cloud-only case).
-    private func acceptLegacyFilePromise(_ sender: NSDraggingInfo) -> Bool {
+    // If unresolved items remain, ask the source to materialise the promised
+    // files — but ONLY for genuine Music.app drags (cloud-only tracks).
+    // namesOfPromisedFilesDropped is synchronous: it blocks this drop callout
+    // while the source app writes each file. For any other source that
+    // advertises a promise flavor alongside file-urls, blocking here risks a
+    // cross-process deadlock (the source's drag loop is waiting for our drop
+    // reply), so DropPasteboardRules.legacyPromiseAction forbids it and we
+    // return whatever resolved instead.
+    private func acceptLegacyFilePromise(_ sender: NSDraggingInfo, diagEnabled: Bool) -> Bool {
         let pb = sender.draggingPasteboard
 
+        if diagEnabled { diagLog.record("drop.branch2.readLegacyPromiseItems") }
         let items = pb.pasteboardItems ?? []
         // How many items advertise a file flavor — the count we expect to resolve.
         // Cloud-only tracks advertise a file-url/promise but have no on-disk file,
@@ -195,48 +247,62 @@ private class MusicAppDropView: NSView {
                 item.string(forType: Self.legacyPromiseURLType),
             ].compactMap { $0 }
             for str in candidates {
-                guard let url = URL(string: str),
-                      url.isFileURL,
+                guard let url = DropPasteboardRules.fileURL(fromPasteboardString: str),
                       FileManager.default.fileExists(atPath: url.path)
                 else { continue }
                 urls.append(url)
                 break
             }
         }
-        // Fast path only when every advertised item resolved to an on-disk file.
-        // A partial resolve means the selection mixes local and cloud-only tracks —
-        // the unresolved ones would be silently dropped, so fall through to
-        // materialise the whole selection instead of returning a truncated set.
-        if !urls.isEmpty && urls.count >= advertisedCount {
+
+        // Music.app-specific flavors identify the only source whose promises
+        // we are willing to materialise synchronously.
+        let types = pb.types ?? []
+        let isMusicAppSource = types.contains(Self.pasteboardType)
+            || types.contains(Self.musicMetadataType)
+            || types.contains(Self.musicJRFSType)
+
+        switch DropPasteboardRules.legacyPromiseAction(resolved: urls.count,
+                                                       advertised: advertisedCount,
+                                                       isMusicAppSource: isMusicAppSource) {
+        case .acceptResolved:
             os_log("promise resolved %d url(s) from pasteboard string",
                    log: dropLog, type: .info, urls.count)
             onDrop(urls)
             return true
-        }
 
-        // Partial or zero local resolution — ask Music.app to materialise the
-        // promised files (writes cached copies of every track, cloud-only included).
-        // namesOfPromisedFilesDropped is synchronous and blocks the drag-tracking
-        // loop while Music.app writes each file. This is unavoidable: the deprecated
-        // promise API has no async equivalent and the destination URL is bound to
-        // `sender` so it cannot be deferred. Acceptable because this path is only
-        // reached for cloud-only Music.app tracks; JRiver and Finder always resolve
-        // all URLs via the fast path above and never reach this call.
-        os_log("promise partial: resolved %d of %d advertised — materialising",
-               log: dropLog, type: .info, urls.count, advertisedCount)
-        let destDir = Self.filePromiseDestination()
-        let names = sender.namesOfPromisedFilesDropped(atDestination: destDir) ?? []
-        let writtenURLs = names.map { destDir.appendingPathComponent($0) }
-        os_log("promise materialised %d file(s) at %{public}@",
-               log: dropLog, type: .info, names.count, destDir.path)
-        if !writtenURLs.isEmpty {
-            onDrop(writtenURLs)
+        case .acceptPartial:
+            os_log("promise partial from non-Music source: using %d of %d advertised (no materialise)",
+                   log: dropLog, type: .info, urls.count, advertisedCount)
+            onDrop(urls)
+            return true
+
+        case .fail:
+            os_log("promise unresolved from non-Music source: rejecting drop (types=%{public}@)",
+                   log: dropLog, type: .error, String(describing: types))
+            return false
+
+        case .materialize:
+            // Cloud-only Music.app tracks — ask Music.app to write cached copies
+            // of every track. Synchronous by API design (the destination URL is
+            // bound to `sender`, so the call cannot be deferred off this callout).
+            os_log("promise partial: resolved %d of %d advertised — materialising",
+                   log: dropLog, type: .info, urls.count, advertisedCount)
+            if diagEnabled { diagLog.record("drop.branch2.materialisePromises") }
+            let destDir = Self.filePromiseDestination()
+            let names = sender.namesOfPromisedFilesDropped(atDestination: destDir) ?? []
+            let writtenURLs = names.map { destDir.appendingPathComponent($0) }
+            os_log("promise materialised %d file(s) at %{public}@",
+                   log: dropLog, type: .info, names.count, destDir.path)
+            if !writtenURLs.isEmpty {
+                onDrop(writtenURLs)
+                return true
+            }
+            // Materialise yielded nothing — fall back to whatever local URLs resolved.
+            guard !urls.isEmpty else { return false }
+            onDrop(urls)
             return true
         }
-        // Materialise yielded nothing — fall back to whatever local URLs resolved.
-        guard !urls.isEmpty else { return false }
-        onDrop(urls)
-        return true
     }
 
     // Accept one or more NSFilePromiseReceiver promises, writing the files to a
@@ -684,6 +750,15 @@ struct SetlistView: View {
     // MARK: - Drop handling
 
     private func handleIncomingURLs(_ urls: [URL], anchorID: UUID?) {
+        let diagEnabled = settings.diagnosticLoggingEnabled
+        if diagEnabled {
+            diagLog.record("drop.handleIncomingURLs")
+            os_log("handleIncomingURLs count=%d anchorID=%{public}@",
+                   log: diagLog.dropLog, type: .info,
+                   urls.count, anchorID?.uuidString ?? "nil")
+        }
+        defer { if diagEnabled { diagLog.clearBreadcrumb() } }
+
         // Reject files that no longer exist on disk (e.g. a Music track whose
         // underlying file is missing — shown with a warning triangle in Music).
         // Otherwise they enter the setlist and get silently skipped at playback.
@@ -777,7 +852,21 @@ struct SetlistView: View {
         checkbox.sizeToFit()
         alert.accessoryView = checkbox
 
+        // Set the critical breadcrumb immediately before runModal().
+        // The FreezeWatchdog reads this from a background thread to identify
+        // the stall site if the main thread blocks in the drag-tracking run loop.
+        let diagEnabled = settings.diagnosticLoggingEnabled
+        if diagEnabled {
+            diagLog.record("drop.promptForDuplicates.runModal")
+            os_log("promptForDuplicates: entering runModal (duplicateCount=%d alreadyPlayed=%{public}@)",
+                   log: diagLog.dropLog, type: .info, count, String(alreadyPlayed))
+        }
         let result = alert.runModal()
+        if diagEnabled {
+            diagLog.clearBreadcrumb()
+            os_log("promptForDuplicates: runModal returned result=%d", log: diagLog.dropLog, type: .info,
+                   result == .alertFirstButtonReturn ? 1 : 0)
+        }
         return (
             shouldAdd: result == .alertFirstButtonReturn,
             remember: checkbox.state == .on

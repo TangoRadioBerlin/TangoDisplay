@@ -3353,6 +3353,7 @@ runRemoteProtocolV2Slice2Tests()
 runSetlistDropRulesTests()
 runAppearanceProfileResolutionTests()
 runMainThreadStallDetectorTests()
+runDropPasteboardRulesTests()
 runPlaylistIndexClampTests()
 runGenreListCodecTests()
 runMissingFileDropTests()
@@ -3774,6 +3775,83 @@ func runMainThreadStallDetectorTests() {
             trail.clear()
             try expectEqual(trail.last, "")
             try expectEqual(trail.formatted(), "<none>")
+        }
+    }
+}
+
+// MARK: - DropPasteboardRules tests
+
+func runDropPasteboardRulesTests() {
+
+    suite("DropPasteboardRules.fileURL") {
+        test("well-formed file URL parses to path") {
+            let url = DropPasteboardRules.fileURL(fromPasteboardString: "file:///Users/dj/Music/track.mp3")
+            try expectEqual(url?.path, "/Users/dj/Music/track.mp3")
+        }
+
+        test("percent-encoded space decodes in path") {
+            let url = DropPasteboardRules.fileURL(fromPasteboardString: "file:///Music/La%20Cumparsita.mp3")
+            try expectEqual(url?.path, "/Music/La Cumparsita.mp3")
+        }
+
+        test("file URL with unencoded space falls back to path init") {
+            // Some players write unencoded file:// strings; URL(string:) rejects them.
+            let url = DropPasteboardRules.fileURL(fromPasteboardString: "file:///Music/La Cumparsita.mp3")
+            try expectEqual(url?.path, "/Music/La Cumparsita.mp3")
+        }
+
+        test("bare POSIX path is accepted (foobar2000 style)") {
+            let url = DropPasteboardRules.fileURL(fromPasteboardString: "/Music/Di Sarli/Bahia Blanca.flac")
+            try expectEqual(url?.path, "/Music/Di Sarli/Bahia Blanca.flac")
+        }
+
+        test("empty string yields nil") {
+            try expectNil(DropPasteboardRules.fileURL(fromPasteboardString: ""))
+        }
+
+        test("non-file scheme yields nil") {
+            try expectNil(DropPasteboardRules.fileURL(fromPasteboardString: "https://example.com/a.mp3"))
+        }
+
+        test("relative path yields nil") {
+            try expectNil(DropPasteboardRules.fileURL(fromPasteboardString: "Music/track.mp3"))
+        }
+    }
+
+    suite("DropPasteboardRules.legacyPromiseAction") {
+        test("all advertised items resolved — fast path") {
+            let a = DropPasteboardRules.legacyPromiseAction(resolved: 3, advertised: 3, isMusicAppSource: false)
+            try expectEqual(a, .acceptResolved)
+        }
+
+        test("resolved exceeds advertised — fast path") {
+            let a = DropPasteboardRules.legacyPromiseAction(resolved: 4, advertised: 3, isMusicAppSource: true)
+            try expectEqual(a, .acceptResolved)
+        }
+
+        test("partial resolve from Music.app — materialize (cloud-only tracks)") {
+            let a = DropPasteboardRules.legacyPromiseAction(resolved: 1, advertised: 3, isMusicAppSource: true)
+            try expectEqual(a, .materialize)
+        }
+
+        test("zero resolve from Music.app — materialize") {
+            let a = DropPasteboardRules.legacyPromiseAction(resolved: 0, advertised: 2, isMusicAppSource: true)
+            try expectEqual(a, .materialize)
+        }
+
+        test("partial resolve from non-Music source — accept partial, never block") {
+            let a = DropPasteboardRules.legacyPromiseAction(resolved: 2, advertised: 5, isMusicAppSource: false)
+            try expectEqual(a, .acceptPartial)
+        }
+
+        test("zero resolve from non-Music source — fail, never block") {
+            let a = DropPasteboardRules.legacyPromiseAction(resolved: 0, advertised: 2, isMusicAppSource: false)
+            try expectEqual(a, .fail)
+        }
+
+        test("zero advertised, zero resolved, Music source — materialize") {
+            let a = DropPasteboardRules.legacyPromiseAction(resolved: 0, advertised: 0, isMusicAppSource: true)
+            try expectEqual(a, .materialize)
         }
     }
 }
