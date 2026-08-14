@@ -20,20 +20,29 @@ struct SetlistEntry: Identifiable, Codable {
     var track: Track
     var state: SetlistEntryState
     var duration: TimeInterval?
-    var ignoresAutoGap: Bool = false
+    var autoGapOverride: Bool? = nil   // nil = follow global rule; true = force skip; false = force apply
     var ignoresAutoFade: Bool = false
     var isLastTanda: Bool = false      // marks this cortina as the last-tanda trigger
     var pluginConfigurationID: UUID? = nil
     var tagColor: TagColor = .none
     var isPerformance: Bool = false    // track is part of a guest performance
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
-    var autoGapSkipped: Bool = false   // transient: true when the first-track setting automatically skips the gap
     var clientRef: String? = nil       // opaque id from a remote controller (echoed in state.setlist[])
     var tandaRef: String? = nil        // opaque grouping hint from a remote controller (echoed)
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, ignoresAutoGap, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, clientRef, tandaRef
-        // autoGapApplied and autoGapSkipped are intentionally excluded — reset each playback session
+        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, clientRef, tandaRef
+        // autoGapApplied is intentionally excluded — reset each playback session
+    }
+
+    // Legacy one-directional flag (pre-tri-state); read for migration only.
+    private enum LegacyKeys: String, CodingKey { case ignoresAutoGap }
+
+    // Effective "gap skipped before this track". Assumes auto-gap is globally enabled.
+    func autoGapIgnored(isFirstTrack: Bool, ignoreFirstTrack: Bool) -> Bool {
+        effectiveAutoGapIgnored(override: autoGapOverride,
+                                isFirstTrack: isFirstTrack,
+                                ignoreFirstTrack: ignoreFirstTrack)
     }
 
     init(id: UUID = UUID(), fileURL: URL, track: Track, state: SetlistEntryState = .queued) {
@@ -50,7 +59,13 @@ struct SetlistEntry: Identifiable, Codable {
         track = try c.decode(Track.self, forKey: .track)
         state = try c.decode(SetlistEntryState.self, forKey: .state)
         duration = try c.decodeIfPresent(TimeInterval.self, forKey: .duration)
-        ignoresAutoGap = try c.decodeIfPresent(Bool.self, forKey: .ignoresAutoGap) ?? false
+        if let o = try c.decodeIfPresent(Bool.self, forKey: .autoGapOverride) {
+            autoGapOverride = o
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            autoGapOverride = migratedAutoGapOverride(
+                legacyIgnores: try legacy.decodeIfPresent(Bool.self, forKey: .ignoresAutoGap))
+        }
         ignoresAutoFade = try c.decodeIfPresent(Bool.self, forKey: .ignoresAutoFade) ?? false
         isLastTanda = try c.decodeIfPresent(Bool.self, forKey: .isLastTanda) ?? false
         pluginConfigurationID = try c.decodeIfPresent(UUID.self, forKey: .pluginConfigurationID) ?? nil
@@ -64,7 +79,6 @@ struct SetlistEntry: Identifiable, Codable {
         clientRef = try c.decodeIfPresent(String.self, forKey: .clientRef)
         tandaRef = try c.decodeIfPresent(String.self, forKey: .tandaRef)
         autoGapApplied = false
-        autoGapSkipped = false
     }
 }
 
@@ -269,9 +283,9 @@ final class SetlistManager: ObservableObject {
         save()
     }
 
-    func toggleIgnoresAutoGap(id: UUID) {
+    func setAutoGapOverride(id: UUID, ignore: Bool) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
-        entries[i].ignoresAutoGap.toggle()
+        entries[i].autoGapOverride = ignore
         save()
     }
 
@@ -316,11 +330,6 @@ final class SetlistManager: ObservableObject {
     func setAutoGapApplied(id: UUID, applied: Bool) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[i].autoGapApplied = applied
-    }
-
-    func setAutoGapSkipped(id: UUID, skipped: Bool) {
-        guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
-        entries[i].autoGapSkipped = skipped
     }
 
     func remove(ids: Set<UUID>) {

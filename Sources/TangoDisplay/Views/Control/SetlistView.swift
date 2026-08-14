@@ -832,13 +832,14 @@ struct SetlistView: View {
     private var trackList: some View {
         let firstID = setlist.entries.first?.id
         let nonePlayedYet = !setlist.entries.contains(where: { $0.state == .played })
-        let isIgnoringFirstTrack = settings.autoGapEnabled && settings.autoGapIgnoreFirstTrack
         let entries = settings.hidePlayed
             ? setlist.entries.filter { $0.state != .played || $0.id == activeEntryID }
             : setlist.entries
         return List(selection: $selectedIDs) {
             ForEach(entries) { entry in
-                let wouldSkipAutoGap = isIgnoringFirstTrack && nonePlayedYet && entry.state == .queued && entry.id == firstID
+                let wouldSkipAutoGap = settings.autoGapEnabled &&
+                    entry.autoGapIgnored(isFirstTrack: nonePlayedYet && entry.id == firstID,
+                                         ignoreFirstTrack: settings.autoGapIgnoreFirstTrack)
                 rowView(for: entry, wouldSkipAutoGap: wouldSkipAutoGap)
             }
             .onMove { source, dest in
@@ -1079,8 +1080,15 @@ struct SetlistView: View {
                 }
             }
             if e.state == .queued || e.state == .paused {
-                Button(e.ignoresAutoGap ? "Resume Auto-gap" : "Ignore Auto-gap before this Track") {
-                    setlist.toggleIgnoresAutoGap(id: id)
+                // Tri-state: the button shows/toggles the *effective* state, so on a
+                // first track auto-skipped by the global rule it reads "Resume" and
+                // stores an explicit force-apply (false) override.
+                let nonePlayed = !setlist.entries.contains { $0.state == .played }
+                let eff = settings.autoGapEnabled &&
+                    e.autoGapIgnored(isFirstTrack: nonePlayed && e.id == setlist.entries.first?.id,
+                                     ignoreFirstTrack: settings.autoGapIgnoreFirstTrack)
+                Button(eff ? "Resume Auto-gap" : "Ignore Auto-gap before this Track") {
+                    setlist.setAutoGapOverride(id: id, ignore: !eff)
                 }
             }
         }
@@ -1715,7 +1723,7 @@ struct SetlistRowView: View {
                     Image(systemName: "wave.3.left.circle.fill")
                         .font(.system(size: 11))
                         .foregroundColor(.green)
-                } else if entry.ignoresAutoGap || entry.autoGapSkipped || wouldSkipAutoGap {
+                } else if wouldSkipAutoGap {
                     Image(systemName: "wave.3.left.circle")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)

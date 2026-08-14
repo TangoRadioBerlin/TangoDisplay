@@ -885,15 +885,14 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             let isFirstTrack = setlist.entries.first?.id == entry.id
                 && !setlist.entries.contains(where: { $0.state == .played })
             var autoGapApplied = false
-            var autoGapSkipped = false
             let sr = file.fileFormat.sampleRate
             var startFrame: AVAudioFramePosition = 0
             var segmentFrames = AVAudioFrameCount(file.length)
 
-            if !bypassAutoGap && !entry.ignoresAutoGap && settings.autoGapEnabled {
-                if settings.autoGapIgnoreFirstTrack && isFirstTrack {
-                    autoGapSkipped = true
-                } else {
+            let autoGapIgnored = entry.autoGapIgnored(isFirstTrack: isFirstTrack,
+                                                      ignoreFirstTrack: settings.autoGapIgnoreFirstTrack)
+            if !bypassAutoGap && !autoGapIgnored && settings.autoGapEnabled {
+                do {
                     let plan = autoGapPlan(
                         leading: nextTrackSilenceAtStart,
                         trailing: nextTrackSilenceAtEnd,
@@ -941,7 +940,6 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 }
             }
             setlist.setAutoGapApplied(id: entry.id, applied: autoGapApplied)
-            setlist.setAutoGapSkipped(id: entry.id, skipped: autoGapSkipped)
             prevTrackSilenceAtEnd = 0
             nextTrackSilenceAtStart = 0
             nextTrackSilenceAtEnd = 0

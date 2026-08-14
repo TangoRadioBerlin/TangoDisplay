@@ -3355,6 +3355,7 @@ runAppearanceProfileResolutionTests()
 runPlaylistIndexClampTests()
 runGenreListCodecTests()
 runMissingFileDropTests()
+runAutoGapOverrideTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3784,6 +3785,35 @@ func runMissingFileDropTests() {
 
         test("feedback nil when nothing was skipped") {
             try expectNil(SetlistDropRules.dropFeedbackMessage(added: 4, skippedDuplicates: 0, missing: 0))
+        }
+    }
+}
+
+// MARK: - Tri-state auto-gap override
+
+func runAutoGapOverrideTests() {
+    suite("AutoGap — tri-state override resolution") {
+        test("nil override follows first-track rule") {
+            try expect(effectiveAutoGapIgnored(override: nil, isFirstTrack: true, ignoreFirstTrack: true))
+            try expect(!effectiveAutoGapIgnored(override: nil, isFirstTrack: false, ignoreFirstTrack: true))
+            try expect(!effectiveAutoGapIgnored(override: nil, isFirstTrack: true, ignoreFirstTrack: false))
+        }
+
+        test("true override forces skip regardless of position") {
+            try expect(effectiveAutoGapIgnored(override: true, isFirstTrack: false, ignoreFirstTrack: false))
+        }
+
+        test("false override forces apply even on first track") {
+            try expect(!effectiveAutoGapIgnored(override: false, isFirstTrack: true, ignoreFirstTrack: true))
+        }
+
+        test("legacy true migrates to force-skip") {
+            try expectEqual(migratedAutoGapOverride(legacyIgnores: true), true)
+        }
+
+        test("legacy false or absent migrates to follow-global (nil)") {
+            try expectNil(migratedAutoGapOverride(legacyIgnores: false))
+            try expectNil(migratedAutoGapOverride(legacyIgnores: nil))
         }
     }
 }

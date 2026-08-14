@@ -30,6 +30,20 @@ public struct AutoGapPlan: Equatable {
 ///   silence, trim its trailing silence, and insert exactly `target` (the previous track's tail was
 ///   trimmed when it was loaded, so it doesn't count here). `safetyMargin` seconds of the detected
 ///   silence are kept at each end so misclassified quiet music is never cut.
+/// Resolves the per-entry tri-state auto-gap override (nil = follow the global
+/// first-track rule; true = force skip; false = force apply). Assumes auto-gap
+/// is globally enabled.
+public func effectiveAutoGapIgnored(override: Bool?, isFirstTrack: Bool, ignoreFirstTrack: Bool) -> Bool {
+    override ?? (ignoreFirstTrack && isFirstTrack)
+}
+
+/// One-time migration of the legacy boolean `ignoresAutoGap` flag: an explicit
+/// skip stays a forced skip; the legacy default (false/absent) becomes
+/// "follow the global rule" rather than a forced apply.
+public func migratedAutoGapOverride(legacyIgnores: Bool?) -> Bool? {
+    legacyIgnores == true ? true : nil
+}
+
 public func autoGapPlan(leading: Double, trailing: Double, prevEnd: Double,
                         target: Double, force: Bool,
                         safetyMargin: Double = AutoGapPlan.defaultSafetyMargin) -> AutoGapPlan {

@@ -37,10 +37,10 @@ enum SetTimingsItems {
             if contributes {
                 let isActive = (elapsedForItem != nil)   // playing / current entry → no preceding gap
                 if !isActive {
-                    addLeadingGap = autoGapEnabled && !entry.ignoresAutoGap
-                    if !firstContributingSeen && setNotStarted && autoGapIgnoreFirstTrack {
-                        addLeadingGap = false
-                    }
+                    let isFirst = !firstContributingSeen && setNotStarted
+                    addLeadingGap = autoGapEnabled &&
+                        !entry.autoGapIgnored(isFirstTrack: isFirst,
+                                              ignoreFirstTrack: autoGapIgnoreFirstTrack)
                 }
                 firstContributingSeen = true
             }
