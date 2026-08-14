@@ -903,6 +903,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             let sr = file.fileFormat.sampleRate
             var startFrame: AVAudioFramePosition = 0
             var segmentFrames = AVAudioFrameCount(file.length)
+            var forceSkipLeading = 0.0
+            var forceTrimTrailing = 0.0
 
             let autoGapIgnored = entry.autoGapIgnored(isFirstTrack: isFirstTrack,
                                                       ignoreFirstTrack: settings.autoGapIgnoreFirstTrack)
@@ -922,21 +924,11 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                         target: settings.autoGapDuration,
                         force: settings.autoGapForceLength
                     )
-                    // Force mode: trim this track's leading/trailing silence by playing only the
-                    // audible segment. elapsed/duration track the real file position via seekOffset.
+                    // Force mode: trim this track's leading/trailing silence — recorded here,
+                    // applied via the combined playback window below.
                     if settings.autoGapForceLength {
-                        let lead = AVAudioFramePosition(max(0, plan.skipLeading) * sr)
-                        let trail = AVAudioFramePosition(max(0, plan.trimTrailing) * sr)
-                        let audible = file.length - lead - trail
-                        if audible > 0 {
-                            startFrame = lead
-                            segmentFrames = AVAudioFrameCount(audible)
-                            seekOffset = plan.skipLeading
-                            elapsed = plan.skipLeading
-                            duration = Double(file.length - trail) / sr
-                            autoGapLeadingTrim = plan.skipLeading
-                            autoGapTrailingTrim = plan.trimTrailing
-                        }
+                        forceSkipLeading = max(0, plan.skipLeading)
+                        forceTrimTrailing = max(0, plan.trimTrailing)
                     }
                     if plan.insert > 0 {
                         let frames = AVAudioFrameCount(plan.insert * sr)
@@ -963,6 +955,25 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             }
             setlist.setAutoGapApplied(id: entry.id, applied: autoGapApplied)
             preparedAutoGap = nil
+
+            // Combine the user trim (Track Start & End Time) with the force-mode silence
+            // trims into one playback window. elapsed/duration keep tracking real file
+            // positions via seekOffset; a degenerate window plays the full file instead.
+            let fullSeconds = Double(file.length) / sr
+            let window = playbackWindow(duration: fullSeconds,
+                                        trimStart: entry.trimStartSeconds,
+                                        trimEnd: entry.trimEndSeconds,
+                                        skipLeading: forceSkipLeading,
+                                        trimTrailing: forceTrimTrailing)
+            if window.end > window.start, (window.start > 0 || window.end < fullSeconds) {
+                startFrame = AVAudioFramePosition(window.start * sr)
+                segmentFrames = AVAudioFrameCount(AVAudioFramePosition(window.end * sr) - startFrame)
+                seekOffset = window.start
+                elapsed = window.start
+                duration = window.end
+                autoGapLeadingTrim = forceSkipLeading
+                autoGapTrailingTrim = forceTrimTrailing
+            }
 
             playerNode.scheduleSegment(file, startingFrame: startFrame, frameCount: segmentFrames,
                                        at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in

@@ -3358,6 +3358,7 @@ runMissingFileDropTests()
 runAutoGapOverrideTests()
 runPreparedAutoGapTests()
 runRepeatTrackRulesTests()
+runPlaybackWindowTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3885,6 +3886,54 @@ func runRepeatTrackRulesTests() {
             try expect(SetlistOrderRules.shouldRepeat(repeatTrack: true, shouldStop: false))
             try expect(!SetlistOrderRules.shouldRepeat(repeatTrack: true, shouldStop: true))
             try expect(!SetlistOrderRules.shouldRepeat(repeatTrack: false, shouldStop: false))
+        }
+    }
+}
+
+// MARK: - Playback window (user trim × force-trim)
+
+func runPlaybackWindowTests() {
+    suite("playbackWindow — user trim combined with force-mode silence trims") {
+        test("no trim and no force plays the whole file") {
+            let w = playbackWindow(duration: 180, trimStart: nil, trimEnd: nil)
+            try expectEqual(w.start, 0)
+            try expectEqual(w.end, 180)
+        }
+
+        test("user start trim alone") {
+            let w = playbackWindow(duration: 180, trimStart: 30, trimEnd: nil)
+            try expectEqual(w.start, 30)
+            try expectEqual(w.end, 180)
+        }
+
+        test("user end trim alone") {
+            let w = playbackWindow(duration: 180, trimStart: nil, trimEnd: 150)
+            try expectEqual(w.start, 0)
+            try expectEqual(w.end, 150)
+        }
+
+        test("trim values clamp to the file duration") {
+            let w = playbackWindow(duration: 180, trimStart: -5, trimEnd: 500)
+            try expectEqual(w.start, 0)
+            try expectEqual(w.end, 180)
+        }
+
+        test("force-mode silence trims combine with the user trim") {
+            // Silence window [2, 177]; user trim [30, 150] lies inside → user wins.
+            let w = playbackWindow(duration: 180, trimStart: 30, trimEnd: 150,
+                                   skipLeading: 2, trimTrailing: 3)
+            try expectEqual(w.start, 30)
+            try expectEqual(w.end, 150)
+            // User trim wider than the silence window → the silence trims win.
+            let w2 = playbackWindow(duration: 180, trimStart: 1, trimEnd: 179,
+                                    skipLeading: 2, trimTrailing: 3)
+            try expectEqual(w2.start, 2)
+            try expectEqual(w2.end, 177)
+        }
+
+        test("degenerate trim yields an empty window for the caller to reject") {
+            let w = playbackWindow(duration: 180, trimStart: 150, trimEnd: 30)
+            try expect(w.end <= w.start)
         }
     }
 }

@@ -40,6 +40,9 @@ final class AppState: ObservableObject {
     /// selected `previewScene` instead of the live playback state, so positioning is WYSIWYG on the
     /// actual second display while editing. Transient; never persisted.
     @Published var mirrorPreviewSceneOnPresentation: Bool = false
+
+    /// Entry the "Track start & end time" editor window operates on (right-clicked entry).
+    @Published var trimEditorEntryID: UUID? = nil
     /// Album artwork for the current dance track. Nil during cortinas and idle.
     @Published private(set) var currentArtwork: NSImage? = nil
     /// persistentID of the track whose artwork is currently displayed; drives transition identity.

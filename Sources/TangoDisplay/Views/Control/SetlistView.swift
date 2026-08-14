@@ -509,6 +509,7 @@ struct SetlistView: View {
     @State private var showPluginChainPopover = false
     @State private var scrollTrigger: UUID? = nil
     @State private var pendingRepeatID: UUID? = nil   // repeat requested on a stop-after track → confirm switch
+    @Environment(\.openWindow) private var openWindow
     @State private var showLastTandaWarning = false
     @State private var pasteMonitor: Any? = nil
     // Option-hover over a row shows the running time up to that track in the status bar.
@@ -1103,6 +1104,17 @@ struct SetlistView: View {
                     }
                 }
             }
+            // Track start & end time: single track, built-in player only (only it can enforce the trim)
+            if appState.localPlayer != nil {
+                Divider()
+                Button("Track Start & End Time…") {
+                    appState.trimEditorEntryID = id
+                    openWindow(id: "trackTiming")
+                }
+                if e.trimStartSeconds != nil || e.trimEndSeconds != nil {
+                    Button("Clear Start & End Time") { setlist.clearTrim(for: id) }
+                }
+            }
             if e.state == .queued || e.state == .paused {
                 // Tri-state: the button shows/toggles the *effective* state, so on a
                 // first track auto-skipped by the global rule it reads "Resume" and
@@ -1666,6 +1678,14 @@ struct SetlistRowView: View {
 
     private var isCurrent: Bool { entry.state == .playing || entry.state == .paused || isActivelyPlaying }
     private var isCurrentPlaying: Bool { entry.state == .playing || isActivelyPlaying }
+    private var trimBadgeText: String {
+        func fmt(_ s: Double) -> String {
+            let i = Int(max(0, s).rounded()); return String(format: "%d:%02d", i / 60, i % 60)
+        }
+        let start = entry.trimStartSeconds ?? 0
+        let end = entry.trimEndSeconds ?? entry.duration ?? 0
+        return "\(fmt(start))–\(fmt(end))"
+    }
     private var isBoldBright: Bool {
         guard entry.state == .queued, !isNextToPlay, !isCurrent else { return false }
         return !genreColorsEnabled || isCortina
@@ -1747,6 +1767,15 @@ struct SetlistRowView: View {
                     Image(systemName: "repeat")
                         .font(.system(size: 11))
                         .foregroundColor(.blue)
+                }
+                if entry.trimStartSeconds != nil || entry.trimEndSeconds != nil {
+                    Label(trimBadgeText, systemImage: "timeline.selection")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.12))
+                        .clipShape(Capsule())
                 }
                 if entry.autoGapApplied {
                     Image(systemName: "wave.3.left.circle.fill")

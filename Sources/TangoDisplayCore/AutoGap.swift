@@ -30,6 +30,23 @@ public struct AutoGapPlan: Equatable {
 ///   silence, trim its trailing silence, and insert exactly `target` (the previous track's tail was
 ///   trimmed when it was loaded, so it doesn't count here). `safetyMargin` seconds of the detected
 ///   silence are kept at each end so misclassified quiet music is never cut.
+/// Effective playback window of a file, in seconds, combining a user-set trim
+/// (`trimStart`/`trimEnd`, nil = untrimmed end) with force-mode silence trims
+/// (`skipLeading`/`trimTrailing`). Both constraints apply: playback starts at
+/// the later of the two starts and ends at the earlier of the two ends, each
+/// clamped to `[0, duration]`. A degenerate result (`end <= start`) means the
+/// constraints conflict — the caller plays the full file instead.
+public func playbackWindow(duration: Double, trimStart: Double?, trimEnd: Double?,
+                           skipLeading: Double = 0, trimTrailing: Double = 0)
+    -> (start: Double, end: Double) {
+    let dur = max(0, duration)
+    var start = min(max(0, skipLeading), dur)
+    var end = max(0, dur - max(0, trimTrailing))
+    if let t = trimStart { start = max(start, min(max(0, t), dur)) }
+    if let t = trimEnd { end = min(end, min(max(0, t), dur)) }
+    return (start, end)
+}
+
 /// Silence analysis bound to a specific (current, next) transition.
 ///
 /// The background analysis for "track A ends, track B starts" finishes long

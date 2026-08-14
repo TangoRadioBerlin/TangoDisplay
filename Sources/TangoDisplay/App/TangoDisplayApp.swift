@@ -54,6 +54,14 @@ struct TangoDisplayApp: App {
         }
         .defaultSize(width: 580, height: 530)
 
+        // Track start & end time editor — trims playback to a sub-range (built-in player only)
+        Window("Track start & end time", id: "trackTiming") {
+            TrackTimingWindowContent()
+                .environmentObject(appState)
+                .environmentObject(appState.settings)
+        }
+        .defaultSize(width: 700, height: 160)
+
         // Presentation window — WindowGroup allows dragging to external monitors
         WindowGroup(id: "presentation") {
             PresentationView()
