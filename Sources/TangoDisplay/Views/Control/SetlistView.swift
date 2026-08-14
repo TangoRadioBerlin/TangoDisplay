@@ -700,20 +700,24 @@ struct SetlistView: View {
             }
         }
 
+        // Import Music's per-track start/stop into trim markers only when the built-in
+        // player is active — trim only affects playback there, matching the editor gate.
+        let importMusicTimes = appState.localPlayer != nil
+
         guard !valid.isEmpty else {
             missingOnlyFeedback()
             return
         }
 
         guard settings.duplicateTrackProtection else {
-            setlist.insertURLs(valid, before: anchorID)
+            setlist.insertURLs(valid, before: anchorID, importMusicTimes: importMusicTimes)
             missingOnlyFeedback()
             return
         }
 
         let existingURLs = Set(setlist.entries.map(\.fileURL))
         guard valid.contains(where: { existingURLs.contains($0) }) else {
-            setlist.insertURLs(valid, before: anchorID)
+            setlist.insertURLs(valid, before: anchorID, importMusicTimes: importMusicTimes)
             missingOnlyFeedback()
             return
         }
@@ -734,7 +738,7 @@ struct SetlistView: View {
         }
 
         let toInsert = shouldAddDuplicates ? valid : valid.filter { !existingURLs.contains($0) }
-        if !toInsert.isEmpty { setlist.insertURLs(toInsert, before: anchorID) }
+        if !toInsert.isEmpty { setlist.insertURLs(toInsert, before: anchorID, importMusicTimes: importMusicTimes) }
 
         if let msg = SetlistDropRules.dropFeedbackMessage(added: toInsert.count,
                                                           skippedDuplicates: valid.count - toInsert.count,

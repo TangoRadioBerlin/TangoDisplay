@@ -3,6 +3,7 @@ import AVFoundation
 import AudioToolbox
 import Combine
 import Foundation
+import iTunesLibrary
 import TangoDisplayCore
 
 enum SetlistEntryState: String, Codable {
@@ -128,7 +129,7 @@ final class SetlistManager: ObservableObject {
     // anchorID is the UUID of the entry to insert before; nil means append to end.
     // Capturing a UUID (rather than an Int) prevents stale-index bugs when the
     // list mutates during the async metadata read.
-    func insertURLs(_ urls: [URL], before anchorID: UUID?) {
+    func insertURLs(_ urls: [URL], before anchorID: UUID?, importMusicTimes: Bool = false) {
         let audioURLs = urls.filter { isAudioURL($0) }
         guard !audioURLs.isEmpty else { return }
         // Insert filename placeholders immediately so rows appear at once;
@@ -145,8 +146,18 @@ final class SetlistManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let track = await SetlistManager.readMetadata(from: url)
+                // Trim from Music's per-track start/stop (Song Info → Options), only when the
+                // built-in player is active. Read off the main actor — the first call forces a
+                // whole-library ITLibrary enumeration that would otherwise hang the drop.
+                let trim = importMusicTimes
+                    ? await SetlistManager.musicTrimAsync(url.path)
+                    : (start: nil, end: nil)
                 guard let i = self.entries.firstIndex(where: { $0.id == id }) else { return }
                 self.entries[i].track = track
+                if importMusicTimes {
+                    self.entries[i].trimStartSeconds = trim.start
+                    self.entries[i].trimEndSeconds = trim.end
+                }
                 // Re-apply genre-colour now that we have a real genre.
                 if let color = self.newEntryTagColorProvider?(track) {
                     self.entries[i].tagColor = color
@@ -647,6 +658,32 @@ final class SetlistManager: ObservableObject {
     // and was never embedded in the file's tags.
     // Returns [:] silently if the XML is absent, unreadable, or malformed — no errors thrown.
     private static let iTunesLibrary: [String: iTunesLibraryEntry] = loadITunesLibrary()
+
+    // Music's per-track start/stop (Song Info → Options), keyed by iTunes-media-relative path.
+    // Read via the iTunesLibrary framework so it works without the deprecated "Share Library
+    // XML" preference. Times are milliseconds. Whole-library enumeration once per session;
+    // if users change Music start/stop mid-session, add an invalidate-on-drop refresh.
+    private static let musicTrimTimes: [String: (startMs: Int, stopMs: Int, totalMs: Int)] = loadMusicTrimTimes()
+
+    private static func loadMusicTrimTimes() -> [String: (startMs: Int, stopMs: Int, totalMs: Int)] {
+        guard let lib = try? ITLibrary(apiVersion: "1.1") else { return [:] }
+        var result: [String: (startMs: Int, stopMs: Int, totalMs: Int)] = [:]
+        for item in lib.allMediaItems {
+            guard let loc = item.location, loc.isFileURL else { continue }
+            result[iTunesMediaRelativeKey(loc.path)] = (item.startTime, item.stopTime, item.totalTime)
+        }
+        return result
+    }
+
+    static func musicTrim(for path: String) -> (start: Double?, end: Double?) {
+        guard let t = musicTrimTimes[iTunesMediaRelativeKey(path)] else { return (nil, nil) }
+        return musicTrimSeconds(startMs: t.startMs, stopMs: t.stopMs, totalMs: t.totalMs)
+    }
+
+    // Runs the (first-call) whole-library ITLibrary enumeration off the main actor.
+    nonisolated static func musicTrimAsync(_ path: String) async -> (start: Double?, end: Double?) {
+        musicTrim(for: path)
+    }
 
     // Artist+title → genre lookup for players (e.g. MegaSeg) that expose no file path.
     // Parsed separately so the existing path-keyed lookup is unaffected.

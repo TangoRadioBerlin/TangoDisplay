@@ -3359,6 +3359,7 @@ runAutoGapOverrideTests()
 runPreparedAutoGapTests()
 runRepeatTrackRulesTests()
 runPlaybackWindowTests()
+runMusicTrimTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3934,6 +3935,28 @@ func runPlaybackWindowTests() {
         test("degenerate trim yields an empty window for the caller to reject") {
             let w = playbackWindow(duration: 180, trimStart: 150, trimEnd: 30)
             try expect(w.end <= w.start)
+        }
+    }
+}
+
+// MARK: - Music start/stop → trim seconds
+
+func runMusicTrimTests() {
+    suite("musicTrimSeconds — Music start/stop import") {
+        test("custom start and stop convert ms→s") {
+            let r = musicTrimSeconds(startMs: 5000, stopMs: 150000, totalMs: 180000)
+            try expectEqual(r.start, 5.0)
+            try expectEqual(r.end, 150.0)
+        }
+        test("no start, stop == total → no trim") {
+            let r = musicTrimSeconds(startMs: 0, stopMs: 180000, totalMs: 180000)
+            try expectNil(r.start)
+            try expectNil(r.end)
+        }
+        test("all zero → no trim") {
+            let r = musicTrimSeconds(startMs: 0, stopMs: 0, totalMs: 180000)
+            try expectNil(r.start)
+            try expectNil(r.end)
         }
     }
 }
