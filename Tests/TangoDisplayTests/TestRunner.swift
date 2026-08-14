@@ -3352,6 +3352,7 @@ runRemoteProtocolV2Tests()
 runRemoteProtocolV2Slice2Tests()
 runSetlistDropRulesTests()
 runAppearanceProfileResolutionTests()
+runPlaylistIndexClampTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3672,6 +3673,32 @@ func runAppearanceProfileResolutionTests() {
         test("empty profiles list with set ID — returns current") {
             let result = AppearanceProfileResolution.resolve(activeID: id, in: [], current: current)
             try expectEqual(result.id, current.id)
+        }
+    }
+}
+
+// MARK: - JRiver playlist index clamp
+
+func runPlaylistIndexClampTests() {
+    // Mirrors the safeIndex computation in JRiverPoller.fetchPlaylistRange.
+    // JRiver reports PlayingNowPosition = -1 when no valid current position
+    // (rapid playlist rebuild) — the index fed to handlePlaylistUpdate must
+    // never be negative, or tracks[playlistCurrentIndex] traps out of bounds.
+    func safeIndex(currentPlayingIndex: Int, lookback: Int, trackCount: Int) -> Int {
+        let adjustedIndex = min(lookback, currentPlayingIndex)
+        return max(0, min(adjustedIndex, trackCount - 1))
+    }
+
+    suite("JRiver playlist index clamp") {
+        test("negative PlayingNowPosition clamps to 0") {
+            try expectEqual(safeIndex(currentPlayingIndex: -1, lookback: 5, trackCount: 16), 0)
+        }
+        test("normal position clamps to lookback") {
+            try expectEqual(safeIndex(currentPlayingIndex: 20, lookback: 5, trackCount: 16), 5)
+        }
+        test("small playlist clamps to last index") {
+            try expectEqual(safeIndex(currentPlayingIndex: 0, lookback: 5, trackCount: 3), 0)
+            try expectEqual(safeIndex(currentPlayingIndex: 10, lookback: 5, trackCount: 3), 2)
         }
     }
 }

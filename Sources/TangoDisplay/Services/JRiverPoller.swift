@@ -286,7 +286,9 @@ final class JRiverPoller: MusicPlayerSource {
             guard !tracks.isEmpty else { return }
 
             let adjustedIndex = min(lookback, self.currentPlayingIndex)
-            let safeIndex = min(adjustedIndex, tracks.count - 1)
+            // Clamp low too: JRiver reports PlayingNowPosition = -1 when no valid current
+            // position (e.g. rapid playlist rebuild), which would yield a negative index.
+            let safeIndex = max(0, min(adjustedIndex, tracks.count - 1))
             DispatchQueue.main.async {
                 self.onPlaylistUpdate((tracks: tracks, currentIndex: safeIndex))
             }

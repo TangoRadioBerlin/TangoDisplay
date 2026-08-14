@@ -694,7 +694,7 @@ final class AppState: ObservableObject {
             let detector = settings.makeDetector()
             if let tracks = playlistTracks {
                 // Primary check: prefer the stored index (handles duplicate-cortina setlists).
-                if playlistCurrentIndex < tracks.count,
+                if tracks.indices.contains(playlistCurrentIndex),
                    tracks[playlistCurrentIndex].persistentID == currentTrack.persistentID {
                     var nextFromPlaylist = findNextDanceTrack(after: playlistCurrentIndex, detector: detector)
                     // Prefer lastKnownNextTrack when PIDs match: it was fetched via
