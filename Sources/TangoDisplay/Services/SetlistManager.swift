@@ -317,6 +317,9 @@ final class SetlistManager: ObservableObject {
 
     func setRepeat(_ value: Bool, for id: UUID) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
+        // No-op when unchanged: the fade actions clear repeat unconditionally on
+        // every fade, which would otherwise save() each time.
+        guard entries[i].repeatTrack != value else { return }
         entries[i].repeatTrack = value
         // stop-after and repeat are mutually exclusive on the same entry
         if value {

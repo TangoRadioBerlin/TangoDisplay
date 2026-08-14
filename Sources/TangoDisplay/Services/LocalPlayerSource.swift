@@ -1035,8 +1035,11 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                                                           trimEnd: outTrimEnd)
                 let effLeading = effectiveLeadingSilence(leading: lead, trimStart: inTrimStart)
                 await MainActor.run { [weak self] in
-                    // Discard results from a superseded load (e.g. user skipped before analysis finished).
-                    guard let self, self.scheduleGeneration == gen else { return }
+                    // Discard results from a superseded load (another entry started before
+                    // the analysis finished). Deliberately NOT the generation counter — a
+                    // seek inside the same track bumps it and would needlessly throw the
+                    // finished analysis away; staleness is caught by the ID pair in plan().
+                    guard let self, self.currentEntryID == currentID else { return }
                     self.preparedAutoGap = PreparedAutoGap(
                         currentID: currentID,
                         nextID: nextID,

@@ -91,7 +91,11 @@ private struct TrackTimingEditor: View {
             let data = await WaveformOverview.shared.overview(url: entry.fileURL)
             if !data.peaks.isEmpty {
                 waveform = data
-                if fullDuration <= 0 { fullDuration = Self.fileDuration(url: entry.fileURL) }
+                if fullDuration <= 0 {
+                    // Off-main: opening the file can stall on slow (NAS) volumes.
+                    let url = entry.fileURL
+                    fullDuration = await Task.detached { Self.fileDuration(url: url) }.value
+                }
                 // Clamp defaults to the loaded duration now it's known.
                 if endSec <= 0 || endSec > fullDuration { endSec = fullDuration }
                 startSec = min(startSec, max(0, endSec - minGap))
@@ -110,7 +114,7 @@ private struct TrackTimingEditor: View {
         syncTextFromState()
     }
 
-    private static func fileDuration(url: URL) -> Double {
+    private nonisolated static func fileDuration(url: URL) -> Double {
         guard let f = try? AVAudioFile(forReading: url), f.fileFormat.sampleRate > 0 else { return 0 }
         return Double(f.length) / f.fileFormat.sampleRate
     }
