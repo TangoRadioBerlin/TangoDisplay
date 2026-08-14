@@ -39,6 +39,10 @@ You can also **copy** audio files in Finder, Music.app, Swinsian, or Foobar2000 
 
 **Supported formats:** MP3, M4A (AAC), AIFF, WAV, FLAC, CAF, Opus.
 
+When the built-in player is active, dropping tracks from Music also imports each track's **start/stop times** (set in Music under Song Info → Options) as playback trim markers automatically — see [Track Start & End Time](#track-start--end-time) below.
+
+Dragged tracks whose files no longer exist on disk (shown with a warning triangle in Music) are skipped with a brief "N files not found" note, so they can't silently fail at playback later.
+
 #### Duplicate Track Protection
 
 When **Duplicate track protection** is enabled in **Player Settings**, dropping a track that is already in the setlist (played or unplayed) shows an alert:
@@ -66,6 +70,8 @@ Each row shows:
 | Duration | Optional — toggle in Player Settings |
 | Comments / Album Artist | Optional — toggle in Player Settings |
 | Stop marker | Small stop icon when "Stop After This Track" is set |
+| Repeat icon | Blue repeat icon when the track is set to Repeat |
+| Trim badge | Blue start–end badge when a Track Start & End Time trim is set |
 | Auto-gap icon | Filled green wave = auto-gap silence applied before this track · Outlined grey wave = skipped or ignored |
 | Last Tanda flag | Red flag icon = this cortina is marked as the last tanda and will activate the Last Tanda label when it plays |
 | Progress bar | Appears beneath the currently-playing row: shows elapsed position, remaining time, the mark-as-played threshold marker, and the auto-fade marker (for cortinas when Auto-fade is enabled) |
@@ -140,7 +146,9 @@ Right-click any row:
 |---|---|
 | **Mark as Played** | Stamps a queued track as played without playing it |
 | **Mark as Not Played** | Resets a played track to queued so it will play again |
-| **Stop after Playing** | Sets a stop marker — playback halts automatically when this track finishes. Can also be set on the currently playing track. Shows as **Resume after Playing** when already set; click again to clear it. |
+| **Stop after Playing** | Sets a stop marker — playback halts automatically when this track finishes. Can also be set on the currently playing track. Shows as **Resume after Playing** when already set; click again to clear it. Setting it clears any Repeat on the same track. |
+| **Repeat Track** | Loops a non-dance track — it replays continuously until you clear the repeat or it hits a stop-after marker. A blue repeat icon appears on the row. Shows as **Stop Repeating** when already set. Mutually exclusive with Stop after Playing (marking Repeat on a stop-after track prompts to switch). Any fade action (Fade & Stop, Fade & Continue, auto-fade) clears the repeat. |
+| **Track Start & End Time…** | Opens an editor to trim playback to a sub-range of the track, so you can replay it from a mid-point (e.g. during applause after a performance). Works on any track. Shows a blue start–end badge on the row once set, and **Clear Start & End Time** to remove it. See [Track Start & End Time](#track-start--end-time) below. Built-in player only. |
 | **Delete** | Removes the track from the setlist (asks for confirmation) |
 | **Ignore Auto-gap before this Track** | Disables auto-gap for this track only. Shows as **Resume Auto-gap** when already set; click again to re-enable it. |
 | **Skip Auto-fade** | Disables auto-fade for this cortina track only, re-enabling the Fade & Stop and Fade & Continue buttons for manual control. Available only when Auto-fade is enabled and fading has not yet started. |
@@ -153,6 +161,25 @@ Right-click any row:
 ### Stop After Playing
 
 When **Stop after Playing** is set on a row, a small stop icon appears in that row and playback halts automatically when that track completes. Right-click the same row again and select **Resume after Playing** to clear the marker. Only one stop marker can be active at a time.
+
+### Track Start & End Time
+
+Sometimes you want to replay a track from part-way through — for example while a performing couple take an applause. **Track Start & End Time** lets you trim any track (dance or cortina) to a sub-range so playback starts and stops where you choose.
+
+Right-click a row and select **Track Start & End Time…** to open the editor window. It shows the track's waveform with two controls for setting the range:
+
+- **Drag the handles** — a green handle at the start and a red handle at the end of the waveform. The part of the waveform outside your selection is dulled so the chosen range stands out.
+- **Type the times** — enter a **Start** and **End** time manually in `m:ss.d` format (tenths of a second are supported, e.g. `1:05.4`). The end time cannot be earlier than the start.
+
+Click **Apply** to save (or **Cancel** to discard). The row then shows a blue **start–end** badge. To remove the trim, right-click the row and choose **Clear Start & End Time**.
+
+Notes:
+
+- Playback begins at the start time and stops at the end time, then advances as normal.
+- Combine with **Repeat Track** to loop just the trimmed range continuously.
+- This is enforced by the built-in player only, so the menu action appears when the built-in player is the active source.
+- Tracks dropped from Music while the built-in player is active have their start/stop times (Song Info → Options) imported as trim markers automatically, so you don't need to re-enter them here. You can still adjust or clear them afterwards.
+- Auto-gap accounts for the trim: silence cut off by a trim is never counted toward the gap between tracks.
 
 ### Clearing the Setlist
 
