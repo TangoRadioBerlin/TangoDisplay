@@ -3357,6 +3357,7 @@ runGenreListCodecTests()
 runMissingFileDropTests()
 runAutoGapOverrideTests()
 runPreparedAutoGapTests()
+runRepeatTrackRulesTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3861,6 +3862,29 @@ func runPreparedAutoGapTests() {
             try expectEqual(fallback.insert, 3.0)
             try expectEqual(fallback.skipLeading, 0)
             try expectEqual(fallback.trimTrailing, 0)
+        }
+    }
+}
+
+// MARK: - Repeat ↔ stop-after exclusivity
+
+func runRepeatTrackRulesTests() {
+    suite("SetlistOrderRules — repeat/stop-after exclusivity") {
+        test("setting repeat clears stop-after on the same entry") {
+            let id = UUID()
+            try expectNil(SetlistOrderRules.stopAfterAfterSettingRepeat(stopAfterID: id, repeatID: id))
+        }
+
+        test("setting repeat keeps a stop-after marker elsewhere") {
+            let other = UUID()
+            try expectEqual(SetlistOrderRules.stopAfterAfterSettingRepeat(stopAfterID: other, repeatID: UUID()), other)
+            try expectNil(SetlistOrderRules.stopAfterAfterSettingRepeat(stopAfterID: nil, repeatID: UUID()))
+        }
+
+        test("stop-after always wins over repeat") {
+            try expect(SetlistOrderRules.shouldRepeat(repeatTrack: true, shouldStop: false))
+            try expect(!SetlistOrderRules.shouldRepeat(repeatTrack: true, shouldStop: true))
+            try expect(!SetlistOrderRules.shouldRepeat(repeatTrack: false, shouldStop: false))
         }
     }
 }

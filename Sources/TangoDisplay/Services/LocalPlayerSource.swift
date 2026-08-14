@@ -733,6 +733,14 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     func skipNext() {
         guard let id = currentEntryID else { play(); return }
         let shouldStop = shouldStopAfter(id)
+        // Repeat: loop the same non-dance track (stop-after wins via shouldStop above)
+        if !shouldStop, let entry = setlist.entries.first(where: { $0.id == id }), entry.repeatTrack {
+            loadEntry(entry, bypassAutoGap: true)
+            playerNode.play()
+            isActivePlaying = true
+            reportCurrentState()
+            return
+        }
         setlist.markPlayed(id: id)
         if id == setlist.stopAfterEntryID { setlist.stopAfterEntryID = nil }
         if !shouldStop, let next = setlist.firstUnplayed(after: id) {
@@ -759,6 +767,14 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     func skipNextImmediate() {
         guard let id = currentEntryID else { play(); return }
         let shouldStop = shouldStopAfter(id)
+        // Repeat: loop the same non-dance track (stop-after wins via shouldStop above)
+        if !shouldStop, let entry = setlist.entries.first(where: { $0.id == id }), entry.repeatTrack {
+            loadEntry(entry, bypassAutoGap: true)
+            playerNode.play()
+            isActivePlaying = true
+            reportCurrentState()
+            return
+        }
         setlist.markPlayed(id: id)
         if id == setlist.stopAfterEntryID { setlist.stopAfterEntryID = nil }
         if !shouldStop, let next = setlist.firstUnplayed(after: id) {

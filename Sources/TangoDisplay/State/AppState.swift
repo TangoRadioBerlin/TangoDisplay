@@ -827,6 +827,7 @@ final class AppState: ObservableObject {
         if fadeMode == .fadeAndStop { cancelFade(); rescheduleAutoFadeIfNeeded(); return }
         cancelAutoFade()
         guard displayState.mode == .cortina, let player = localPlayer else { return }
+        if let id = player.currentEntryID { setlist.setRepeat(false, for: id) }
         preFadeVolume = player.volume
         fadeMode = .fadeAndStop
         fadeTask = Task { @MainActor [weak self] in
@@ -845,6 +846,7 @@ final class AppState: ObservableObject {
         if fadeMode == .fadeAndContinue { cancelFade(); rescheduleAutoFadeIfNeeded(); return }
         cancelAutoFade()
         guard displayState.mode == .cortina, let player = localPlayer else { return }
+        if let id = player.currentEntryID { setlist.setRepeat(false, for: id) }
         preFadeVolume = player.volume
         fadeMode = .fadeAndContinue
         fadeTask = Task { @MainActor [weak self] in
@@ -900,6 +902,7 @@ final class AppState: ObservableObject {
         autoFadeTask = nil
         guard settings.autoFadeCortinasEnabled else { return }
         guard let player = localPlayer, fadeMode == .none else { return }
+        if let id = player.currentEntryID { setlist.setRepeat(false, for: id) }
         preFadeVolume = player.volume
         fadeMode = .fadeAndContinue
         fadeTask = Task { @MainActor [weak self] in

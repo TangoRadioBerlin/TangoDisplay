@@ -67,4 +67,18 @@ public enum SetlistOrderRules {
                                      enforceContiguousPrefix: Bool) -> Set<Int> {
         enforceContiguousPrefix ? sanitizedUnplay(played: played, targets: targets) : targets
     }
+
+    // MARK: - Repeat ↔ stop-after exclusivity
+
+    /// Marking an entry as repeating clears a stop-after marker on the *same*
+    /// entry (the two are mutually exclusive); a marker elsewhere survives.
+    public static func stopAfterAfterSettingRepeat(stopAfterID: UUID?, repeatID: UUID) -> UUID? {
+        stopAfterID == repeatID ? nil : stopAfterID
+    }
+
+    /// Whether a finished entry may loop: repeat only when no stop condition
+    /// fired — stop-after always wins over repeat.
+    public static func shouldRepeat(repeatTrack: Bool, shouldStop: Bool) -> Bool {
+        repeatTrack && !shouldStop
+    }
 }

@@ -508,6 +508,7 @@ struct SetlistView: View {
     @State private var showReplayGainPopover = false
     @State private var showPluginChainPopover = false
     @State private var scrollTrigger: UUID? = nil
+    @State private var pendingRepeatID: UUID? = nil   // repeat requested on a stop-after track → confirm switch
     @State private var showLastTandaWarning = false
     @State private var pasteMonitor: Any? = nil
     // Option-hover over a row shows the running time up to that track in the status bar.
@@ -1045,6 +1046,17 @@ struct SetlistView: View {
         } message: {
             Text("Set the Last Tanda label text in Appearance Settings before marking a Last Tanda.")
         }
+        .alert("Track Set to Stop after Playing",
+               isPresented: Binding(get: { pendingRepeatID != nil },
+                                    set: { if !$0 { pendingRepeatID = nil } })) {
+            Button("Repeat Instead") {
+                if let id = pendingRepeatID { setlist.setRepeat(true, for: id) }
+                pendingRepeatID = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRepeatID = nil }
+        } message: {
+            Text("This track is marked Stop after Playing. Remove that and repeat it instead?")
+        }
     }
 
     private var deleteConfirmationTitle: String {
@@ -1074,9 +1086,21 @@ struct SetlistView: View {
             Divider()
             if e.state != .played || e.id == player.currentEntryID {
                 Button {
-                    setlist.stopAfterEntryID = (setlist.stopAfterEntryID == id) ? nil : id
+                    if setlist.stopAfterEntryID == id {
+                        setlist.stopAfterEntryID = nil
+                    } else {
+                        setlist.stopAfterEntryID = id
+                        setlist.setRepeat(false, for: id)   // stop-after supersedes repeat
+                    }
                 } label: {
                     Text(setlist.stopAfterEntryID == id ? "Resume after Playing" : "Stop after Playing")
+                }
+                Button(e.repeatTrack ? "Stop Repeating" : "Repeat Track") {
+                    if !e.repeatTrack && setlist.stopAfterEntryID == id {
+                        pendingRepeatID = id
+                    } else {
+                        setlist.setRepeat(!e.repeatTrack, for: id)
+                    }
                 }
             }
             if e.state == .queued || e.state == .paused {
@@ -1718,6 +1742,11 @@ struct SetlistRowView: View {
                     Image(systemName: "stop.circle")
                         .font(.system(size: 11))
                         .foregroundColor(.orange)
+                }
+                if entry.repeatTrack {
+                    Image(systemName: "repeat")
+                        .font(.system(size: 11))
+                        .foregroundColor(.blue)
                 }
                 if entry.autoGapApplied {
                     Image(systemName: "wave.3.left.circle.fill")

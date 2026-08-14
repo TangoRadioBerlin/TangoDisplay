@@ -26,12 +26,13 @@ struct SetlistEntry: Identifiable, Codable {
     var pluginConfigurationID: UUID? = nil
     var tagColor: TagColor = .none
     var isPerformance: Bool = false    // track is part of a guest performance
+    var repeatTrack: Bool = false      // non-dance track loops until stop-after or un-marked
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
     var clientRef: String? = nil       // opaque id from a remote controller (echoed in state.setlist[])
     var tandaRef: String? = nil        // opaque grouping hint from a remote controller (echoed)
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, clientRef, tandaRef
+        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, repeatTrack, clientRef, tandaRef
         // autoGapApplied is intentionally excluded — reset each playback session
     }
 
@@ -76,6 +77,7 @@ struct SetlistEntry: Identifiable, Codable {
             tagColor = .none
         }
         isPerformance = try c.decodeIfPresent(Bool.self, forKey: .isPerformance) ?? false
+        repeatTrack = try c.decodeIfPresent(Bool.self, forKey: .repeatTrack) ?? false
         clientRef = try c.decodeIfPresent(String.self, forKey: .clientRef)
         tandaRef = try c.decodeIfPresent(String.self, forKey: .tandaRef)
         autoGapApplied = false
@@ -286,6 +288,17 @@ final class SetlistManager: ObservableObject {
     func setAutoGapOverride(id: UUID, ignore: Bool) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[i].autoGapOverride = ignore
+        save()
+    }
+
+    func setRepeat(_ value: Bool, for id: UUID) {
+        guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[i].repeatTrack = value
+        // stop-after and repeat are mutually exclusive on the same entry
+        if value {
+            stopAfterEntryID = SetlistOrderRules.stopAfterAfterSettingRepeat(
+                stopAfterID: stopAfterEntryID, repeatID: id)
+        }
         save()
     }
 
