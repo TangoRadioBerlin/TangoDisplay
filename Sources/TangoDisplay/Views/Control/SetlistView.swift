@@ -682,14 +682,37 @@ struct SetlistView: View {
     // MARK: - Drop handling
 
     private func handleIncomingURLs(_ urls: [URL], anchorID: UUID?) {
+        // Reject files that no longer exist on disk (e.g. a Music track whose
+        // underlying file is missing — shown with a warning triangle in Music).
+        // Otherwise they enter the setlist and get silently skipped at playback.
+        // Runs post-deferral, so a slow (NAS) stat can beachball but never
+        // deadlock the drag; the watchdog attributes it via the breadcrumb.
+        let (valid, missingCount) = SetlistDropRules.partitionExisting(urls) {
+            FileManager.default.fileExists(atPath: $0.path)
+        }
+        func missingOnlyFeedback() {
+            if let msg = SetlistDropRules.dropFeedbackMessage(added: valid.count,
+                                                             skippedDuplicates: 0,
+                                                             missing: missingCount) {
+                showDropFeedback(msg)
+            }
+        }
+
+        guard !valid.isEmpty else {
+            missingOnlyFeedback()
+            return
+        }
+
         guard settings.duplicateTrackProtection else {
-            setlist.insertURLs(urls, before: anchorID)
+            setlist.insertURLs(valid, before: anchorID)
+            missingOnlyFeedback()
             return
         }
 
         let existingURLs = Set(setlist.entries.map(\.fileURL))
-        guard urls.contains(where: { existingURLs.contains($0) }) else {
-            setlist.insertURLs(urls, before: anchorID)
+        guard valid.contains(where: { existingURLs.contains($0) }) else {
+            setlist.insertURLs(valid, before: anchorID)
+            missingOnlyFeedback()
             return
         }
 
@@ -701,19 +724,20 @@ struct SetlistView: View {
             shouldAddDuplicates = false
         case nil:
             let playedURLs = Set(setlist.entries.compactMap { $0.state == .played ? $0.fileURL : nil })
-            let dup = SetlistDropRules.duplicateSummary(incoming: urls, existing: existingURLs, played: playedURLs)
+            let dup = SetlistDropRules.duplicateSummary(incoming: valid, existing: existingURLs, played: playedURLs)
             let (shouldAdd, remember) = promptForDuplicates(count: dup.duplicateCount,
                                                             alreadyPlayed: dup.anyAlreadyPlayed)
             if remember { setlist.setDuplicateSessionDecision(shouldAdd ? .alwaysAdd : .neverAdd) }
             shouldAddDuplicates = shouldAdd
         }
 
-        let toInsert = shouldAddDuplicates ? urls : urls.filter { !existingURLs.contains($0) }
+        let toInsert = shouldAddDuplicates ? valid : valid.filter { !existingURLs.contains($0) }
         if !toInsert.isEmpty { setlist.insertURLs(toInsert, before: anchorID) }
 
-        let skipped = urls.count - toInsert.count
-        if skipped > 0 {
-            showDropFeedback("Added \(toInsert.count) — \(skipped) already in set")
+        if let msg = SetlistDropRules.dropFeedbackMessage(added: toInsert.count,
+                                                          skippedDuplicates: valid.count - toInsert.count,
+                                                          missing: missingCount) {
+            showDropFeedback(msg)
         }
     }
 

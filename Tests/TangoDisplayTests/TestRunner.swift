@@ -3354,6 +3354,7 @@ runSetlistDropRulesTests()
 runAppearanceProfileResolutionTests()
 runPlaylistIndexClampTests()
 runGenreListCodecTests()
+runMissingFileDropTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3742,6 +3743,47 @@ func runGenreListCodecTests() {
             try expectEqual(viaLegacy, ["Tango"])
             let viaDefault = GenreListCodec.decode(data: corrupt, legacyCommaString: nil, default: ["D"])
             try expectEqual(viaDefault, ["D"])
+        }
+    }
+}
+
+// MARK: - Missing-file drop filtering
+
+func runMissingFileDropTests() {
+    let a = URL(fileURLWithPath: "/tmp/a.mp3")
+    let b = URL(fileURLWithPath: "/tmp/b.mp3")
+    let c = URL(fileURLWithPath: "/tmp/c.mp3")
+
+    suite("SetlistDropRules — missing-file filtering") {
+        test("partition keeps existing files in order, counts missing") {
+            let r = SetlistDropRules.partitionExisting([a, b, c]) { $0 != b }
+            try expectEqual(r.valid, [a, c])
+            try expectEqual(r.missingCount, 1)
+        }
+
+        test("partition with nothing missing") {
+            let r = SetlistDropRules.partitionExisting([a, b]) { _ in true }
+            try expectEqual(r.valid, [a, b])
+            try expectEqual(r.missingCount, 0)
+        }
+
+        test("missing note pluralises") {
+            try expectEqual(SetlistDropRules.missingFileNote(1), "1 file not found")
+            try expectEqual(SetlistDropRules.missingFileNote(3), "3 files not found")
+        }
+
+        test("feedback combines duplicates and missing") {
+            let msg = SetlistDropRules.dropFeedbackMessage(added: 2, skippedDuplicates: 1, missing: 2)
+            try expectEqual(msg, "Added 2 — 1 already in set — 2 files not found")
+        }
+
+        test("feedback with only missing files") {
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 3, skippedDuplicates: 0, missing: 1),
+                            "1 file not found")
+        }
+
+        test("feedback nil when nothing was skipped") {
+            try expectNil(SetlistDropRules.dropFeedbackMessage(added: 4, skippedDuplicates: 0, missing: 0))
         }
     }
 }
