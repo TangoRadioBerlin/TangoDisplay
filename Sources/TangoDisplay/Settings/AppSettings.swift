@@ -54,8 +54,7 @@ final class AppSettings: ObservableObject {
     }
     @Published var allowlistGenres: [String] {
         didSet {
-            UserDefaults.standard.set(allowlistGenres.joined(separator: ","),
-                                      forKey: kPrefix + "allowlistGenres")
+            AppSettings.saveGenreList(allowlistGenres, key: kPrefix + "allowlistGenres")
             // Prune partial-match entries no longer in the allowlist
             allowlistPartialMatchGenres = allowlistPartialMatchGenres.filter {
                 allowlistGenres.contains($0)
@@ -64,10 +63,8 @@ final class AppSettings: ObservableObject {
     }
     @Published var allowlistPartialMatchGenres: Set<String> {
         didSet {
-            UserDefaults.standard.set(
-                Array(allowlistPartialMatchGenres).joined(separator: ","),
-                forKey: kPrefix + "allowlistPartialMatchGenres"
-            )
+            AppSettings.saveGenreList(Array(allowlistPartialMatchGenres),
+                                      key: kPrefix + "allowlistPartialMatchGenres")
         }
     }
     @Published var useDenylist: Bool {
@@ -75,8 +72,7 @@ final class AppSettings: ObservableObject {
     }
     @Published var denylistGenres: [String] {
         didSet {
-            UserDefaults.standard.set(denylistGenres.joined(separator: ","),
-                                       forKey: kPrefix + "denylistGenres")
+            AppSettings.saveGenreList(denylistGenres, key: kPrefix + "denylistGenres")
             // Prune entries no longer in the denylist
             denylistPartialMatchGenres = denylistPartialMatchGenres.filter {
                 denylistGenres.contains($0)
@@ -88,10 +84,8 @@ final class AppSettings: ObservableObject {
     }
     @Published var denylistPartialMatchGenres: Set<String> {
         didSet {
-            UserDefaults.standard.set(
-                Array(denylistPartialMatchGenres).joined(separator: ","),
-                forKey: kPrefix + "denylistPartialMatchGenres"
-            )
+            AppSettings.saveGenreList(Array(denylistPartialMatchGenres),
+                                      key: kPrefix + "denylistPartialMatchGenres")
         }
     }
     @Published var denylistLabelOverrides: [String: String] {
@@ -419,21 +413,21 @@ final class AppSettings: ObservableObject {
         lastPlayedPrefix = ud.string(forKey: kPrefix + "lastPlayedPrefix") ?? "prev. Song: "
         useAllowlist  = ud.object(forKey: kPrefix + "useAllowlist")
                            .flatMap { $0 as? Bool } ?? true
-        allowlistGenres = AppSettings.parseGenres(
-            ud.string(forKey: kPrefix + "allowlistGenres"), default: ["Cortina"])
-        allowlistPartialMatchGenres = Set(AppSettings.parseGenres(
-            ud.string(forKey: kPrefix + "allowlistPartialMatchGenres"), default: []))
+        allowlistGenres = AppSettings.loadGenreList(
+            ud, key: kPrefix + "allowlistGenres", default: ["Cortina"])
+        allowlistPartialMatchGenres = Set(AppSettings.loadGenreList(
+            ud, key: kPrefix + "allowlistPartialMatchGenres", default: []))
         useDenylist   = ud.object(forKey: kPrefix + "useDenylist")
                            .flatMap { $0 as? Bool } ?? true
-        denylistGenres = AppSettings.parseGenres(
-            ud.string(forKey: kPrefix + "denylistGenres"), default: ["Tango", "Vals", "Milonga"])
-        let rawPartial = ud.string(forKey: kPrefix + "denylistPartialMatchGenres")
-        if let rawPartial, !rawPartial.isEmpty {
-            denylistPartialMatchGenres = Set(AppSettings.parseGenres(rawPartial, default: []))
+        let loadedDenylist = AppSettings.loadGenreList(
+            ud, key: kPrefix + "denylistGenres", default: ["Tango", "Vals", "Milonga"])
+        denylistGenres = loadedDenylist
+        if ud.object(forKey: kPrefix + "denylistPartialMatchGenres") != nil {
+            denylistPartialMatchGenres = Set(AppSettings.loadGenreList(
+                ud, key: kPrefix + "denylistPartialMatchGenres", default: []))
         } else {
             // First launch after update: enable partial match for all current denylist genres
-            denylistPartialMatchGenres = Set(AppSettings.parseGenres(
-                ud.string(forKey: kPrefix + "denylistGenres"), default: ["Tango", "Vals", "Milonga"]))
+            denylistPartialMatchGenres = Set(loadedDenylist)
         }
         denylistLabelOverrides = AppSettings.decodeOrQuarantine(
             [String: String].self, key: kPrefix + "denylistLabelOverrides") ?? [:]
@@ -553,9 +547,18 @@ final class AppSettings: ObservableObject {
 
     // MARK: - Helpers
 
-    private static func parseGenres(_ raw: String?, default defaultValue: [String]) -> [String] {
-        guard let raw, !raw.isEmpty else { return defaultValue }
-        return raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    private static func saveGenreList(_ list: [String], key: String) {
+        if let data = GenreListCodec.encode(list) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    // JSON array if present, else legacy comma-string (one-time migration).
+    // Comma is a valid genre character, so comma-joined storage is ambiguous — JSON isn't.
+    private static func loadGenreList(_ ud: UserDefaults, key: String, default def: [String]) -> [String] {
+        GenreListCodec.decode(data: ud.data(forKey: key),
+                              legacyCommaString: ud.string(forKey: key),
+                              default: def)
     }
 
     func displayLabel(for genre: String) -> String {

@@ -3353,6 +3353,7 @@ runRemoteProtocolV2Slice2Tests()
 runSetlistDropRulesTests()
 runAppearanceProfileResolutionTests()
 runPlaylistIndexClampTests()
+runGenreListCodecTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3699,6 +3700,48 @@ func runPlaylistIndexClampTests() {
         test("small playlist clamps to last index") {
             try expectEqual(safeIndex(currentPlayingIndex: 0, lookback: 5, trackCount: 3), 0)
             try expectEqual(safeIndex(currentPlayingIndex: 10, lookback: 5, trackCount: 3), 2)
+        }
+    }
+}
+
+// MARK: - Genre list persistence (JSON + legacy comma migration)
+
+func runGenreListCodecTests() {
+    suite("GenreListCodec — JSON storage with legacy migration") {
+        test("JSON round-trip preserves list") {
+            let list = ["Tango", "Vals", "Milonga"]
+            let data = GenreListCodec.encode(list)
+            try expectNotNil(data)
+            try expectEqual(GenreListCodec.decode(data: data, legacyCommaString: nil, default: []), list)
+        }
+
+        test("genre containing a comma survives round-trip") {
+            let list = ["Foxtrot, slow", "Cortina"]
+            let data = GenreListCodec.encode(list)
+            try expectEqual(GenreListCodec.decode(data: data, legacyCommaString: nil, default: []), list)
+        }
+
+        test("empty list round-trips as empty, not default") {
+            let data = GenreListCodec.encode([])
+            try expectEqual(GenreListCodec.decode(data: data, legacyCommaString: nil, default: ["X"]), [])
+        }
+
+        test("no data falls back to legacy comma string") {
+            let r = GenreListCodec.decode(data: nil, legacyCommaString: "Tango, Vals ,Milonga", default: [])
+            try expectEqual(r, ["Tango", "Vals", "Milonga"])
+        }
+
+        test("no data and no legacy yields default") {
+            try expectEqual(GenreListCodec.decode(data: nil, legacyCommaString: nil, default: ["Cortina"]), ["Cortina"])
+            try expectEqual(GenreListCodec.decode(data: nil, legacyCommaString: "", default: ["Cortina"]), ["Cortina"])
+        }
+
+        test("corrupt data falls back to legacy, then default") {
+            let corrupt = Data("not json".utf8)
+            let viaLegacy = GenreListCodec.decode(data: corrupt, legacyCommaString: "Tango", default: [])
+            try expectEqual(viaLegacy, ["Tango"])
+            let viaDefault = GenreListCodec.decode(data: corrupt, legacyCommaString: nil, default: ["D"])
+            try expectEqual(viaDefault, ["D"])
         }
     }
 }
