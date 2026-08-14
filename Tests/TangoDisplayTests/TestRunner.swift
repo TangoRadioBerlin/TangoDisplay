@@ -3352,6 +3352,7 @@ runRemoteProtocolV2Tests()
 runRemoteProtocolV2Slice2Tests()
 runSetlistDropRulesTests()
 runAppearanceProfileResolutionTests()
+runMainThreadStallDetectorTests()
 runPlaylistIndexClampTests()
 runGenreListCodecTests()
 runMissingFileDropTests()
@@ -3683,6 +3684,96 @@ func runAppearanceProfileResolutionTests() {
         test("empty profiles list with set ID — returns current") {
             let result = AppearanceProfileResolution.resolve(activeID: id, in: [], current: current)
             try expectEqual(result.id, current.id)
+        }
+    }
+}
+
+// MARK: - MainThreadStallDetector + BreadcrumbTrail
+
+func runMainThreadStallDetectorTests() {
+
+    suite("MainThreadStallDetector") {
+        let detector = MainThreadStallDetector(intervalSeconds: 0.2, thresholdSeconds: 2.0)
+
+        test("thresholdBeats is ceiling(2.0/0.2) = 10") {
+            try expectEqual(detector.thresholdBeats, 10)
+        }
+
+        test("ok when beats in sync") {
+            let result = detector.check(beatsRequested: 5, beatsServiced: 5)
+            try expectEqual(result, .ok)
+        }
+
+        test("ok when gap below threshold") {
+            let result = detector.check(beatsRequested: 9, beatsServiced: 0)
+            try expectEqual(result, .ok)
+        }
+
+        test("stalled when gap exactly equals threshold") {
+            let result = detector.check(beatsRequested: 10, beatsServiced: 0)
+            try expectEqual(result, .stalled(duration: 2.0))
+        }
+
+        test("stalled when gap exceeds threshold") {
+            let result = detector.check(beatsRequested: 25, beatsServiced: 5)
+            try expectEqual(result, .stalled(duration: 4.0))
+        }
+
+        test("duration = missed * interval") {
+            let d = MainThreadStallDetector(intervalSeconds: 0.1, thresholdSeconds: 1.0)
+            // 12 beats missed → 12 * 0.1 = 1.2s
+            if case .stalled(let dur) = d.check(beatsRequested: 12, beatsServiced: 0) {
+                try expect(abs(dur - 1.2) < 0.001, "Expected 1.2s got \(dur)")
+            } else {
+                throw TestFailure(message: "Expected .stalled", file: #file, line: #line)
+            }
+        }
+
+        test("ok after recovery: beatsServiced catches up") {
+            let result = detector.check(beatsRequested: 15, beatsServiced: 15)
+            try expectEqual(result, .ok)
+        }
+
+        test("custom threshold: 500ms / 100ms interval = 5 beats") {
+            let d = MainThreadStallDetector(intervalSeconds: 0.1, thresholdSeconds: 0.5)
+            try expectEqual(d.thresholdBeats, 5)
+            try expectEqual(d.check(beatsRequested: 4, beatsServiced: 0), .ok)
+            try expectEqual(d.check(beatsRequested: 5, beatsServiced: 0), .stalled(duration: 0.5))
+        }
+    }
+
+    suite("BreadcrumbTrail") {
+        test("starts empty") {
+            let trail = BreadcrumbTrail()
+            try expectEqual(trail.last, "")
+            try expectEqual(trail.formatted(), "<none>")
+        }
+
+        test("record sets last") {
+            var trail = BreadcrumbTrail()
+            trail.record("drop.handleIncomingURLs")
+            try expectEqual(trail.last, "drop.handleIncomingURLs")
+        }
+
+        test("subsequent record replaces previous") {
+            var trail = BreadcrumbTrail()
+            trail.record("first")
+            trail.record("second")
+            try expectEqual(trail.last, "second")
+        }
+
+        test("formatted returns breadcrumb when set") {
+            var trail = BreadcrumbTrail()
+            trail.record("drop.promptForDuplicates.runModal")
+            try expectEqual(trail.formatted(), "drop.promptForDuplicates.runModal")
+        }
+
+        test("clear resets to empty") {
+            var trail = BreadcrumbTrail()
+            trail.record("something")
+            trail.clear()
+            try expectEqual(trail.last, "")
+            try expectEqual(trail.formatted(), "<none>")
         }
     }
 }

@@ -234,6 +234,13 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(enforceContiguousPlayedPrefix,
                                            forKey: kPrefix + "enforceContiguousPlayedPrefix") }
     }
+    /// When true, enables the FreezeWatchdog and verbose drop-path timing logs.
+    /// Default false (zero overhead when off). Persisted so it survives across launches
+    /// during a debugging session.
+    @Published var diagnosticLoggingEnabled: Bool {
+        didSet { UserDefaults.standard.set(diagnosticLoggingEnabled,
+                                           forKey: kPrefix + "diagnosticLoggingEnabled") }
+    }
     @Published var showYear: Bool {
         didSet { UserDefaults.standard.set(showYear, forKey: kPrefix + "showYear") }
     }
@@ -468,6 +475,8 @@ final class AppSettings: ObservableObject {
         duplicateTrackProtection = ud.object(forKey: kPrefix + "duplicateTrackProtection")
             .flatMap { $0 as? Bool } ?? false
         enforceContiguousPlayedPrefix = ud.object(forKey: kPrefix + "enforceContiguousPlayedPrefix")
+            .flatMap { $0 as? Bool } ?? false
+        diagnosticLoggingEnabled = ud.object(forKey: kPrefix + "diagnosticLoggingEnabled")
             .flatMap { $0 as? Bool } ?? false
         showYear = ud.object(forKey: kPrefix + "showYear").flatMap { $0 as? Bool } ?? true
         showTime = ud.object(forKey: kPrefix + "showTime").flatMap { $0 as? Bool } ?? true

@@ -64,6 +64,7 @@ final class AppState: ObservableObject {
     let setlist = SetlistManager()
     let configStore = PluginConfigurationStore()
     let microphoneMonitor = MicrophoneMonitor()
+    private let freezeWatchdog = FreezeWatchdog()
     lazy var setlistRemoteBridge: RemoteControlBridge = RemoteControlBridge(appState: self, settings: self.settings)
     private var activeSource: any MusicPlayerSource = MusicPoller()  // replaced in start()
     private var cancellables = Set<AnyCancellable>()
@@ -144,6 +145,7 @@ final class AppState: ObservableObject {
         observeMicrophoneMonitor()
         observeRemoteControlEnabled()
         observeGenreTrackColors()
+        observeDiagnosticLogging()
     }
 
     // MARK: - Genre → track tag colour
@@ -183,6 +185,20 @@ final class AppState: ObservableObject {
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] enabled in self?.handleRemoteControlEnabledChange(enabled) }
+            .store(in: &cancellables)
+    }
+
+    private func observeDiagnosticLogging() {
+        // Start watchdog immediately if the toggle is already on at launch.
+        if settings.diagnosticLoggingEnabled { freezeWatchdog.start() }
+        // React to subsequent changes.
+        settings.$diagnosticLoggingEnabled
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled { self.freezeWatchdog.start() } else { self.freezeWatchdog.stop() }
+            }
             .store(in: &cancellables)
     }
 

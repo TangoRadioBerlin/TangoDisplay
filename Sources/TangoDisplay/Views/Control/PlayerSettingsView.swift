@@ -330,6 +330,12 @@ struct PlayerSettingsView: View {
                     Text("Warns before adding a track that is already in the setlist.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    subgroupLabel("Diagnostics")
+                    Toggle("Freeze-detection logging", isOn: $settings.diagnosticLoggingEnabled)
+                    Text("Enables a background watchdog that detects main-thread stalls (\u{2265}2 s) and logs them as faults to the Unified Log (subsystem com.tangodisplay, category diagnostics). Also logs detailed timing on the drag-drop path. Turn off during normal use \u{2014} zero overhead when disabled.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 } header: {
                     groupHeading("Safety")
                 }
