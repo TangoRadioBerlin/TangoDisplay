@@ -30,6 +30,41 @@ public struct AutoGapPlan: Equatable {
 ///   silence, trim its trailing silence, and insert exactly `target` (the previous track's tail was
 ///   trimmed when it was loaded, so it doesn't count here). `safetyMargin` seconds of the detected
 ///   silence are kept at each end so misclassified quiet music is never cut.
+/// Silence analysis bound to a specific (current, next) transition.
+///
+/// The background analysis for "track A ends, track B starts" finishes long
+/// after it was scheduled; by then the user may have reordered, skipped or
+/// marked tracks played. Binding the measured values to the exact entry pair
+/// means a stale result can never shape the wrong transition — the caller
+/// falls back to a conservative full-target plan instead.
+public struct PreparedAutoGap: Equatable {
+    public let currentID: UUID
+    public let nextID: UUID
+    /// Trailing silence of the outgoing (current) track.
+    public let prevEnd: Double
+    /// Leading silence of the incoming (next) track.
+    public let leading: Double
+    /// Trailing silence of the incoming track (force-trim input when it loads).
+    public let trailing: Double
+
+    public init(currentID: UUID, nextID: UUID, prevEnd: Double, leading: Double, trailing: Double) {
+        self.currentID = currentID
+        self.nextID = nextID
+        self.prevEnd = prevEnd
+        self.leading = leading
+        self.trailing = trailing
+    }
+
+    /// The auto-gap plan for loading `nextID` right after `currentID`, or nil
+    /// when the prepared pair doesn't match (stale analysis).
+    public func plan(currentID: UUID, nextID: UUID, target: Double, force: Bool,
+                     safetyMargin: Double = AutoGapPlan.defaultSafetyMargin) -> AutoGapPlan? {
+        guard currentID == self.currentID, nextID == self.nextID else { return nil }
+        return autoGapPlan(leading: leading, trailing: trailing, prevEnd: prevEnd,
+                           target: target, force: force, safetyMargin: safetyMargin)
+    }
+}
+
 /// Resolves the per-entry tri-state auto-gap override (nil = follow the global
 /// first-track rule; true = force skip; false = force apply). Assumes auto-gap
 /// is globally enabled.

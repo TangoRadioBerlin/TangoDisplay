@@ -3356,6 +3356,7 @@ runPlaylistIndexClampTests()
 runGenreListCodecTests()
 runMissingFileDropTests()
 runAutoGapOverrideTests()
+runPreparedAutoGapTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3814,6 +3815,52 @@ func runAutoGapOverrideTests() {
         test("legacy false or absent migrates to follow-global (nil)") {
             try expectNil(migratedAutoGapOverride(legacyIgnores: false))
             try expectNil(migratedAutoGapOverride(legacyIgnores: nil))
+        }
+    }
+}
+
+// MARK: - PreparedAutoGap (analysis bound to a transition)
+
+func runPreparedAutoGapTests() {
+    let curID = UUID()
+    let nextID = UUID()
+    let prepared = PreparedAutoGap(currentID: curID, nextID: nextID,
+                                   prevEnd: 1.0, leading: 2.0, trailing: 4.0)
+
+    suite("PreparedAutoGap — stale-analysis protection") {
+        test("matching pair yields the measured pad plan") {
+            let plan = prepared.plan(currentID: curID, nextID: nextID, target: 5.0, force: false)
+            try expectNotNil(plan)
+            // Pad mode: top up to target minus existing silence (1.0 + 2.0).
+            try expectEqual(plan?.insert, 2.0)
+            try expectEqual(plan?.skipLeading, 0)
+            try expectEqual(plan?.trimTrailing, 0)
+        }
+
+        test("matching pair in force mode keeps the safety margin") {
+            let plan = prepared.plan(currentID: curID, nextID: nextID, target: 5.0, force: true)
+            try expectEqual(plan?.insert, 5.0)
+            try expectEqual(plan?.skipLeading, 1.5)   // 2.0 − 0.5 margin
+            try expectEqual(plan?.trimTrailing, 3.5)  // 4.0 − 0.5 margin
+        }
+
+        test("stale current ID yields nil") {
+            try expectNil(prepared.plan(currentID: UUID(), nextID: nextID, target: 5.0, force: false))
+        }
+
+        test("stale next ID yields nil (reorder/skip after analysis)") {
+            try expectNil(prepared.plan(currentID: curID, nextID: UUID(), target: 5.0, force: false))
+        }
+
+        test("swapped pair yields nil") {
+            try expectNil(prepared.plan(currentID: nextID, nextID: curID, target: 5.0, force: false))
+        }
+
+        test("conservative fallback plan inserts the full target") {
+            let fallback = autoGapPlan(leading: 0, trailing: 0, prevEnd: 0, target: 3.0, force: true)
+            try expectEqual(fallback.insert, 3.0)
+            try expectEqual(fallback.skipLeading, 0)
+            try expectEqual(fallback.trimTrailing, 0)
         }
     }
 }

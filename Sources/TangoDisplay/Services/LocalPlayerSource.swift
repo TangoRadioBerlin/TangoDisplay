@@ -140,9 +140,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     // MARK: - Private — auto-gap
 
     private var currentPaddingFrames: AVAudioFrameCount = 0
-    private var prevTrackSilenceAtEnd: Double = 0   // populated by background analysis of the track that just played
-    private var nextTrackSilenceAtStart: Double = 0 // populated by background analysis of the upcoming track
-    private var nextTrackSilenceAtEnd: Double = 0   // upcoming track's trailing silence (for force-trim mode)
+    private var preparedAutoGap: PreparedAutoGap?     // silence analysis bound to a specific (current, next) transition
+    private var autoGapAnalysisTask: Task<Void, Never>?
     private var audioStartSampleTime: AVAudioFramePosition = 0
     private var silencePending: Bool = false
 
@@ -596,8 +595,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         currentPaddingFrames = 0
         silencePending = false
         audioStartSampleTime = 0
-        prevTrackSilenceAtEnd = 0
-        nextTrackSilenceAtStart = 0
+        autoGapAnalysisTask?.cancel()
+        preparedAutoGap = nil
         teardownObservers()
     }
 
@@ -715,8 +714,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         currentPaddingFrames = 0
         silencePending = false
         audioStartSampleTime = 0
-        prevTrackSilenceAtEnd = 0
-        nextTrackSilenceAtStart = 0
+        autoGapAnalysisTask?.cancel()
+        preparedAutoGap = nil
         reportCurrentState()
         reportPlaylist()
         onNextTrackUpdate?(nil)
@@ -893,10 +892,17 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                                                       ignoreFirstTrack: settings.autoGapIgnoreFirstTrack)
             if !bypassAutoGap && !autoGapIgnored && settings.autoGapEnabled {
                 do {
-                    let plan = autoGapPlan(
-                        leading: nextTrackSilenceAtStart,
-                        trailing: nextTrackSilenceAtEnd,
-                        prevEnd: prevTrackSilenceAtEnd,
+                    // Use the analysis prepared for this exact (outgoing, incoming) pair.
+                    // currentEntryID still holds the outgoing track here (set to the new
+                    // entry below). A stale/mismatched pair → conservative full-target
+                    // plan with no measured silence credited and nothing trimmed.
+                    let plan = preparedAutoGap?.plan(
+                        currentID: currentEntryID ?? entry.id,
+                        nextID: entry.id,
+                        target: settings.autoGapDuration,
+                        force: settings.autoGapForceLength
+                    ) ?? autoGapPlan(
+                        leading: 0, trailing: 0, prevEnd: 0,
                         target: settings.autoGapDuration,
                         force: settings.autoGapForceLength
                     )
@@ -940,36 +946,46 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 }
             }
             setlist.setAutoGapApplied(id: entry.id, applied: autoGapApplied)
-            prevTrackSilenceAtEnd = 0
-            nextTrackSilenceAtStart = 0
-            nextTrackSilenceAtEnd = 0
+            preparedAutoGap = nil
 
             playerNode.scheduleSegment(file, startingFrame: startFrame, frameCount: segmentFrames,
                                        at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
                 DispatchQueue.main.async { self?.handleTrackEnd(generation: gen) }
             }
 
-            // Analyze current track's end-silence and pre-warm next track's start-silence in background.
+            // Pre-warm silence analysis for the next automatic transition, bound to the
+            // exact (current, next) pair. Analyze firstUnplayed(after:) — the real
+            // transition target — not the immediate neighbour, which may be played.
+            autoGapAnalysisTask?.cancel()
+            let currentID = entry.id
+            let next = setlist.firstUnplayed(after: entry.id)
             let currentURL = entry.fileURL
-            let nextURL = setlist.entry(after: entry.id)?.fileURL
-            Task { [weak self] in
-                let result = await AudioSilenceAnalyzer.shared.analyze(url: currentURL)
-                let nextStart: Double
-                let nextEnd: Double
+            let nextURL = next?.fileURL
+            let nextID = next?.id
+            autoGapAnalysisTask = Task { [weak self] in
+                let cur = await AudioSilenceAnalyzer.shared.analyze(url: currentURL)
+                guard !Task.isCancelled else { return }
+                let lead: Double
+                let tail: Double
                 if let nextURL {
                     let nextResult = await AudioSilenceAnalyzer.shared.analyze(url: nextURL)
-                    nextStart = nextResult.silenceAtStart
-                    nextEnd = nextResult.silenceAtEnd
+                    lead = nextResult.silenceAtStart
+                    tail = nextResult.silenceAtEnd
                 } else {
-                    nextStart = 0
-                    nextEnd = 0
+                    lead = 0
+                    tail = 0
                 }
+                guard !Task.isCancelled, let nextID else { return }
                 await MainActor.run { [weak self] in
                     // Discard results from a superseded load (e.g. user skipped before analysis finished).
                     guard let self, self.scheduleGeneration == gen else { return }
-                    self.prevTrackSilenceAtEnd = result.silenceAtEnd
-                    self.nextTrackSilenceAtStart = nextStart
-                    self.nextTrackSilenceAtEnd = nextEnd
+                    self.preparedAutoGap = PreparedAutoGap(
+                        currentID: currentID,
+                        nextID: nextID,
+                        prevEnd: cur.silenceAtEnd,
+                        leading: lead,
+                        trailing: tail
+                    )
                 }
             }
         } catch {
