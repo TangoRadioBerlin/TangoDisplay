@@ -22,7 +22,6 @@ enum SetTimingsItems {
         var firstContributingSeen = false
         for entry in entries {
             let isCortina = detector.isCortina(genre: entry.track.genre)
-            let dur = entry.duration ?? 0
             var contributes = false
             var elapsedForItem: TimeInterval? = nil
             switch entry.state {
@@ -44,7 +43,13 @@ enum SetTimingsItems {
                 }
                 firstContributingSeen = true
             }
-            items.append(.init(duration: dur, isCortina: isCortina, elapsed: elapsedForItem,
+            // Trimmed tracks contribute their playback-window length; the current
+            // entry's absolute elapsed is normalised to window-relative time.
+            let span = timingSpan(duration: entry.duration ?? 0,
+                                  trimStart: entry.trimStartSeconds,
+                                  trimEnd: entry.trimEndSeconds,
+                                  absoluteElapsed: elapsedForItem)
+            items.append(.init(duration: span.duration, isCortina: isCortina, elapsed: span.elapsed,
                                contributes: contributes, addLeadingGap: addLeadingGap))
             if let t = through {
                 if entry.id == t { break }

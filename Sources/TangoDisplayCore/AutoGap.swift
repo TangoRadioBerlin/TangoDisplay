@@ -47,6 +47,24 @@ public func playbackWindow(duration: Double, trimStart: Double?, trimEnd: Double
     return (start, end)
 }
 
+/// Duration/elapsed pair for set-timings arithmetic: a trimmed track contributes
+/// its playback-window length, and the current entry's absolute file position is
+/// normalised to window-relative elapsed (clamped into the window). A degenerate
+/// trim falls back to the full duration — matching playback, which ignores it.
+public func timingSpan(duration: Double, trimStart: Double?, trimEnd: Double?,
+                       absoluteElapsed: Double?) -> (duration: Double, elapsed: Double?) {
+    let window = playbackWindow(duration: duration, trimStart: trimStart, trimEnd: trimEnd)
+    guard window.end > window.start else {
+        // Degenerate/unknown window: keep the raw elapsed — the duration may be
+        // unknown (0) while elapsed is real (e.g. a playing cortina without
+        // metadata length, which the calculator caps by assumed play time).
+        return (duration, absoluteElapsed.map { max(0, $0) })
+    }
+    let length = window.end - window.start
+    let elapsed = absoluteElapsed.map { max(0, min($0 - window.start, length)) }
+    return (length, elapsed)
+}
+
 /// Clamp a seek target into the active playback window: targets before the
 /// window snap to its start; targets at or past the window end are rejected
 /// (nil), mirroring the historical end-of-file guard. Playback beyond the

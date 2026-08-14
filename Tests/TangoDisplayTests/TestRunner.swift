@@ -3362,6 +3362,7 @@ runPlaybackWindowTests()
 runMusicTrimTests()
 runEffectiveSilenceTests()
 runSeekTargetTests()
+runTimingSpanTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4015,6 +4016,51 @@ func runSeekTargetTests() {
         test("full-file window behaves like the old EOF guard") {
             try expectEqual(seekTarget(seconds: 30, windowStart: 0, windowEnd: 180), 30)
             try expectNil(seekTarget(seconds: 180, windowStart: 0, windowEnd: 180))
+        }
+    }
+}
+
+// MARK: - Set-timings span for trimmed tracks
+
+func runTimingSpanTests() {
+    suite("timingSpan — trimmed tracks contribute their window length") {
+        test("no trim passes duration and elapsed through") {
+            let s = timingSpan(duration: 180, trimStart: nil, trimEnd: nil, absoluteElapsed: 42)
+            try expectEqual(s.duration, 180)
+            try expectEqual(s.elapsed, 42)
+        }
+
+        test("trimmed track contributes the window length with window-relative elapsed") {
+            let s = timingSpan(duration: 180, trimStart: 60, trimEnd: 120, absoluteElapsed: 90)
+            try expectEqual(s.duration, 60)
+            try expectEqual(s.elapsed, 30)
+        }
+
+        test("elapsed clamps to the window bounds") {
+            let before = timingSpan(duration: 180, trimStart: 60, trimEnd: 120, absoluteElapsed: 30)
+            try expectEqual(before.elapsed, 0)
+            let past = timingSpan(duration: 180, trimStart: 60, trimEnd: 120, absoluteElapsed: 150)
+            try expectEqual(past.elapsed, 60)
+        }
+
+        test("nil elapsed stays nil") {
+            let s = timingSpan(duration: 180, trimStart: 60, trimEnd: 120, absoluteElapsed: nil)
+            try expectEqual(s.duration, 60)
+            try expectNil(s.elapsed)
+        }
+
+        test("degenerate trim falls back to the full duration") {
+            let s = timingSpan(duration: 180, trimStart: 150, trimEnd: 30, absoluteElapsed: 42)
+            try expectEqual(s.duration, 180)
+            try expectEqual(s.elapsed, 42)
+        }
+
+        test("unknown duration keeps raw elapsed for the cortina cap") {
+            // A playing cortina without metadata length: the calculator caps it by
+            // assumed play time, so elapsed must survive un-clamped.
+            let s = timingSpan(duration: 0, trimStart: nil, trimEnd: nil, absoluteElapsed: 42)
+            try expectEqual(s.duration, 0)
+            try expectEqual(s.elapsed, 42)
         }
     }
 }
