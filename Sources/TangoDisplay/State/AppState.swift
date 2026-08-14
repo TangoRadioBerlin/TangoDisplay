@@ -408,9 +408,13 @@ final class AppState: ObservableObject {
               let player = localPlayer,
               autoFadeTask == nil else { return }
         if setlist.entries.first(where: { $0.id == player.currentEntryID })?.ignoresAutoFade == true { return }
-        let dur = player.duration > 0 ? player.duration
+        // Fade timing runs inside the playback window: play from the window start,
+        // fade before the (possibly trimmed) window end. Untrimmed tracks reduce to
+        // the old full-duration arithmetic.
+        let window = player.playbackWindowSeconds
+        let windowLength = window.end > window.start ? window.end - window.start
             : (setlist.entries.first(where: { $0.state == .playing })?.duration ?? 0.0)
-        let remaining = autoFadeDelay(trackDuration: dur) - player.elapsed
+        let remaining = window.start + autoFadeDelay(trackDuration: windowLength) - player.elapsed
         if remaining <= 0 {
             triggerAutoFadeCortina()
             return

@@ -145,6 +145,11 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     /// Playback window of the loaded entry (user trim × force-trim), in seconds into
     /// the file; nil = whole file. Seek/early-mark/auto-fade compute against this.
     private var activeWindow: (start: Double, end: Double)?
+
+    /// The loaded entry's playback window in absolute file seconds — the trim
+    /// window, or (0, full duration) when untrimmed. Auto-fade scheduling uses
+    /// this so a fade still fires before a trimmed end.
+    var playbackWindowSeconds: (start: Double, end: Double) { activeWindow ?? (0, duration) }
     private var audioStartSampleTime: AVAudioFramePosition = 0
     private var silencePending: Bool = false
 
@@ -1842,7 +1847,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
            let id = currentEntryID,
            !earlyMarkedEntryIDs.contains(id),
            duration > 0,
-           elapsed >= Double(settings.markAsPlayedAfterSeconds) {
+           // Measure from the playback-window start: a track trimmed to begin at 1:00
+           // must not count that minute toward the mark-as-played threshold.
+           elapsed - (activeWindow?.start ?? 0) >= Double(settings.markAsPlayedAfterSeconds) {
             earlyMarkedEntryIDs.insert(id)
             isCurrentEntryMarkedAsPlayed = true
             setlist.markPlayed(id: id)
