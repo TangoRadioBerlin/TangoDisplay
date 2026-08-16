@@ -644,6 +644,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             setlist.markQueued(id: id)
             playerNode.stop()
             audioFile = nil
+            activeWindow = nil
             seekOffset = 0
             elapsed = 0
             currentEntryID = firstUnplayed.id
@@ -677,11 +678,13 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         isActivePlaying = false
         if let id = currentEntryID, !earlyMarkedEntryIDs.contains(id), !currentEntryIsPlayed() {
             setlist.markPaused(id: id)
+            // seekTo clamps into the playback window and sets elapsed to the
+            // (possibly trimmed) start — don't overwrite it with 0 here.
             seekTo(0)
-            elapsed = 0
             reportCurrentState()
         } else if let id = currentEntryID, let nextEntry = setlist.firstUnplayed(after: id) {
             audioFile = nil
+            activeWindow = nil
             seekOffset = 0
             currentEntryID = nextEntry.id
             elapsed = 0
@@ -691,6 +694,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             onNextTrackUpdate?(setlist.entry(after: nextEntry.id)?.track)
         } else {
             audioFile = nil
+            activeWindow = nil
             seekOffset = 0
             currentEntryID = nil
             elapsed = 0
@@ -765,6 +769,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             appliedReplayGainLinear = 1.0
             playerNode.stop()
             audioFile = nil
+            activeWindow = nil
             elapsed = 0
             duration = 0
             seekOffset = 0
@@ -799,6 +804,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             appliedReplayGainLinear = 1.0
             playerNode.stop()
             audioFile = nil
+            activeWindow = nil
             elapsed = 0
             duration = 0
             seekOffset = 0
@@ -809,7 +815,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     }
 
     func skipPrevious() {
-        if elapsed > 3 {
+        // Window-relative: with a start trim, absolute elapsed begins at the trim
+        // point and would otherwise always exceed 3s — making the previous track
+        // unreachable.
+        if elapsed - (activeWindow?.start ?? 0) > 3 {
             // Restart the current track — at its trim start, not the file start.
             seek(to: activeWindow?.start ?? 0)
             return
@@ -1765,6 +1774,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                     self.appliedReplayGainLinear = 1.0
                     self.playerNode.stop()
                     self.audioFile = nil
+                    self.activeWindow = nil
                     self.elapsed = 0
                     self.duration = 0
                     self.seekOffset = 0
