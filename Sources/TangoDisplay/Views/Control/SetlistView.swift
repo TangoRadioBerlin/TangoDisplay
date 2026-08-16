@@ -61,9 +61,13 @@ private class MusicAppDropView: NSView {
                 Self.legacyPromiseURLType, Self.legacyPromiseContentsType,
                 Self.fileURLType
             ]
-            // Also include NSFilePromiseReceiver types so future Music.app versions
-            // that adopt the modern API are still handled. We filter non-Music promise
-            // drags in hasAcceptableDrag().
+            // Also include NSFilePromiseReceiver types so a drag carrying them
+            // registers at all. Note: hasAcceptableDrag() deliberately does NOT
+            // accept promise-only drags — it requires one of the concrete flavors
+            // below, so a drag advertising nothing but file promises is rejected
+            // at draggingEntered. Every observed Music.app drag also carries
+            // itunes.drag / music.metadata / JRFS / file-url, which is what
+            // gates acceptance (and the isMusicAppSource classification).
             types.append(contentsOf: NSFilePromiseReceiver.readableDraggedTypes
                 .map { NSPasteboard.PasteboardType($0) })
             registerForDraggedTypes(types)
@@ -283,9 +287,12 @@ private class MusicAppDropView: NSView {
             return false
 
         case .materialize:
-            // Cloud-only Music.app tracks — ask Music.app to write cached copies
-            // of every track. Synchronous by API design (the destination URL is
-            // bound to `sender`, so the call cannot be deferred off this callout).
+            // Cloud-only Music.app tracks — ask Music.app to write cached copies.
+            // Synchronous by API design (the destination URL is bound to `sender`,
+            // so the call cannot be deferred off this callout). We rely on Music
+            // writing the files before returning; if a file were still pending
+            // when the deferred missing-file filter runs, it would be dropped
+            // with a "not found" note (accepted residual risk, never observed).
             os_log("promise partial: resolved %d of %d advertised — materialising",
                    log: dropLog, type: .info, urls.count, advertisedCount)
             if diagEnabled { diagLog.record("drop.branch2.materialisePromises") }
@@ -294,11 +301,15 @@ private class MusicAppDropView: NSView {
             let writtenURLs = names.map { destDir.appendingPathComponent($0) }
             os_log("promise materialised %d file(s) at %{public}@",
                    log: dropLog, type: .info, names.count, destDir.path)
-            if !writtenURLs.isEmpty {
-                onDrop(writtenURLs)
+            // Union: locally resolved tracks first, then the materialised copies —
+            // Music may only write the subset it actually promised, so dropping
+            // `urls` here would lose the local half of a mixed local+cloud drag.
+            let seen = Set(urls)
+            let combined = urls + writtenURLs.filter { !seen.contains($0) }
+            if !combined.isEmpty {
+                onDrop(combined)
                 return true
             }
-            // Materialise yielded nothing — fall back to whatever local URLs resolved.
             guard !urls.isEmpty else { return false }
             onDrop(urls)
             return true
@@ -384,7 +395,11 @@ private class MusicAppDropView: NSView {
                 let exists = FileManager.default.fileExists(atPath: url.path)
                 os_log("track loc=%{public}@ → url=%{public}@ exists=%{public}@",
                        log: dropLog, type: .info, raw, url.path, String(exists))
-                if url.isFileURL { urls.append(url) }
+                // Only accept locations that resolve to a real file: a Location
+                // string URL(string:) mangles (unencoded #/? etc.) yields a
+                // garbage relative URL here — appending it would make this branch
+                // "succeed" and cut off the per-item file-url fallback below.
+                if exists { urls.append(url) }
             }
         }
         os_log("resolveViaMusicMetadata produced %d urls", log: dropLog, type: .info, urls.count)
