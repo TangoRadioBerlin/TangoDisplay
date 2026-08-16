@@ -3816,6 +3816,34 @@ func runDropPasteboardRulesTests() {
         test("relative path yields nil") {
             try expectNil(DropPasteboardRules.fileURL(fromPasteboardString: "Music/track.mp3"))
         }
+
+        test("unencoded hash stays in the path (lenient URL(string:) would truncate)") {
+            let url = DropPasteboardRules.fileURL(fromPasteboardString: "file:///Users/dj/Milonga #2.mp3")
+            try expectEqual(url?.path, "/Users/dj/Milonga #2.mp3")
+        }
+
+        test("unencoded question mark stays in the path") {
+            let url = DropPasteboardRules.fileURL(fromPasteboardString: "file:///Users/dj/what?.mp3")
+            try expectEqual(url?.path, "/Users/dj/what?.mp3")
+        }
+
+        test("localhost host is normalised away for URL equality") {
+            let url = DropPasteboardRules.fileURL(fromPasteboardString: "file://localhost/Music/a.mp3")
+            try expectEqual(url, URL(fileURLWithPath: "/Music/a.mp3"))
+        }
+
+        test("literal percent that is not valid encoding survives raw") {
+            let url = DropPasteboardRules.fileURL(fromPasteboardString: "file:///Music/100% Tango.mp3")
+            try expectEqual(url?.path, "/Music/100% Tango.mp3")
+        }
+
+        test("foreign host yields nil") {
+            try expectNil(DropPasteboardRules.fileURL(fromPasteboardString: "file://server.local/share/a.mp3"))
+        }
+
+        test("file scheme without a path yields nil") {
+            try expectNil(DropPasteboardRules.fileURL(fromPasteboardString: "file://"))
+        }
     }
 
     suite("DropPasteboardRules.legacyPromiseAction") {

@@ -10,22 +10,30 @@ public enum DropPasteboardRules {
     /// Parse a pasteboard string into a local file URL.
     ///
     /// Accepts three shapes seen in the wild:
-    ///   - well-formed `file://` URLs (percent-encoded),
-    ///   - `file://` strings with unencoded characters (some players skip
-    ///     encoding; `URL(string:)` rejects those, so fall back to a path init),
+    ///   - well-formed `file://` URLs (percent-encoded, optional `localhost` host),
+    ///   - `file://` strings with unencoded characters (some players skip encoding),
     ///   - bare absolute POSIX paths (foobar2000 writes `public.file-url` this way).
+    ///
+    /// `file://` strings are parsed manually, never via `URL(string:)`: modern
+    /// Foundation parses leniently and reinterprets unencoded `#`/`?` as
+    /// fragment/query — silently truncating the path while `isFileURL` stays
+    /// true ("Milonga #2.mp3" → "Milonga "). The host is normalised away
+    /// (`file://localhost/...` must compare equal to a plain path URL for
+    /// duplicate detection); any other host yields nil.
     ///
     /// Anything else (relative paths, non-file schemes, empty) yields nil.
     public static func fileURL(fromPasteboardString string: String) -> URL? {
         guard !string.isEmpty else { return nil }
         if string.hasPrefix("file://") {
-            if let url = URL(string: string), url.isFileURL, !url.path.isEmpty {
-                return url
-            }
-            // Unencoded characters — strip the scheme and treat the rest as a path.
-            let raw = String(string.dropFirst("file://".count))
-            guard raw.hasPrefix("/") else { return nil }
-            return URL(fileURLWithPath: raw)
+            let rest = String(string.dropFirst("file://".count))
+            guard let slash = rest.firstIndex(of: "/") else { return nil }
+            let host = String(rest[..<slash])
+            guard host.isEmpty || host == "localhost" else { return nil }
+            let rawPath = String(rest[slash...])
+            // Decode percent-encoding when present; a literal "%" that is not a
+            // valid escape makes decoding fail — keep the raw path then.
+            let path = rawPath.removingPercentEncoding ?? rawPath
+            return URL(fileURLWithPath: path)
         }
         if string.hasPrefix("/") {
             return URL(fileURLWithPath: string)
