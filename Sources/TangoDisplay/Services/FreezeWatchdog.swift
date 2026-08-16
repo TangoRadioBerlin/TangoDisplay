@@ -51,6 +51,13 @@ final class FreezeWatchdog {
         timerQueue.async { [weak self] in
             guard let self, self.timer == nil else { return }
 
+            // Reset counters: an in-flight heartbeat can land after stop()'s reset
+            // (its double-hop block runs regardless), leaving a permanent skew for
+            // the next session if start() trusted the old values.
+            self.beatsRequested = 0
+            self.beatsServiced  = 0
+            self.isCurrentlyStalled = false
+
             let t = DispatchSource.makeTimerSource(queue: self.timerQueue)
             t.schedule(
                 deadline: .now() + Self.intervalSeconds,

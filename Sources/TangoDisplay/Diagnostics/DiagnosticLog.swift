@@ -6,8 +6,9 @@
 // `lastBreadcrumb` is read from the FreezeWatchdog background queue
 // → protected by an NSLock.
 //
-// Gated by AppSettings.diagnosticLoggingEnabled: when disabled, record()
-// is a no-op and no OSLog activity is generated.
+// Gating: record()/clearBreadcrumb() themselves are NOT gated — every call
+// site checks AppSettings.diagnosticLoggingEnabled first (cheaper than a
+// per-call lookup here). A new call site must add that guard itself.
 
 import Foundation
 import TangoDisplayCore

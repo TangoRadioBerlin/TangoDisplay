@@ -878,7 +878,10 @@ struct SetlistView: View {
         }
         let result = alert.runModal()
         if diagEnabled {
-            diagLog.clearBreadcrumb()
+            // Restore the enclosing section's crumb rather than clearing: the trail
+            // holds a single slot, and the rest of handleIncomingURLs (NAS stat,
+            // insert) still deserves attribution. Its defer clears at the end.
+            diagLog.record("drop.handleIncomingURLs")
             os_log("promptForDuplicates: runModal returned result=%d", log: diagLog.dropLog, type: .info,
                    result == .alertFirstButtonReturn ? 1 : 0)
         }
