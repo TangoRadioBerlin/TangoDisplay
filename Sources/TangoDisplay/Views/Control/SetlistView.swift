@@ -1373,19 +1373,13 @@ struct SetlistView: View {
         }
 
         // foobar2000 (macOS) writes public.file-url as a bare POSIX path string
-        // rather than a file:// URL, so readObjects yields nothing. Read per-item
-        // and construct the URL directly from the path or file:// string.
+        // rather than a file:// URL, so readObjects yields nothing. Resolve
+        // per-item through the same tested Core rule as the drag path.
         var perItemURLs: [URL] = []
         for item in NSPasteboard.general.pasteboardItems ?? [] {
-            if let str = item.string(forType: .fileURL), !str.isEmpty {
-                let url: URL
-                if str.hasPrefix("file://") {
-                    // percent-encode in case the app left spaces unencoded
-                    url = URL(string: str) ?? URL(fileURLWithPath: String(str.dropFirst(7)))
-                } else {
-                    url = URL(fileURLWithPath: str)
-                }
-                if url.isFileURL { perItemURLs.append(url) }
+            if let str = item.string(forType: .fileURL),
+               let url = DropPasteboardRules.fileURL(fromPasteboardString: str) {
+                perItemURLs.append(url)
             }
         }
         if !perItemURLs.isEmpty {
