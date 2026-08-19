@@ -132,7 +132,11 @@ Configure how album artwork appears on the dancer screen. Artwork visibility is 
 | **Horizontal offset** | Move the artwork left (negative) or right (positive) |
 | **Vertical offset** | Move the artwork up (negative) or down (positive) |
 
-Artwork is fetched automatically from the playing track for all three player sources — Music.app, Swinsian, and Embrace. It fades in and out in sync with track transitions using the same transition style and duration configured above. When no artwork is available the display falls back gracefully (nothing is shown in that layer).
+Artwork is fetched automatically from the playing track for all three player sources — Music.app, Swinsian, and Embrace. It fades in and out in sync with track transitions using the same transition style and duration configured above. When the track has no embedded artwork, nothing is shown in that layer — including the backing plate.
+
+### Artwork Backing Plate
+
+An optional square coloured plate rendered behind the artwork (up to 25 % larger), configured in the **Position** tab. It only appears while artwork is shown. Its **colour** and **position** follow the selected scene (Tango, Vals, Milonga, Cortina, …): unset scenes inherit the profile colour, and the plate position defaults to the artwork's position until overridden. Plate size, opacity and fade are profile-wide.
 
 ### Background Image
 
