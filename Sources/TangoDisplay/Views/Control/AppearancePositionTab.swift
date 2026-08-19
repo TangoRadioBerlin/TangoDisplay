@@ -129,6 +129,75 @@ struct AppearancePositionTab: View {
         working.genreBackgrounds[idx].positions = nil
     }
 
+    // MARK: - Scene-aware backing plate (colour + position; size/opacity/fade stay global)
+
+    private var scenePlate: PlatePlacement? {
+        guard let idx = sceneOverrideIndex else { return nil }
+        return working.genreBackgrounds[idx].positions?.plate
+    }
+
+    /// Mutates the selected scene's plate override with B6 cleanup: a fully reset
+    /// plate collapses to nil, an emptied PositionSet collapses to nil.
+    private func updateScenePlate(_ mutate: (inout PlatePlacement) -> Void) {
+        guard let idx = ensureSceneEntryIndex() else { return }
+        var set = working.genreBackgrounds[idx].positions ?? PositionSet()
+        var plate = set.plate ?? PlatePlacement()
+        mutate(&plate)
+        set.plate = plate.hasContent ? plate : nil
+        working.genreBackgrounds[idx].positions = set.hasContent ? set : nil
+    }
+
+    private func plateColorBinding() -> Binding<Color> {
+        Binding(
+            get: { Color(hex: scenePlate?.colorHex ?? working.albumArtworkBackingColor) },
+            set: { newColor in
+                if isDanceScene {
+                    working.albumArtworkBackingColor = newColor.hexString
+                } else {
+                    updateScenePlate { $0.colorHex = newColor.hexString }
+                }
+            }
+        )
+    }
+
+    private func plateOffsetXBinding(coupledFallback: Double) -> Binding<Double> {
+        Binding(
+            get: { scenePlate?.offsetX ?? working.albumArtworkBackingOffsetX ?? coupledFallback },
+            set: { v in
+                if isDanceScene { working.albumArtworkBackingOffsetX = v }
+                else { updateScenePlate { $0.offsetX = v } }
+            }
+        )
+    }
+
+    private func plateOffsetYBinding(coupledFallback: Double) -> Binding<Double> {
+        Binding(
+            get: { scenePlate?.offsetY ?? working.albumArtworkBackingOffsetY ?? coupledFallback },
+            set: { v in
+                if isDanceScene { working.albumArtworkBackingOffsetY = v }
+                else { updateScenePlate { $0.offsetY = v } }
+            }
+        )
+    }
+
+    private var plateColorOverridden: Bool { scenePlate?.colorHex != nil }
+
+    private var plateOffsetsOverridden: Bool {
+        if isDanceScene {
+            return working.albumArtworkBackingOffsetX != nil || working.albumArtworkBackingOffsetY != nil
+        }
+        return scenePlate?.offsetX != nil || scenePlate?.offsetY != nil
+    }
+
+    private func resetPlateOffsets() {
+        if isDanceScene {
+            working.albumArtworkBackingOffsetX = nil
+            working.albumArtworkBackingOffsetY = nil
+        } else {
+            updateScenePlate { $0.offsetX = nil; $0.offsetY = nil }
+        }
+    }
+
     // MARK: - Save / load a scene's override to a file (back up or copy onto another genre)
 
     private func saveSceneOverride() {
@@ -352,13 +421,26 @@ struct AppearancePositionTab: View {
         Section {
             Toggle("Backing plate behind artwork", isOn: $working.albumArtworkBackingEnabled)
             if working.albumArtworkBackingEnabled {
+                let art = artworkBinding()
                 HStack {
                     Text("Plate Colour").foregroundColor(.secondary).frame(width: 80, alignment: .leading)
-                    ColorPicker("", selection: Binding(
-                        get: { Color(hex: working.albumArtworkBackingColor) },
-                        set: { working.albumArtworkBackingColor = $0.hexString }))
+                    ColorPicker("", selection: plateColorBinding())
                         .labelsHidden()
+                    if !isDanceScene && plateColorOverridden {
+                        Button("Reset to profile colour") { updateScenePlate { $0.colorHex = nil } }
+                            .buttonStyle(.link).font(.caption)
+                    }
                     Spacer()
+                }
+                artworkSlider("Plate Horizontal",
+                              value: plateOffsetXBinding(coupledFallback: art.wrappedValue.offsetX),
+                              range: -100...100, format: "%+.0f%%")
+                artworkSlider("Plate Vertical",
+                              value: plateOffsetYBinding(coupledFallback: art.wrappedValue.offsetY),
+                              range: -100...100, format: "%+.0f%%")
+                if plateOffsetsOverridden {
+                    Button("Follow artwork position") { resetPlateOffsets() }
+                        .buttonStyle(.link).font(.caption)
                 }
                 artworkSlider("Plate Size", value: $working.albumArtworkBackingScale,
                               range: 1.0...1.25, format: "%.0f%%", percent: true)
@@ -382,7 +464,7 @@ struct AppearancePositionTab: View {
                 .foregroundColor(ControlTheme.accent)
         } footer: {
             Label {
-                Text("A square coloured plate centred under the artwork, up to 25 % larger. Its edges and corners fade like the artwork. Profile-wide (not per scene).")
+                Text("A square coloured plate under the artwork, up to 25 % larger. It only appears while artwork is shown. Colour and position follow the selected scene (position defaults to the artwork's); size, opacity and fade are profile-wide.")
             } icon: {
                 Image(systemName: "info.circle")
             }

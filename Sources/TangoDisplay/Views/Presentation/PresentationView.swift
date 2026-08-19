@@ -53,6 +53,10 @@ struct PresentationView: View {
                         // Artwork offsets are percentages of the resolution → resolve to points here.
                         let ax = renderProfile.albumArtworkOffsetX / 100 * geo.size.width
                         let ay = renderProfile.albumArtworkOffsetY / 100 * geo.size.height
+                        // Plate offsets: independent when set (base field or scene override),
+                        // otherwise coupled to the artwork offsets as before.
+                        let bx = (renderProfile.albumArtworkBackingOffsetX ?? renderProfile.albumArtworkOffsetX) / 100 * geo.size.width
+                        let by = (renderProfile.albumArtworkBackingOffsetY ?? renderProfile.albumArtworkOffsetY) / 100 * geo.size.height
                         // Square backing plate: match the artwork's shortest fitted dimension (B4).
                         // scaledToFit constrains to min(w/imgW, h/imgH); for non-square covers
                         // (landscape/portrait) this differs from min(containerW, containerH).
@@ -79,7 +83,7 @@ struct PresentationView: View {
                                 .mask(fadeMask(fade: renderProfile.albumArtworkBackingEdgeFade,
                                                style: renderProfile.albumArtworkBackingFadeStyle))
                                 .opacity(renderProfile.albumArtworkBackingOpacity)
-                                .offset(x: ax, y: ay)
+                                .offset(x: bx, y: by)
                         }
                         Group {
                             if let art = appState.currentArtwork {
