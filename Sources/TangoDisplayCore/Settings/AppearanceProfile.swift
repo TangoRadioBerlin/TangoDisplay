@@ -203,6 +203,10 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
     public var albumArtworkBackingOpacity: Double     // 0.0–1.0
     public var albumArtworkBackingEdgeFade: Double    // 0.0 = no fade, 1.0 = max edge/corner fade
     public var albumArtworkBackingFadeStyle: AlbumArtFadeStyle  // radial vs. edges
+    // Optional independent plate position (percent of resolution, like the artwork
+    // offsets). nil = follow the artwork offsets — the pre-feature behaviour.
+    public var albumArtworkBackingOffsetX: Double?
+    public var albumArtworkBackingOffsetY: Double?
 
     // Track Counter font
     public var trackCounterFontName:   String
@@ -497,6 +501,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         self.albumArtworkBackingOpacity = albumArtworkBackingOpacity
         self.albumArtworkBackingEdgeFade = albumArtworkBackingEdgeFade
         self.albumArtworkBackingFadeStyle = albumArtworkBackingFadeStyle
+        self.albumArtworkBackingOffsetX = nil
+        self.albumArtworkBackingOffsetY = nil
         self.genreTextCase = genreTextCase
         self.yearInParentheses = yearInParentheses
         self.danceItemOrder = danceItemOrder
@@ -674,6 +680,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         albumArtworkBackingOpacity  = try c.decodeIfPresent(Double.self, forKey: .albumArtworkBackingOpacity)  ?? 1.0
         albumArtworkBackingEdgeFade = try c.decodeIfPresent(Double.self, forKey: .albumArtworkBackingEdgeFade) ?? 0.0
         albumArtworkBackingFadeStyle = try c.decodeIfPresent(AlbumArtFadeStyle.self, forKey: .albumArtworkBackingFadeStyle) ?? .radial
+        albumArtworkBackingOffsetX  = try c.decodeIfPresent(Double.self, forKey: .albumArtworkBackingOffsetX)
+        albumArtworkBackingOffsetY  = try c.decodeIfPresent(Double.self, forKey: .albumArtworkBackingOffsetY)
         genreTextCase           = try c.decodeIfPresent(GenreTextCase.self,     forKey: .genreTextCase)           ?? .uppercase
         yearInParentheses       = try c.decodeIfPresent(Bool.self,              forKey: .yearInParentheses)       ?? false
         showSinger              = try c.decodeIfPresent(Bool.self,         forKey: .showSinger)              ?? false

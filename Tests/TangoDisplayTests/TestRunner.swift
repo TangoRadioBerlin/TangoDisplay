@@ -3365,6 +3365,7 @@ runMusicTrimTests()
 runEffectiveSilenceTests()
 runSeekTargetTests()
 runTimingSpanTests()
+runPlatePlacementTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -3845,7 +3846,6 @@ func runDropPasteboardRulesTests() {
             try expectNil(DropPasteboardRules.fileURL(fromPasteboardString: "file://"))
         }
     }
-
     suite("DropPasteboardRules.legacyPromiseAction") {
         test("all advertised items resolved — fast path") {
             let a = DropPasteboardRules.legacyPromiseAction(resolved: 3, advertised: 3, isMusicAppSource: false)
@@ -3882,6 +3882,79 @@ func runDropPasteboardRulesTests() {
             try expectEqual(a, .materialize)
         }
     }
+}
+
+// MARK: - Per-scene backing-plate override
+
+func runPlatePlacementTests() {
+    suite("PlatePlacement — per-scene backing plate") {
+        test("empty plate has no content, any field counts") {
+            try expect(!PlatePlacement().hasContent)
+            try expect(PlatePlacement(colorHex: "#FF0000").hasContent)
+            try expect(PlatePlacement(offsetX: 5).hasContent)
+            try expect(PlatePlacement(offsetY: -3).hasContent)
+        }
+
+        test("PositionSet with only a plate override has content") {
+            var set = PositionSet()
+            try expect(!set.hasContent)
+            set.plate = PlatePlacement(colorHex: "#112233")
+            try expect(set.hasContent)
+            set.plate = PlatePlacement()   // emptied plate = no content again (B6)
+            try expect(!set.hasContent)
+        }
+
+        test("override applies plate colour and offsets to the profile copy") {
+            var profile = AppearanceProfile.classic
+            profile.albumArtworkBackingColor = "#000000"
+            let set = PositionSet(plate: PlatePlacement(colorHex: "#AABBCC", offsetX: 7, offsetY: -2))
+            let resolved = profile.applyingPositionOverride(set)
+            try expectEqual(resolved.albumArtworkBackingColor, "#AABBCC")
+            try expectEqual(resolved.albumArtworkBackingOffsetX, 7)
+            try expectEqual(resolved.albumArtworkBackingOffsetY, -2)
+        }
+
+        test("nil plate fields inherit the profile values") {
+            var profile = AppearanceProfile.classic
+            profile.albumArtworkBackingColor = "#123456"
+            profile.albumArtworkBackingOffsetX = 4
+            let set = PositionSet(plate: PlatePlacement(offsetY: 9))
+            let resolved = profile.applyingPositionOverride(set)
+            try expectEqual(resolved.albumArtworkBackingColor, "#123456")   // inherited
+            try expectEqual(resolved.albumArtworkBackingOffsetX, 4)         // inherited
+            try expectEqual(resolved.albumArtworkBackingOffsetY, 9)         // overridden
+        }
+
+        test("legacy PositionSet JSON without plate decodes with nil plate") {
+            let legacy = Data("""
+            {"placements":{"title":{"offsetX":1,"offsetY":2,"boxWidth":0,"hAlign":"center"}}}
+            """.utf8)
+            let set = try JSONDecoder().decode(PositionSet.self, from: legacy)
+            try expectNil(set.plate)
+            try expect(set.hasContent)
+        }
+
+        test("plate survives a PositionSet encode/decode round-trip") {
+            let set = PositionSet(plate: PlatePlacement(colorHex: "#010203", offsetX: 1.5))
+            let data = try JSONEncoder().encode(set)
+            let back = try JSONDecoder().decode(PositionSet.self, from: data)
+            try expectEqual(back.plate, set.plate)
+        }
+
+        test("legacy profile JSON without backing offsets decodes with nil (follow artwork)") {
+            var profile = AppearanceProfile.classic
+            profile.isBuiltIn = false
+            let data = try JSONEncoder().encode(profile)
+            var json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            json.removeValue(forKey: "albumArtworkBackingOffsetX")
+            json.removeValue(forKey: "albumArtworkBackingOffsetY")
+            let stripped = try JSONSerialization.data(withJSONObject: json)
+            let decoded = try JSONDecoder().decode(AppearanceProfile.self, from: stripped)
+            try expectNil(decoded.albumArtworkBackingOffsetX)
+            try expectNil(decoded.albumArtworkBackingOffsetY)
+        }
+    }
+
 }
 
 // MARK: - JRiver playlist index clamp

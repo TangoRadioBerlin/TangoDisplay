@@ -32,21 +32,43 @@ public struct ArtworkPlacement: Codable, Equatable {
     }
 }
 
+/// Per-scene override for the artwork backing plate. Every field is optional:
+/// nil inherits the profile value (colour) or follows the artwork offsets
+/// (position) — exactly the pre-feature behaviour.
+public struct PlatePlacement: Codable, Equatable {
+    public var colorHex: String?
+    public var offsetX: Double?
+    public var offsetY: Double?
+
+    public init(colorHex: String? = nil, offsetX: Double? = nil, offsetY: Double? = nil) {
+        self.colorHex = colorHex
+        self.offsetX = offsetX
+        self.offsetY = offsetY
+    }
+
+    /// True when at least one field is actually overridden.
+    public var hasContent: Bool { colorHex != nil || offsetX != nil || offsetY != nil }
+}
+
 /// A sparse per-element position override set, keyed by element name (see AppearanceProfile.positionElementKeys).
 /// Elements absent from `placements` fall back to the profile's default position. `artwork` optionally
-/// overrides the album-artwork placement for the genre.
+/// overrides the album-artwork placement for the genre, `plate` the artwork backing plate.
 public struct PositionSet: Codable, Equatable {
     public var placements: [String: ElementPlacement]
     public var artwork: ArtworkPlacement?
+    public var plate: PlatePlacement?
 
-    public init(placements: [String: ElementPlacement] = [:], artwork: ArtworkPlacement? = nil) {
+    public init(placements: [String: ElementPlacement] = [:], artwork: ArtworkPlacement? = nil,
+                plate: PlatePlacement? = nil) {
         self.placements = placements
         self.artwork = artwork
+        self.plate = plate
     }
 
     /// True when the set contains at least one real override. An empty PositionSet
     /// (all elements returned to base) should be treated as absent and set to nil (B6).
-    public var hasContent: Bool { !placements.isEmpty || artwork != nil }
+    /// A plate whose fields were all reset counts as absent too.
+    public var hasContent: Bool { !placements.isEmpty || artwork != nil || plate?.hasContent == true }
 }
 
 extension AppearanceProfile {
@@ -140,6 +162,11 @@ extension AppearanceProfile {
             copy.albumArtworkOffsetY = a.offsetY
             copy.albumArtworkScale = a.scale
             copy.albumArtworkOpacity = a.opacity
+        }
+        if let p = set.plate {
+            if let color = p.colorHex { copy.albumArtworkBackingColor = color }
+            if let x = p.offsetX { copy.albumArtworkBackingOffsetX = x }
+            if let y = p.offsetY { copy.albumArtworkBackingOffsetY = y }
         }
         return copy
     }
