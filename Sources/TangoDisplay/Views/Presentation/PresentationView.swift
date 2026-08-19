@@ -65,8 +65,14 @@ struct PresentationView: View {
                             return min(art.size.width, art.size.height) * ratio * renderProfile.albumArtworkScale
                         }()
                         let backingSide = artworkSide * renderProfile.albumArtworkBackingScale
+                        // The plate is a backing FOR the artwork: without a loaded image
+                        // (track has no embedded art, or art is still loading) it must not
+                        // stand alone as a bare coloured square. The positioning preview
+                        // keeps it visible alongside the music-note placeholder.
+                        let plateVisible = appState.currentArtwork != nil
+                            || (isPreview && appState.showElementBoundsInPreview)
                         ZStack {
-                        if renderProfile.albumArtworkBackingEnabled {
+                        if renderProfile.albumArtworkBackingEnabled, plateVisible {
                             Rectangle()
                                 .fill(renderProfile.albumArtworkBackingSwiftUIColor)
                                 .frame(width: backingSide, height: backingSide)
