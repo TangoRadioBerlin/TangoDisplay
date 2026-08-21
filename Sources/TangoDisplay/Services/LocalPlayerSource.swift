@@ -166,6 +166,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         self.settings = settings
         self.configStore = configStore
         super.init()
+        // Kick off the one-time Music-library trim enumeration in the background so
+        // the non-blocking peek in loadEntry has data by the time playback starts.
+        SetlistManager.warmUpMusicTrimTimes()
         setupAudioEngine()
         levelMeter = AudioLevelMeter(mixerNode: audioEngine.mainMixerNode)
         playerNode.volume = max(0, min(1, volume))
@@ -989,8 +992,18 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             // time model; updateTime reasserts it every tick), the scheduled segment and
             // activeWindow enforce the trim. A degenerate window plays the full file.
             let fullSeconds = Double(file.length) / sr
+            // Live Music start time (Song Info → Options): cortinas always start
+            // there, dance tracks per entry opt-in; a manual trim wins. Non-blocking
+            // peek — during the first seconds after launch the table may not be
+            // enumerated yet, in which case this one load starts at the file head.
+            let detector = settings.makeDetector()
+            let effTrimStart = effectiveTrimStart(
+                entryTrimStart: entry.trimStartSeconds,
+                musicStart: SetlistManager.musicTrimIfLoaded(for: entry.fileURL.path)?.start,
+                isCortina: detector.isCortina(genre: entry.track.genre),
+                useMusicStartTime: false)   // per-entry opt-in lands with the follow-up commit
             let window = playbackWindow(duration: fullSeconds,
-                                        trimStart: entry.trimStartSeconds,
+                                        trimStart: effTrimStart,
                                         trimEnd: entry.trimEndSeconds,
                                         skipLeading: forceSkipLeading,
                                         trimTrailing: forceTrimTrailing)
@@ -1024,7 +1037,15 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             // so it must not be credited against the auto-gap target (else the gap collapses).
             let outTrimEnd = entry.trimEndSeconds
             let outDuration = fullSeconds
-            let inTrimStart = next?.trimStartSeconds
+            // The incoming track's effective start (manual trim or live Music start)
+            // decides how much of its leading silence will actually play.
+            let inTrimStart = next.flatMap { n in
+                effectiveTrimStart(
+                    entryTrimStart: n.trimStartSeconds,
+                    musicStart: SetlistManager.musicTrimIfLoaded(for: n.fileURL.path)?.start,
+                    isCortina: detector.isCortina(genre: n.track.genre),
+                    useMusicStartTime: false)   // per-entry opt-in lands with the follow-up commit
+            }
             autoGapAnalysisTask = Task { [weak self] in
                 let cur = await AudioSilenceAnalyzer.shared.analyze(url: currentURL)
                 guard !Task.isCancelled else { return }

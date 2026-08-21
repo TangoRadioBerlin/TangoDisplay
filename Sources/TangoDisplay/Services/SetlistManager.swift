@@ -666,11 +666,34 @@ final class SetlistManager: ObservableObject {
     // Read via the iTunesLibrary framework so it works without the deprecated "Share Library
     // XML" preference. Times are milliseconds. Whole-library enumeration once per session;
     // if users change Music start/stop mid-session, add an invalidate-on-drop refresh.
-    private static let musicTrimTimes: [String: (startMs: Int, stopMs: Int, totalMs: Int)] = loadMusicTrimTimes()
+    //
+    // Loaded exactly once, off the main actor, by `musicTrimTask`; the finished table is
+    // mirrored into a lock-guarded cache so the built-in player can peek at load time
+    // WITHOUT blocking (loadEntry runs synchronously on main — the enumeration takes
+    // seconds on large libraries).
+    private typealias MusicTrimTable = [String: (startMs: Int, stopMs: Int, totalMs: Int)]
 
-    private static func loadMusicTrimTimes() -> [String: (startMs: Int, stopMs: Int, totalMs: Int)] {
+    private static let musicTrimLock = NSLock()
+    nonisolated(unsafe) private static var musicTrimCache: MusicTrimTable?
+
+    private static let musicTrimTask = Task<Void, Never> {
+        storeMusicTrimTable(loadMusicTrimTimes())
+    }
+
+    // Synchronous on purpose: NSLock must not be taken directly in an async frame,
+    // and the critical section holds no suspension points.
+    private static func storeMusicTrimTable(_ table: MusicTrimTable) {
+        musicTrimLock.lock()
+        musicTrimCache = table
+        musicTrimLock.unlock()
+    }
+
+    /// Kick off the one-time library enumeration in the background.
+    static func warmUpMusicTrimTimes() { _ = musicTrimTask }
+
+    private static func loadMusicTrimTimes() -> MusicTrimTable {
         guard let lib = try? ITLibrary(apiVersion: "1.1") else { return [:] }
-        var result: [String: (startMs: Int, stopMs: Int, totalMs: Int)] = [:]
+        var result: MusicTrimTable = [:]
         for item in lib.allMediaItems {
             guard let loc = item.location, loc.isFileURL else { continue }
             result[iTunesMediaRelativeKey(loc.path)] = (item.startTime, item.stopTime, item.totalTime)
@@ -678,14 +701,21 @@ final class SetlistManager: ObservableObject {
         return result
     }
 
-    static func musicTrim(for path: String) -> (start: Double?, end: Double?) {
-        guard let t = musicTrimTimes[iTunesMediaRelativeKey(path)] else { return (nil, nil) }
+    /// Non-blocking peek: nil while the library is still being enumerated (the caller
+    /// then simply skips the Music trim for that one load), (nil, nil) for files that
+    /// are loaded-but-absent from the Music library.
+    static func musicTrimIfLoaded(for path: String) -> (start: Double?, end: Double?)? {
+        musicTrimLock.lock()
+        defer { musicTrimLock.unlock() }
+        guard let cache = musicTrimCache else { return nil }
+        guard let t = cache[iTunesMediaRelativeKey(path)] else { return (nil, nil) }
         return musicTrimSeconds(startMs: t.startMs, stopMs: t.stopMs, totalMs: t.totalMs)
     }
 
-    // Runs the (first-call) whole-library ITLibrary enumeration off the main actor.
+    // Waits for the one-time whole-library enumeration off the main actor (drop path).
     nonisolated static func musicTrimAsync(_ path: String) async -> (start: Double?, end: Double?) {
-        musicTrim(for: path)
+        await musicTrimTask.value
+        return musicTrimIfLoaded(for: path) ?? (nil, nil)
     }
 
     // Artist+title → genre lookup for players (e.g. MegaSeg) that expose no file path.
