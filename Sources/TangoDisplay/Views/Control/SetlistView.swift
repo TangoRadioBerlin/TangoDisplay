@@ -1298,6 +1298,24 @@ struct SetlistView: View {
                 setlist.setPerformance(!areAllPerformance, for: performanceTargets)
             }
         }
+        // Music start time opt-in: dance tracks only (cortinas always use it),
+        // built-in player only (only it enforces the start).
+        if appState.localPlayer != nil {
+            let detector = settings.makeDetector()
+            let musicStartTargets = targets.filter { id in
+                guard let e = setlist.entries.first(where: { $0.id == id }) else { return false }
+                return !detector.isCortina(genre: e.track.genre)
+                    && (e.state != .played || e.id == player.currentEntryID)
+            }
+            if !musicStartTargets.isEmpty {
+                let allUse = musicStartTargets.allSatisfy { id in
+                    setlist.entries.first(where: { $0.id == id })?.useMusicStartTime ?? false
+                }
+                Button(allUse ? "Stop Using Music Start Time" : "Use Music Start Time") {
+                    setlist.setUseMusicStartTime(!allUse, for: musicStartTargets)
+                }
+            }
+        }
         Divider()
         let singleEntry = targets.count == 1 ? setlist.entries.first(where: { targets.contains($0.id) }) : nil
         let hasTag = singleEntry.map { $0.tagColor != TagColor.none } ?? targets.contains(where: { id in

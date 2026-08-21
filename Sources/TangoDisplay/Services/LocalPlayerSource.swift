@@ -1001,7 +1001,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 entryTrimStart: entry.trimStartSeconds,
                 musicStart: SetlistManager.musicTrimIfLoaded(for: entry.fileURL.path)?.start,
                 isCortina: detector.isCortina(genre: entry.track.genre),
-                useMusicStartTime: false)   // per-entry opt-in lands with the follow-up commit
+                useMusicStartTime: entry.useMusicStartTime)
             let window = playbackWindow(duration: fullSeconds,
                                         trimStart: effTrimStart,
                                         trimEnd: entry.trimEndSeconds,
@@ -1044,7 +1044,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                     entryTrimStart: n.trimStartSeconds,
                     musicStart: SetlistManager.musicTrimIfLoaded(for: n.fileURL.path)?.start,
                     isCortina: detector.isCortina(genre: n.track.genre),
-                    useMusicStartTime: false)   // per-entry opt-in lands with the follow-up commit
+                    useMusicStartTime: n.useMusicStartTime)
             }
             autoGapAnalysisTask = Task { [weak self] in
                 let cur = await AudioSilenceAnalyzer.shared.analyze(url: currentURL)

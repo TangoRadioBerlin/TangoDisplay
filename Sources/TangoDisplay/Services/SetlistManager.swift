@@ -28,6 +28,7 @@ struct SetlistEntry: Identifiable, Codable {
     var tagColor: TagColor = .none
     var isPerformance: Bool = false    // track is part of a guest performance
     var repeatTrack: Bool = false      // non-dance track loops until stop-after or un-marked
+    var useMusicStartTime: Bool = false   // dance track opts in to Music's per-song start time (cortinas always use it)
     var trimStartSeconds: Double? = nil   // nil = play from file start
     var trimEndSeconds: Double? = nil     // nil = play to file end
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
@@ -35,7 +36,7 @@ struct SetlistEntry: Identifiable, Codable {
     var tandaRef: String? = nil        // opaque grouping hint from a remote controller (echoed)
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, repeatTrack, trimStartSeconds, trimEndSeconds, clientRef, tandaRef
+        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, repeatTrack, useMusicStartTime, trimStartSeconds, trimEndSeconds, clientRef, tandaRef
         // autoGapApplied is intentionally excluded — reset each playback session
     }
 
@@ -81,6 +82,7 @@ struct SetlistEntry: Identifiable, Codable {
         }
         isPerformance = try c.decodeIfPresent(Bool.self, forKey: .isPerformance) ?? false
         repeatTrack = try c.decodeIfPresent(Bool.self, forKey: .repeatTrack) ?? false
+        useMusicStartTime = try c.decodeIfPresent(Bool.self, forKey: .useMusicStartTime) ?? false
         trimStartSeconds = try c.decodeIfPresent(Double.self, forKey: .trimStartSeconds)
         trimEndSeconds = try c.decodeIfPresent(Double.self, forKey: .trimEndSeconds)
         clientRef = try c.decodeIfPresent(String.self, forKey: .clientRef)
@@ -303,6 +305,14 @@ final class SetlistManager: ObservableObject {
     func setAutoGapOverride(id: UUID, ignore: Bool) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[i].autoGapOverride = ignore
+        save()
+    }
+
+    func setUseMusicStartTime(_ value: Bool, for ids: Set<UUID>) {
+        for id in ids {
+            guard let i = entries.firstIndex(where: { $0.id == id }) else { continue }
+            entries[i].useMusicStartTime = value
+        }
         save()
     }
 

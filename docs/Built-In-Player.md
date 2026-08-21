@@ -41,6 +41,8 @@ You can also **copy** audio files in Finder, Music.app, Swinsian, or Foobar2000 
 
 When the built-in player is active, dropping tracks from Music also imports each track's **start/stop times** (set in Music under Song Info → Options) as playback trim markers automatically — see [Track Start & End Time](#track-start--end-time) below.
 
+Music start times are also applied **live at playback**, no drop required (works for saved setlists too): **cortinas always** begin at their Music start time, and dance tracks can opt in per track via right-click → **Use Music Start Time**. A manual trim set in the app always takes precedence. The Music library is read once in the background at launch; a track started within the first seconds after launch may play from the file beginning that one time.
+
 Dragged tracks whose files no longer exist on disk (shown with a warning triangle in Music) are skipped with a brief "N files not found" note, so they can't silently fail at playback later.
 
 #### Duplicate Track Protection
