@@ -4232,6 +4232,35 @@ func runMusicTrimTests() {
             try expectNil(r.end)
         }
     }
+
+    suite("effectiveTrimStart — live Music start times") {
+        test("manual entry trim always wins, even for cortinas") {
+            try expectEqual(effectiveTrimStart(entryTrimStart: 12, musicStart: 30,
+                                               isCortina: true, useMusicStartTime: true), 12)
+            try expectEqual(effectiveTrimStart(entryTrimStart: 12, musicStart: 30,
+                                               isCortina: false, useMusicStartTime: false), 12)
+        }
+
+        test("cortinas take the Music start without any opt-in") {
+            try expectEqual(effectiveTrimStart(entryTrimStart: nil, musicStart: 30,
+                                               isCortina: true, useMusicStartTime: false), 30)
+        }
+
+        test("dance tracks ignore the Music start unless opted in") {
+            try expectNil(effectiveTrimStart(entryTrimStart: nil, musicStart: 30,
+                                             isCortina: false, useMusicStartTime: false))
+        }
+
+        test("opted-in dance track takes the Music start") {
+            try expectEqual(effectiveTrimStart(entryTrimStart: nil, musicStart: 30,
+                                               isCortina: false, useMusicStartTime: true), 30)
+        }
+
+        test("no Music start yields nil (start at file beginning)") {
+            try expectNil(effectiveTrimStart(entryTrimStart: nil, musicStart: nil,
+                                             isCortina: true, useMusicStartTime: true))
+        }
+    }
 }
 
 // MARK: - Effective silence at trim points

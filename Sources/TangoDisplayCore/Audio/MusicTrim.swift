@@ -8,3 +8,13 @@ public func musicTrimSeconds(startMs: Int, stopMs: Int, totalMs: Int) -> (start:
     let end   = (stopMs > 0 && stopMs < totalMs) ? Double(stopMs) / 1000 : nil
     return (start, end)
 }
+
+/// Which trim start applies when a track loads. A manual entry trim always
+/// wins; cortinas always take the Music start time; dance tracks only when
+/// the entry opted in. nil = start at the file beginning.
+public func effectiveTrimStart(entryTrimStart: Double?, musicStart: Double?,
+                               isCortina: Bool, useMusicStartTime: Bool) -> Double? {
+    if let entryTrimStart { return entryTrimStart }
+    guard isCortina || useMusicStartTime else { return nil }
+    return musicStart
+}
