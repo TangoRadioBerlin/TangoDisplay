@@ -677,10 +677,12 @@ final class SetlistManager: ObservableObject {
     // XML" preference. Times are milliseconds. Whole-library enumeration once per session;
     // if users change Music start/stop mid-session, add an invalidate-on-drop refresh.
     //
-    // Loaded exactly once, off the main actor, by `musicTrimTask`; the finished table is
-    // mirrored into a lock-guarded cache so the built-in player can peek at load time
-    // WITHOUT blocking (loadEntry runs synchronously on main — the enumeration takes
-    // seconds on large libraries).
+    // Loaded exactly once, off the main actor, by `musicTrimTask` — and only LAZILY, the
+    // first time a track is dropped into the setlist (`musicTrimAsync`). Deliberately not
+    // started at launch: the whole-library enumeration is heavy enough to make app start
+    // sluggish on large libraries. The finished table is mirrored into a lock-guarded
+    // cache so the built-in player can peek at load time WITHOUT blocking (loadEntry runs
+    // synchronously on main); before the first drop of a session the peek yields nil.
     private typealias MusicTrimTable = [String: (startMs: Int, stopMs: Int, totalMs: Int)]
 
     private static let musicTrimLock = NSLock()
@@ -698,9 +700,6 @@ final class SetlistManager: ObservableObject {
         musicTrimLock.unlock()
     }
 
-    /// Kick off the one-time library enumeration in the background.
-    static func warmUpMusicTrimTimes() { _ = musicTrimTask }
-
     private static func loadMusicTrimTimes() -> MusicTrimTable {
         guard let lib = try? ITLibrary(apiVersion: "1.1") else { return [:] }
         var result: MusicTrimTable = [:]
@@ -711,9 +710,10 @@ final class SetlistManager: ObservableObject {
         return result
     }
 
-    /// Non-blocking peek: nil while the library is still being enumerated (the caller
-    /// then simply skips the Music trim for that one load), (nil, nil) for files that
-    /// are loaded-but-absent from the Music library.
+    /// Non-blocking peek: nil while the library has not been enumerated yet (no drop in
+    /// this session, or still loading — the caller then simply skips the Music trim for
+    /// that load), (nil, nil) for files that are loaded-but-absent from the Music library.
+    /// Never triggers the enumeration itself.
     static func musicTrimIfLoaded(for path: String) -> (start: Double?, end: Double?)? {
         musicTrimLock.lock()
         defer { musicTrimLock.unlock() }

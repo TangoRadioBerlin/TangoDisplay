@@ -166,9 +166,6 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         self.settings = settings
         self.configStore = configStore
         super.init()
-        // Kick off the one-time Music-library trim enumeration in the background so
-        // the non-blocking peek in loadEntry has data by the time playback starts.
-        SetlistManager.warmUpMusicTrimTimes()
         setupAudioEngine()
         levelMeter = AudioLevelMeter(mixerNode: audioEngine.mainMixerNode)
         playerNode.volume = max(0, min(1, volume))
