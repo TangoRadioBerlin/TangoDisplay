@@ -3367,6 +3367,7 @@ runSeekTargetTests()
 runTimingSpanTests()
 runPlatePlacementTests()
 runDropPayloadClassificationTests()
+runDropResolutionAccountingTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4412,6 +4413,60 @@ func runDropPayloadClassificationTests() {
         test("file-url only is not Music.app") {
             try expect(!DropPasteboardRules.isMusicAppSource(itemTypes: [[T.fileURL], [T.fileURL, T.legacyPromiseURL]]))
             try expect(!DropPasteboardRules.isMusicAppSource(itemTypes: []))
+        }
+    }
+}
+
+// MARK: - Drop resolution accounting (Core)
+
+func runDropResolutionAccountingTests() {
+    typealias T = DropPasteboardType
+
+    suite("DropPasteboardRules.resolutionOutcome") {
+        test("nothing requested") {
+            try expectEqual(DropPasteboardRules.resolutionOutcome(requested: 0, resolved: 0), .nothingRequested)
+        }
+        test("all resolved → complete") {
+            try expectEqual(DropPasteboardRules.resolutionOutcome(requested: 5, resolved: 5), .complete)
+        }
+        test("shortfall → partial with unreadable count") {
+            try expectEqual(DropPasteboardRules.resolutionOutcome(requested: 5, resolved: 3), .partial(unreadable: 2))
+        }
+        test("nothing resolved → empty with unreadable count") {
+            try expectEqual(DropPasteboardRules.resolutionOutcome(requested: 5, resolved: 0), .empty(unreadable: 5))
+        }
+        test("more resolved than requested is still complete (never negative)") {
+            try expectEqual(DropPasteboardRules.resolutionOutcome(requested: 3, resolved: 5), .complete)
+        }
+    }
+
+    suite("DropPasteboardRules.typeSummary") {
+        test("groups identical type sets with counts, deterministic order") {
+            let s = DropPasteboardRules.typeSummary(itemTypes: [
+                [T.fileURL, T.legacyPromiseURL], [T.legacyPromiseURL], [T.fileURL, T.legacyPromiseURL], [T.fileURL, T.legacyPromiseURL]
+            ])
+            try expectEqual(s, "3x[com.apple.pasteboard.promised-file-url+public.file-url] 1x[com.apple.pasteboard.promised-file-url]")
+        }
+        test("empty item list") {
+            try expectEqual(DropPasteboardRules.typeSummary(itemTypes: []), "0 items")
+        }
+        test("truncates beyond maxItems with a remainder note") {
+            let items: [Set<String>] = (0..<5).map { ["type\($0)"] }
+            let s = DropPasteboardRules.typeSummary(itemTypes: items, maxItems: 3)
+            try expectEqual(s, "1x[type0] 1x[type1] 1x[type2] +2 more")
+        }
+    }
+
+    suite("DropPasteboardRules.dedupe") {
+        test("keeps first occurrence, order preserved") {
+            let a = URL(fileURLWithPath: "/Music/a.mp3")
+            let b = URL(fileURLWithPath: "/Music/b.mp3")
+            try expectEqual(DropPasteboardRules.dedupe([a, b, a, b, a]), [a, b])
+        }
+        test("standardized paths compare equal") {
+            let a = URL(fileURLWithPath: "/Music/a.mp3")
+            let a2 = URL(fileURLWithPath: "/Music/./a.mp3")
+            try expectEqual(DropPasteboardRules.dedupe([a, a2]).count, 1)
         }
     }
 }

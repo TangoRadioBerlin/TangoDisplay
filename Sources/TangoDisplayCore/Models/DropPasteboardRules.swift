@@ -58,6 +58,60 @@ public enum DropPasteboardRules {
         }
     }
 
+    // MARK: - Resolution accounting
+
+    /// Requested-vs-resolved bookkeeping for a drop. Any shortfall must reach
+    /// the user — a silently truncated multi-track drag is the failure mode
+    /// this exists to prevent.
+    public enum ResolutionOutcome: Equatable {
+        case nothingRequested
+        case complete
+        case partial(unreadable: Int)
+        case empty(unreadable: Int)
+    }
+
+    public static func resolutionOutcome(requested: Int, resolved: Int) -> ResolutionOutcome {
+        if requested <= 0 { return .nothingRequested }
+        if resolved >= requested { return .complete }
+        return resolved > 0 ? .partial(unreadable: requested - resolved)
+                            : .empty(unreadable: requested)
+    }
+
+    /// Compact, deterministic histogram of per-item type sets for the
+    /// persisted drop log — e.g. `3x[a+b] 1x[b]`. Groups keep first-seen
+    /// order; types inside a group are sorted. Never contains file paths.
+    public static func typeSummary(itemTypes: [Set<String>], maxItems: Int = 20) -> String {
+        guard !itemTypes.isEmpty else { return "0 items" }
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for types in itemTypes {
+            let key = types.sorted().joined(separator: "+")
+            if counts[key] == nil { order.append(key) }
+            counts[key, default: 0] += 1
+        }
+        var parts: [String] = []
+        var shown = 0
+        for key in order {
+            if shown >= maxItems { break }
+            parts.append("\(counts[key]!)x[\(key)]")
+            shown += 1
+        }
+        if order.count > shown { parts.append("+\(order.count - shown) more") }
+        return parts.joined(separator: " ")
+    }
+
+    /// Order-preserving de-duplication on standardized file URLs (a Music
+    /// metadata plist may list the same track once per item).
+    public static func dedupe(_ urls: [URL]) -> [URL] {
+        var seen = Set<URL>()
+        var out: [URL] = []
+        for url in urls {
+            let key = url.standardizedFileURL
+            if seen.insert(key).inserted { out.append(url) }
+        }
+        return out
+    }
+
     // MARK: - Pasteboard string → file URL
 
     /// Parse a pasteboard string into a local file URL.
