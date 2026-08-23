@@ -3368,6 +3368,7 @@ runTimingSpanTests()
 runPlatePlacementTests()
 runDropPayloadClassificationTests()
 runDropResolutionAccountingTests()
+runDropFeedbackCountsTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4467,6 +4468,70 @@ func runDropResolutionAccountingTests() {
             let a = URL(fileURLWithPath: "/Music/a.mp3")
             let a2 = URL(fileURLWithPath: "/Music/./a.mp3")
             try expectEqual(DropPasteboardRules.dedupe([a, a2]).count, 1)
+        }
+    }
+}
+
+// MARK: - Drop feedback with unreadable / unsupported counts (Core)
+
+func runDropFeedbackCountsTests() {
+    suite("SetlistDropRules.dropFeedbackMessage — unreadable/unsupported") {
+        test("shortfall reports added of requested") {
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 3, skippedDuplicates: 0, missing: 0,
+                                                                 unreadable: 2, unsupported: 0),
+                            "Added 3 of 5 — 2 items could not be read")
+        }
+        test("singular unreadable item") {
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 1, skippedDuplicates: 0, missing: 0,
+                                                                 unreadable: 1, unsupported: 0),
+                            "Added 1 of 2 — 1 item could not be read")
+        }
+        test("nothing added when every item was unreadable") {
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 0, skippedDuplicates: 0, missing: 0,
+                                                                 unreadable: 4, unsupported: 0),
+                            "Nothing added — 4 items could not be read")
+        }
+        test("unsupported file types are reported") {
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 2, skippedDuplicates: 0, missing: 0,
+                                                                 unreadable: 0, unsupported: 1),
+                            "Added 2 — 1 unsupported file type")
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 0, skippedDuplicates: 0, missing: 0,
+                                                                 unreadable: 0, unsupported: 2),
+                            "Nothing added — 2 unsupported file types")
+        }
+        test("combined notes keep the order duplicates, missing, unreadable, unsupported") {
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 1, skippedDuplicates: 1, missing: 1,
+                                                                 unreadable: 1, unsupported: 1),
+                            "Added 1 of 2 — 1 already in set — 1 file not found — 1 item could not be read — 1 unsupported file type")
+        }
+        test("nil when all skip counts are zero") {
+            try expectNil(SetlistDropRules.dropFeedbackMessage(added: 3, skippedDuplicates: 0, missing: 0,
+                                                               unreadable: 0, unsupported: 0))
+        }
+        test("three-argument overload output is unchanged") {
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 2, skippedDuplicates: 1, missing: 2),
+                            "Added 2 — 1 already in set — 2 files not found")
+            try expectEqual(SetlistDropRules.dropFeedbackMessage(added: 3, skippedDuplicates: 0, missing: 1),
+                            "1 file not found")
+        }
+    }
+
+    suite("SetlistDropRules.partitionSupported") {
+        let mp3 = URL(fileURLWithPath: "/tmp/a.mp3")
+        let upper = URL(fileURLWithPath: "/tmp/b.MP3")
+        let m4p = URL(fileURLWithPath: "/tmp/c.m4p")
+        let none = URL(fileURLWithPath: "/tmp/promised-file")
+        test("keeps supported audio in order, counts the rest") {
+            let r = SetlistDropRules.partitionSupported([m4p, mp3, none, upper])
+            try expectEqual(r.supported, [mp3, upper])
+            try expectEqual(r.unsupportedCount, 2)
+        }
+        test("extension match is case-insensitive") {
+            try expectEqual(SetlistDropRules.partitionSupported([upper]).unsupportedCount, 0)
+        }
+        test("supported extension contract") {
+            try expectEqual(SetlistDropRules.supportedAudioExtensions,
+                            ["mp3", "m4a", "aiff", "aif", "wav", "flac", "caf", "opus"])
         }
     }
 }

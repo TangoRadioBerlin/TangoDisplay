@@ -37,14 +37,61 @@ public enum SetlistDropRules {
         "\(count) file\(count == 1 ? "" : "s") not found"
     }
 
+    public static func unreadableNote(_ count: Int) -> String {
+        "\(count) item\(count == 1 ? "" : "s") could not be read"
+    }
+
+    public static func unsupportedNote(_ count: Int) -> String {
+        "\(count) unsupported file type\(count == 1 ? "" : "s")"
+    }
+
+    /// Audio file extensions the built-in player accepts. Single source of
+    /// truth for the setlist's insert filter and the drop pre-filter.
+    public static let supportedAudioExtensions: Set<String> =
+        ["mp3", "m4a", "aiff", "aif", "wav", "flac", "caf", "opus"]
+
+    /// Split dropped URLs into supported audio files (order preserved) and a
+    /// count of the rest, so unsupported types are reported instead of being
+    /// dropped silently inside the setlist insert.
+    public static func partitionSupported(
+        _ urls: [URL],
+        supportedExtensions: Set<String> = supportedAudioExtensions
+    ) -> (supported: [URL], unsupportedCount: Int) {
+        let supported = urls.filter { supportedExtensions.contains($0.pathExtension.lowercased()) }
+        return (supported, urls.count - supported.count)
+    }
+
     /// Combined post-drop feedback line; nil when nothing was skipped.
     /// Duplicate skips mention the added count; a pure missing-file skip is
     /// reported on its own.
     public static func dropFeedbackMessage(added: Int, skippedDuplicates: Int, missing: Int) -> String? {
-        if skippedDuplicates > 0 {
-            let base = "Added \(added) — \(skippedDuplicates) already in set"
-            return missing > 0 ? base + " — " + missingFileNote(missing) : base
+        dropFeedbackMessage(added: added, skippedDuplicates: skippedDuplicates, missing: missing,
+                            unreadable: 0, unsupported: 0)
+    }
+
+    /// Full post-drop feedback. `unreadable` = items the drop could not turn
+    /// into a file URL (the requested-vs-resolved shortfall); `unsupported` =
+    /// resolved files with a non-audio extension. Any shortfall leads with
+    /// "Added N of M" (or "Nothing added") so a partial multi-track drop is
+    /// never mistaken for a complete one. Notes follow in a fixed order:
+    /// duplicates, missing, unreadable, unsupported. nil when nothing was skipped.
+    public static func dropFeedbackMessage(added: Int, skippedDuplicates: Int, missing: Int,
+                                           unreadable: Int, unsupported: Int) -> String? {
+        var notes: [String] = []
+        if skippedDuplicates > 0 { notes.append("\(skippedDuplicates) already in set") }
+        if missing > 0 { notes.append(missingFileNote(missing)) }
+        if unreadable > 0 { notes.append(unreadableNote(unreadable)) }
+        if unsupported > 0 { notes.append(unsupportedNote(unsupported)) }
+        guard !notes.isEmpty else { return nil }
+
+        let head: String?
+        if unreadable > 0 {
+            head = added > 0 ? "Added \(added) of \(added + unreadable)" : "Nothing added"
+        } else if skippedDuplicates > 0 || unsupported > 0 {
+            head = added > 0 ? "Added \(added)" : (skippedDuplicates > 0 ? "Added 0" : "Nothing added")
+        } else {
+            head = nil   // missing-only keeps its standalone wording
         }
-        return missing > 0 ? missingFileNote(missing) : nil
+        return ([head].compactMap { $0 } + notes).joined(separator: " — ")
     }
 }

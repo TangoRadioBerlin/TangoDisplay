@@ -846,8 +846,7 @@ final class SetlistManager: ObservableObject {
 }
 
 private func isAudioURL(_ url: URL) -> Bool {
-    let ext = url.pathExtension.lowercased()
-    return ["mp3", "m4a", "aiff", "aif", "wav", "flac", "caf", "opus"].contains(ext)
+    SetlistDropRules.supportedAudioExtensions.contains(url.pathExtension.lowercased())
 }
 
 // Standard iTunes/ID3v1/Winamp genre list (192 entries).
