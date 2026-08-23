@@ -570,11 +570,19 @@ When enabled, a live dB reading appears in the Setlist toolbar showing the curre
 
 The indicator updates every 250 ms and disappears automatically if microphone permission is denied.
 
+### Calibration
+
+The Mac's microphone is not a measuring instrument, so the raw reading is only SPL-*like*. In **Settings › Player › Decibel Meter**, the **Calibration offset** (−40…+40 dB) is added to every reading; the live **Current reading** is shown right next to it. Place an external sound level meter beside the Mac and step the offset until both readings match. The offset applies to whichever input device is selected.
+
+> **Practical Use Case:** As the noise level can often vary between the DJ booth and the floor, calibrate against a professional meter at the desk, then measure once at floor level to learn the booth-to-floor difference and set your acceptable range accordingly.
+
+### Response
+
+The **Response** slider sets the averaging window of the reading (0.25–10 s, default 2 s). A longer window gives a calm display that no longer jumps with every beat; 0.25 s behaves like an instantaneous meter. The meter averages signal power over the window, so short peaks still raise the reading, just more gently.
+
 ### Setting Your Range
 
 Use the interactive range slider in **Settings › Player › Decibel Meter** to configure your thresholds. The slider shows three colour zones — blue, green, and red — with draggable handles for the low and high boundaries (0–140 dB). The defaults are 60 dB (low) and 80 dB (high).
-
-> **Practical Use Case:** As the noise level can often vary between the DJ booth and the floor, set the noise level with a professional noise meter at floor level. Measure at the desk and set the acceptable range in Setlist.
 
 The meter runs only when enabled — it has no CPU overhead when turned off.
 
@@ -696,6 +704,10 @@ These options appear only when **Built-in Player** is selected.
 **Enable decibel meter** — when enabled, TangoDisplay monitors ambient room noise using the Mac's built-in microphone and shows a live colour-coded dB reading in the Setlist toolbar. Requires microphone permission.
 
 **Decibel meter range** — an interactive three-zone slider to configure the low and high thresholds (0–140 dB). Readings below the low threshold appear blue, within range appear green, and above the high threshold appear red. Defaults: 60 dB (low), 80 dB (high). Visible only when the decibel meter is enabled.
+
+**Calibration offset** — dB added to every reading so the Mac's microphone matches an external sound level meter (−40…+40, default 0). The live reading is shown beside the stepper. Visible only when the decibel meter is enabled.
+
+**Response** — averaging window of the reading (0.25–10 s, default 2 s); longer is calmer. Visible only when the decibel meter is enabled.
 
 **Mark as played** — controls when a track receives its played stamp:
 

@@ -4,6 +4,7 @@ import CoreAudio
 import CoreMedia
 import Foundation
 import os
+import TangoDisplayCore
 
 /// Monitors the built-in microphone and publishes room level as an integer on 0–140.
 ///
@@ -26,14 +27,22 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
 
     // MARK: - Configuration
 
-    /// Offset added to 20·log₁₀(rms) to map dBFS to an approximate SPL-like range.
-    /// At +90 dB, typical quiet-room background (~-30 dBFS) reads as ~60 dB.
-    private static let calibrationOffset: Float = 90
+    /// User calibration in dB, added to the SPL-like mapping (see
+    /// `splDecibels` in Core) so the built-in microphone can be matched to
+    /// an external sound level meter. Main-thread only.
+    private var calibrationOffsetDb: Double = 0
+
+    /// Averaging window for the displayed level. Main-thread only (the
+    /// averager is read/written from the display timer).
+    private var averager = LevelAverager(windowSeconds: 2)
 
     // MARK: - Private types
 
-    private struct RawRMS {
-        var value: Float = 0
+    /// Energy accumulated by the capture callback since the display timer
+    /// last drained it — every buffer counts, none is skipped.
+    private struct RawEnergy {
+        var sumSquares: Double = 0
+        var sampleCount: Int = 0
     }
 
     // MARK: - Private state
@@ -41,7 +50,7 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
     private let session = AVCaptureSession()
     private let output = AVCaptureAudioDataOutput()
     private let sampleQueue = DispatchQueue(label: "TangoDisplay.micMeter")
-    private let rawLock = OSAllocatedUnfairLock(initialState: RawRMS())
+    private let rawLock = OSAllocatedUnfairLock(initialState: RawEnergy())
     private var displayTimer: Timer?
     private var runtimeErrorObserver: NSObjectProtocol?
     private var isRunning = false
@@ -75,6 +84,17 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
     func stop() {
         guard isRunning else { return }
         tearDown()
+    }
+
+    /// Calibration offset in dB (matches the meter to an external SPL meter). Takes effect
+    /// on the next display update; no capture restart needed.
+    func configure(calibrationOffsetDb: Int) {
+        self.calibrationOffsetDb = Double(calibrationOffsetDb)
+    }
+
+    /// Averaging window in seconds; larger = calmer reading. Takes effect immediately.
+    func configure(averagingSeconds: Double) {
+        averager.windowSeconds = max(0.1, averagingSeconds)
     }
 
     /// Selects the input device (`nil` = built-in microphone) and restarts capture if running.
@@ -212,7 +232,9 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
             self.log.info("Decibel meter capture session running=\(self.session.isRunning, privacy: .public)")
         }
 
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        // 10 Hz is plenty: the toolbar throttles to 250 ms anyway and the
+        // averager, not the timer rate, defines the meter's response.
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.updateDisplay()
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -231,16 +253,25 @@ final class MicrophoneMonitor: NSObject, ObservableObject {
             guard let self else { return }
             if self.session.isRunning { self.session.stopRunning() }
         }
-        rawLock.withLock { $0 = RawRMS() }
+        rawLock.withLock { $0 = RawEnergy() }
+        averager.reset()
         level = 0
     }
 
-    // MARK: - Main-thread display update (30 fps)
+    // MARK: - Main-thread display update (10 Hz)
 
     private func updateDisplay() {
-        let rms = rawLock.withLock { $0.value }
-        let dbValue = 20 * log10(max(rms, 1e-9)) + Self.calibrationOffset
-        level = max(0, min(140, Int(dbValue.rounded())))
+        // Drain everything captured since the last tick into the averager.
+        let energy = rawLock.withLock { e -> RawEnergy in
+            let snapshot = e
+            e = RawEnergy()
+            return snapshot
+        }
+        let now = CACurrentMediaTime()
+        averager.add(sumSquares: energy.sumSquares, sampleCount: energy.sampleCount, at: now)
+        let db = splDecibels(meanSquare: averager.meanSquare(at: now), calibrationOffset: calibrationOffsetDb)
+        let newLevel = meterLevel(decibels: db)
+        if newLevel != level { level = newLevel }
     }
 
     // MARK: - deinit
@@ -305,7 +336,10 @@ extension MicrophoneMonitor: AVCaptureAudioDataOutputSampleBufferDelegate {
         }
 
         guard sampleCount > 0 else { return }
-        let rms = Float((sumSquares / Double(sampleCount)).squareRoot())
-        rawLock.withLock { $0 = RawRMS(value: rms) }
+        let chunkSum = sumSquares, chunkCount = sampleCount
+        rawLock.withLock {
+            $0.sumSquares += chunkSum
+            $0.sampleCount += chunkCount
+        }
     }
 }

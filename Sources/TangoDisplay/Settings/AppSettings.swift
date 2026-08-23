@@ -377,6 +377,14 @@ final class AppSettings: ObservableObject {
     @Published var decibelMeterInputDeviceUID: String? {
         didSet { UserDefaults.standard.set(decibelMeterInputDeviceUID, forKey: kPrefix + "decibelMeterInputDeviceUID") }
     }
+    /// dB added to the reading so the built-in microphone matches an external sound level meter.
+    @Published var decibelMeterCalibrationOffset: Int {
+        didSet { UserDefaults.standard.set(decibelMeterCalibrationOffset, forKey: kPrefix + "decibelMeterCalibrationOffset") }
+    }
+    /// Averaging window of the displayed level in seconds (larger = calmer reading).
+    @Published var decibelMeterAveragingSeconds: Double {
+        didSet { UserDefaults.standard.set(decibelMeterAveragingSeconds, forKey: kPrefix + "decibelMeterAveragingSeconds") }
+    }
 
     @Published var hidePlayed: Bool {
         didSet { UserDefaults.standard.set(hidePlayed, forKey: kPrefix + "hidePlayed") }
@@ -547,6 +555,8 @@ final class AppSettings: ObservableObject {
         decibelMeterLowThreshold  = ud.object(forKey: kPrefix + "decibelMeterLowThreshold").flatMap { $0 as? Int } ?? 60
         decibelMeterHighThreshold = ud.object(forKey: kPrefix + "decibelMeterHighThreshold").flatMap { $0 as? Int } ?? 80
         decibelMeterInputDeviceUID = ud.object(forKey: kPrefix + "decibelMeterInputDeviceUID") as? String
+        decibelMeterCalibrationOffset = ud.object(forKey: kPrefix + "decibelMeterCalibrationOffset").flatMap { $0 as? Int } ?? 0
+        decibelMeterAveragingSeconds = ud.object(forKey: kPrefix + "decibelMeterAveragingSeconds").flatMap { $0 as? Double } ?? 2.0
         hidePlayed = ud.object(forKey: kPrefix + "hidePlayed").flatMap { $0 as? Bool } ?? false
         let rawStartup = ud.string(forKey: kPrefix + "startupMode") ?? ""
         startupMode = StartupMode(rawValue: rawStartup) ?? .fullExperience

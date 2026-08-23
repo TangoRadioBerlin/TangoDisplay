@@ -245,6 +245,8 @@ final class AppState: ObservableObject {
         versionChecker.startPeriodicChecks()
         if settings.decibelMeterEnabled {
             microphoneMonitor.configure(deviceUID: settings.decibelMeterInputDeviceUID)
+            microphoneMonitor.configure(calibrationOffsetDb: settings.decibelMeterCalibrationOffset)
+            microphoneMonitor.configure(averagingSeconds: settings.decibelMeterAveragingSeconds)
             microphoneMonitor.start()
         }
         if settings.remoteControlEnabled { handleRemoteControlEnabledChange(true) }
@@ -336,6 +338,8 @@ final class AppState: ObservableObject {
                 guard let self else { return }
                 if enabled {
                     self.microphoneMonitor.configure(deviceUID: self.settings.decibelMeterInputDeviceUID)
+                    self.microphoneMonitor.configure(calibrationOffsetDb: self.settings.decibelMeterCalibrationOffset)
+                    self.microphoneMonitor.configure(averagingSeconds: self.settings.decibelMeterAveragingSeconds)
                     self.microphoneMonitor.start()
                 } else {
                     self.microphoneMonitor.stop()
@@ -348,6 +352,20 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] uid in
                 self?.microphoneMonitor.configure(deviceUID: uid)
+            }
+            .store(in: &cancellables)
+
+        settings.$decibelMeterCalibrationOffset
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] offset in
+                self?.microphoneMonitor.configure(calibrationOffsetDb: offset)
+            }
+            .store(in: &cancellables)
+
+        settings.$decibelMeterAveragingSeconds
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] seconds in
+                self?.microphoneMonitor.configure(averagingSeconds: seconds)
             }
             .store(in: &cancellables)
     }

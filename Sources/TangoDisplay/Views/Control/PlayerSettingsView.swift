@@ -530,6 +530,46 @@ private struct DecibelMeterSettingsContent: View {
     @ObservedObject var monitor: MicrophoneMonitor
     @EnvironmentObject var settings: AppSettings
 
+    /// Calibration against an external meter + response (averaging window).
+    /// The live reading sits next to the offset so both can be matched by eye.
+    private var calibrationRows: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text("Calibration offset")
+                Stepper(value: $settings.decibelMeterCalibrationOffset, in: -40...40) {
+                    Text(String(format: "%+d dB", settings.decibelMeterCalibrationOffset))
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minWidth: 52, alignment: .trailing)
+                }
+                Spacer()
+                Text("Current reading:")
+                    .foregroundColor(.secondary)
+                Text(settings.decibelMeterEnabled ? "\(monitor.level) dB" : "—")
+                    .font(.system(.body, design: .monospaced).bold())
+                    .frame(minWidth: 52, alignment: .trailing)
+            }
+            Text("Place an external sound level meter next to the Mac and adjust the offset until both readings match. Applies to the built-in and any external input.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            HStack(spacing: 12) {
+                Text("Response")
+                Slider(value: $settings.decibelMeterAveragingSeconds, in: 0.25...10, step: 0.25) {
+                    EmptyView()
+                } minimumValueLabel: {
+                    Text("Fast").font(.caption)
+                } maximumValueLabel: {
+                    Text("Smooth").font(.caption)
+                }
+                Text(String(format: "%.2g s", settings.decibelMeterAveragingSeconds))
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minWidth: 44, alignment: .trailing)
+            }
+            Text("Averaging window of the reading. Longer windows give a calmer display that no longer jumps with every beat; 0.25 s is close to an instantaneous meter.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
     var body: some View {
         if monitor.permissionDenied {
             Label {
@@ -552,6 +592,7 @@ private struct DecibelMeterSettingsContent: View {
                 Text("The decibel meter listens to this input. Pick the built-in microphone if your default input (e.g. an audio interface) carries no room sound.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                calibrationRows
                 Text("Drag the handles to set band boundaries (0–140 dB)")
                     .font(.caption)
                     .foregroundColor(.secondary)
