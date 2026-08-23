@@ -3366,6 +3366,7 @@ runEffectiveSilenceTests()
 runSeekTargetTests()
 runTimingSpanTests()
 runPlatePlacementTests()
+runDropPayloadClassificationTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4360,6 +4361,57 @@ func runTimingSpanTests() {
             let s = timingSpan(duration: 0, trimStart: nil, trimEnd: nil, absoluteElapsed: 42)
             try expectEqual(s.duration, 0)
             try expectEqual(s.elapsed, 42)
+        }
+    }
+}
+
+// MARK: - Drop payload classification (Core)
+
+func runDropPayloadClassificationTests() {
+    typealias T = DropPasteboardType
+    let modern: Set<String> = ["com.apple.NSFilePromiseItemMetaData", "com.apple.pasteboard.promised-file-content-type"]
+
+    suite("DropPasteboardRules.classify") {
+        test("file-url only → fileURL") {
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.fileURL], [T.fileURL]],
+                                                         modernPromiseTypes: modern), .fileURL)
+        }
+        test("a modern promise type on any item wins") {
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.fileURL], [T.fileURL, "com.apple.NSFilePromiseItemMetaData"]],
+                                                         modernPromiseTypes: modern), .modernFilePromise)
+        }
+        test("legacy promise on one item + file-url on others → legacyFilePromise (union)") {
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.fileURL], [T.fileURL, T.legacyPromiseURL], [T.fileURL]],
+                                                         modernPromiseTypes: modern), .legacyFilePromise)
+        }
+        test("NSPromiseContentsPboardType alone also selects the legacy branch") {
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.legacyPromiseContents, T.itunesDrag]],
+                                                         modernPromiseTypes: modern), .legacyFilePromise)
+        }
+        test("music metadata without promise → musicMetadata") {
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.musicMetadata, T.itunesDrag, T.fileURL]],
+                                                         modernPromiseTypes: modern), .musicMetadata)
+        }
+        test("itunes.drag only → musicSelection") {
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.itunesDrag]],
+                                                         modernPromiseTypes: modern), .musicSelection)
+        }
+        test("plain text or no items → unsupported") {
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [["public.utf8-plain-text"]],
+                                                         modernPromiseTypes: modern), .unsupported)
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [], modernPromiseTypes: modern), .unsupported)
+        }
+    }
+
+    suite("DropPasteboardRules.isMusicAppSource") {
+        test("Music flavors on any single item mark the drag as Music.app") {
+            try expect(DropPasteboardRules.isMusicAppSource(itemTypes: [[T.fileURL], [T.itunesDrag]]))
+            try expect(DropPasteboardRules.isMusicAppSource(itemTypes: [[T.musicMetadata]]))
+            try expect(DropPasteboardRules.isMusicAppSource(itemTypes: [[T.musicJRFS, T.legacyPromiseURL]]))
+        }
+        test("file-url only is not Music.app") {
+            try expect(!DropPasteboardRules.isMusicAppSource(itemTypes: [[T.fileURL], [T.fileURL, T.legacyPromiseURL]]))
+            try expect(!DropPasteboardRules.isMusicAppSource(itemTypes: []))
         }
     }
 }

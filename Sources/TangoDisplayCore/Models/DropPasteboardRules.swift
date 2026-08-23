@@ -1,9 +1,62 @@
 import Foundation
 
+/// Pasteboard type identifiers seen on Music.app / Finder / player drags, as
+/// plain strings (AppKit wraps them in `NSPasteboard.PasteboardType`).
+public enum DropPasteboardType {
+    /// Legacy Music.app drag marker (pre-Sequoia / older purchased AAC).
+    public static let itunesDrag = "com.apple.itunes.drag"
+    /// Music.app plist with per-track "Location" entries.
+    public static let musicMetadata = "com.apple.music.metadata"
+    /// Music.app on Sequoia for iTunes-purchased AAC.
+    public static let musicJRFS = "com.apple.Music.JRFS"
+    /// Legacy file-promise flavors (Music.app's actual mechanism on Sequoia).
+    public static let legacyPromiseURL = "com.apple.pasteboard.promised-file-url"
+    public static let legacyPromiseContents = "NSPromiseContentsPboardType"
+    /// Plain file URL (Finder, Swinsian, foobar2000, AIFF-from-Music).
+    public static let fileURL = "public.file-url"
+}
+
+/// Which branch of the drop resolver a pasteboard payload takes. Ordered by
+/// the resolver's priority (promise flavors first, AppleScript selection last).
+public enum DropPayloadKind: String, Equatable {
+    case modernFilePromise, legacyFilePromise, musicMetadata, fileURL, musicSelection, unsupported
+}
+
 /// Pure rules for resolving drag-pasteboard payloads into file URLs and for
 /// deciding how the legacy file-promise drop path may proceed.
 /// Kept in Core so the logic is unit-testable without AppKit.
 public enum DropPasteboardRules {
+
+    // MARK: - Payload classification
+
+    /// Classify a multi-item pasteboard by the UNION of every item's types —
+    /// Music.app selections are heterogeneous (only some items carry the
+    /// promise string, others just a file-url), and the branch must be chosen
+    /// for the whole drag, never per item. Priority mirrors the resolver:
+    /// modern promise → legacy promise → Music metadata → file-url → Music
+    /// selection (AppleScript) → unsupported. `modernPromiseTypes` is injected
+    /// because `NSFilePromiseReceiver.readableDraggedTypes` lives in AppKit.
+    public static func classify(itemTypes: [Set<String>],
+                                modernPromiseTypes: Set<String>) -> DropPayloadKind {
+        let union = itemTypes.reduce(into: Set<String>()) { $0.formUnion($1) }
+        if !union.isDisjoint(with: modernPromiseTypes) { return .modernFilePromise }
+        if union.contains(DropPasteboardType.legacyPromiseURL)
+            || union.contains(DropPasteboardType.legacyPromiseContents) { return .legacyFilePromise }
+        if union.contains(DropPasteboardType.musicMetadata) { return .musicMetadata }
+        if union.contains(DropPasteboardType.fileURL) { return .fileURL }
+        if union.contains(DropPasteboardType.itunesDrag) { return .musicSelection }
+        return .unsupported
+    }
+
+    /// Music.app-specific flavors on ANY item identify the only source whose
+    /// file promises the resolver may materialise synchronously.
+    public static func isMusicAppSource(itemTypes: [Set<String>]) -> Bool {
+        itemTypes.contains { types in
+            types.contains(DropPasteboardType.itunesDrag)
+                || types.contains(DropPasteboardType.musicMetadata)
+                || types.contains(DropPasteboardType.musicJRFS)
+        }
+    }
 
     // MARK: - Pasteboard string → file URL
 
