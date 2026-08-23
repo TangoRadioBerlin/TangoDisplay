@@ -3371,6 +3371,7 @@ runDropResolutionAccountingTests()
 runDropFeedbackCountsTests()
 runMusicMetadataLocationsTests()
 runLevelMeterTests()
+runDuplicateKeyTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4677,6 +4678,37 @@ func runLevelMeterTests() {
             try expectEqual(meterLevel(decibels: 63.5), 64)
             try expectEqual(meterLevel(decibels: 180), 140)
             try expectEqual(meterLevel(decibels: -5), 0)
+        }
+    }
+}
+
+// MARK: - Duplicate detection across URL spellings (Core)
+
+func runDuplicateKeyTests() {
+    suite("SetlistDropRules.duplicateKey — same file, different URL spellings") {
+        // Music.app hands the same path out decomposed (NFD) via its promise string
+        // and precomposed (NFC) via NSItemProvider; percent-encoding differs accordingly.
+        let nfd = URL(string: "file:///Users/dj/Music/Echt%20Bo%CC%88hmisch/Sir%20Duke.m4a")!
+        let nfc = URL(string: "file:///Users/dj/Music/Echt%20B%C3%B6hmisch/Sir%20Duke.m4a")!
+        test("NFC and NFD spellings share one key") {
+            try expectEqual(SetlistDropRules.duplicateKey(nfd), SetlistDropRules.duplicateKey(nfc))
+        }
+        test("localhost host and ./ segments do not matter") {
+            let a = URL(string: "file://localhost/Music/a.mp3")!
+            let b = URL(fileURLWithPath: "/Music/./a.mp3")
+            try expectEqual(SetlistDropRules.duplicateKey(a), SetlistDropRules.duplicateKey(b))
+        }
+        test("different files keep different keys") {
+            try expect(SetlistDropRules.duplicateKey(nfc)
+                       != SetlistDropRules.duplicateKey(URL(fileURLWithPath: "/Users/dj/Music/Echt Böhmisch/Sir Duke (live).m4a")))
+        }
+        test("duplicateSummary and partitionDuplicates use the normalised key") {
+            let r = SetlistDropRules.duplicateSummary(incoming: [nfc], existing: [nfd], played: [nfd])
+            try expectEqual(r.duplicateCount, 1)
+            try expect(r.anyAlreadyPlayed)
+            let p = SetlistDropRules.partitionDuplicates([nfc, URL(fileURLWithPath: "/x/new.mp3")], existing: [nfd])
+            try expectEqual(p.fresh.map(\.path), ["/x/new.mp3"])
+            try expectEqual(p.duplicateCount, 1)
         }
     }
 }

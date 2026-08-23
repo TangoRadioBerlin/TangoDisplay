@@ -9,6 +9,20 @@ public enum SetlistDropRules {
         public let anyAlreadyPlayed: Bool
     }
 
+    /// Identity of a file for duplicate detection. The same file reaches the
+    /// setlist under different URL spellings — Music.app's promise string
+    /// carries the path decomposed (NFD, `o%CC%88`), NSItemProvider precomposed
+    /// (NFC, `%C3%B6`), Finder sometimes with a `localhost` host — so raw URL
+    /// equality misses duplicates on any path with an umlaut. Compare the
+    /// standardized path in one Unicode normalisation instead.
+    public static func duplicateKey(_ url: URL) -> String {
+        url.standardizedFileURL.path.precomposedStringWithCanonicalMapping
+    }
+
+    public static func duplicateKeys<S: Sequence>(_ urls: S) -> Set<String> where S.Element == URL {
+        Set(urls.map(duplicateKey))
+    }
+
     /// Count how many of the `incoming` URLs are already in `existing`, and whether
     /// any of those duplicates have been played. `played` is a subset of `existing`.
     public static func duplicateSummary(
@@ -16,9 +30,22 @@ public enum SetlistDropRules {
         existing: Set<URL>,
         played: Set<URL>
     ) -> DuplicateSummary {
-        let dups = incoming.filter { existing.contains($0) }
-        let anyPlayed = dups.contains { played.contains($0) }
+        let existingKeys = duplicateKeys(existing)
+        let playedKeys = duplicateKeys(played)
+        let dups = incoming.map(duplicateKey).filter { existingKeys.contains($0) }
+        let anyPlayed = dups.contains { playedKeys.contains($0) }
         return DuplicateSummary(duplicateCount: dups.count, anyAlreadyPlayed: anyPlayed)
+    }
+
+    /// Split incoming URLs into those not yet in the setlist (order preserved)
+    /// and the number of duplicates, using the normalised key.
+    public static func partitionDuplicates(
+        _ incoming: [URL],
+        existing: Set<URL>
+    ) -> (fresh: [URL], duplicateCount: Int) {
+        let existingKeys = duplicateKeys(existing)
+        let fresh = incoming.filter { !existingKeys.contains(duplicateKey($0)) }
+        return (fresh, incoming.count - fresh.count)
     }
 
     /// Split dropped URLs into those whose files exist (order preserved) and a

@@ -504,7 +504,7 @@ struct SetlistView: View {
         var skippedDuplicates = 0
         if !valid.isEmpty, settings.duplicateTrackProtection {
             var existingURLs = Set(setlist.entries.map(\.fileURL))
-            if valid.contains(where: { existingURLs.contains($0) }) {
+            if SetlistDropRules.partitionDuplicates(valid, existing: existingURLs).duplicateCount > 0 {
                 let shouldAddDuplicates: Bool
                 switch setlist.duplicateSessionDecision {
                 case .alwaysAdd:
@@ -522,8 +522,9 @@ struct SetlistView: View {
                     existingURLs = Set(setlist.entries.map(\.fileURL))
                 }
                 if !shouldAddDuplicates {
-                    toInsert = valid.filter { !existingURLs.contains($0) }
-                    skippedDuplicates = valid.count - toInsert.count
+                    let split = SetlistDropRules.partitionDuplicates(valid, existing: existingURLs)
+                    toInsert = split.fresh
+                    skippedDuplicates = split.duplicateCount
                 }
             }
         }
@@ -715,38 +716,8 @@ struct SetlistView: View {
                 // before any async work — the list may mutate during URL/metadata loading.
                 // Index the filtered `entries` (what the ForEach actually rendered),
                 // not `setlist.entries`, so the anchor is correct when Hide Played is on.
-                let anchorID: UUID? = offset < entries.count
-                    ? entries[offset].id
-                    : nil
-                // Same resolver as the window-level drop, read synchronously
-                // while the drag pasteboard is still live in this callout —
-                // SwiftUI's NSItemProvider bridge only sees public.file-url and
-                // silently loses Music.app items that carry something else.
-                // Providers remain the fallback for whatever the resolver could
-                // not read (union by URL; provider↔item index matching is not
-                // reliable).
-                let drag = NSPasteboard(name: .drag)
-                let liveItems = drag.pasteboardItems?.count ?? 0
-                os_log("row drop: providers=%d dragItems=%d changeCount=%d",
-                       log: dropLog, type: .default, providers.count, liveItems, drag.changeCount)
-                let result: DropResolutionResult? = liveItems > 0
-                    ? DropPasteboardResolver.resolve(drag, draggingInfo: nil,
-                                                     diagEnabled: settings.diagnosticLoggingEnabled)
-                    : nil
-                Task { @MainActor in
-                    var r: DropResolution
-                    if let result {
-                        r = await result.value
-                    } else {
-                        r = DropResolution(urls: [], requested: 0, branch: .fileURL, itemTypes: [])
-                    }
-                    if r.unreadable > 0 || r.requested == 0 {
-                        let providerURLs = await loadURLs(from: providers)
-                        r.merge(providerURLs, requestedAtLeast: providers.count)
-                    }
-                    DropPasteboardResolver.logSummary(r, entry: "row")
-                    await handleIncomingDrop(r, anchorID: anchorID)
-                }
+                let anchorID: UUID? = offset < entries.count ? entries[offset].id : nil
+                handleRowInsert(providers: providers, anchorID: anchorID)
             }
         }
         .listStyle(.plain)
@@ -1186,6 +1157,39 @@ struct SetlistView: View {
         }
 
         return nil
+    }
+
+    /// Row-level drop (SwiftUI `.onInsert`). Runs the shared resolver over the
+    /// drag pasteboard synchronously inside the callout (SwiftUI's
+    /// NSItemProvider bridge only sees public.file-url), then falls back to
+    /// the providers for whatever the resolver could not read — union by URL,
+    /// since provider↔item index matching is not reliable. Field note: for
+    /// Music.app drags the drag pasteboard here carries only the playlist
+    /// name, so the providers are the real payload in that case.
+    private func handleRowInsert(providers: [NSItemProvider], anchorID: UUID?) {
+        let drag = NSPasteboard(name: .drag)
+        let liveItems = drag.pasteboardItems?.count ?? 0
+        os_log("row drop: providers=%d dragItems=%d changeCount=%d",
+               log: dropLog, type: .default, providers.count, liveItems, drag.changeCount)
+        let result: DropResolutionResult? = liveItems > 0
+            ? DropPasteboardResolver.resolve(drag, draggingInfo: nil,
+                                             diagEnabled: settings.diagnosticLoggingEnabled)
+            : nil
+        Task { @MainActor in
+            var r: DropResolution
+            if let result {
+                r = await result.value
+            } else {
+                r = DropResolution(urls: [], requested: 0, branch: .fileURL, itemTypes: [])
+            }
+            if r.unreadable > 0 || r.requested == 0 {
+                let providerURLs = await loadURLs(from: providers)
+                r.merge(providerURLs, requestedAtLeast: providers.count)
+                if r.branch == .unsupported, !providerURLs.isEmpty { r.branch = .fileURL }
+            }
+            DropPasteboardResolver.logSummary(r, entry: "row")
+            await handleIncomingDrop(r, anchorID: anchorID)
+        }
     }
 
     private func feedbackCapsule(_ message: String) -> some View {
