@@ -709,8 +709,9 @@ struct SetlistView: View {
         }
         .background(
             MusicAppWindowDropInstaller(isTargeted: $isDragTargeted) { urls in
-                // Defer past the drag-tracking run loop; NSAlert.runModal() inside performDragOperation deadlocks cross-process drags.
-                DispatchQueue.main.async { handleIncomingURLs(urls, anchorID: nil) }
+                // Defer past the drag-tracking run loop: the duplicate prompt must never
+                // run inside performDragOperation (cross-process drags deadlock there).
+                Task { @MainActor in await handleIncomingURLs(urls, anchorID: nil) }
             }
         )
         .onReceive(player.$currentEntryID) { activeEntryID = $0 }
@@ -764,7 +765,8 @@ struct SetlistView: View {
 
     // MARK: - Drop handling
 
-    private func handleIncomingURLs(_ urls: [URL], anchorID: UUID?) {
+    @MainActor
+    private func handleIncomingURLs(_ urls: [URL], anchorID: UUID?) async {
         let diagEnabled = settings.diagnosticLoggingEnabled
         if diagEnabled {
             diagLog.record("drop.handleIncomingURLs")
@@ -805,7 +807,7 @@ struct SetlistView: View {
             return
         }
 
-        let existingURLs = Set(setlist.entries.map(\.fileURL))
+        var existingURLs = Set(setlist.entries.map(\.fileURL))
         guard valid.contains(where: { existingURLs.contains($0) }) else {
             setlist.insertURLs(valid, before: anchorID, importMusicTimes: importMusicTimes)
             missingOnlyFeedback()
@@ -821,10 +823,12 @@ struct SetlistView: View {
         case nil:
             let playedURLs = Set(setlist.entries.compactMap { $0.state == .played ? $0.fileURL : nil })
             let dup = SetlistDropRules.duplicateSummary(incoming: valid, existing: existingURLs, played: playedURLs)
-            let (shouldAdd, remember) = promptForDuplicates(count: dup.duplicateCount,
-                                                            alreadyPlayed: dup.anyAlreadyPlayed)
+            let (shouldAdd, remember) = await promptForDuplicates(count: dup.duplicateCount,
+                                                                  alreadyPlayed: dup.anyAlreadyPlayed)
             if remember { setlist.setDuplicateSessionDecision(shouldAdd ? .alwaysAdd : .neverAdd) }
             shouldAddDuplicates = shouldAdd
+            // The sheet suspended us; the setlist may have changed meanwhile.
+            existingURLs = Set(setlist.entries.map(\.fileURL))
         }
 
         let toInsert = shouldAddDuplicates ? valid : valid.filter { !existingURLs.contains($0) }
@@ -847,7 +851,14 @@ struct SetlistView: View {
         }
     }
 
-    private func promptForDuplicates(count: Int, alreadyPlayed: Bool) -> (shouldAdd: Bool, remember: Bool) {
+    // Presented as a sheet on the setlist window, never as an app-modal
+    // `runModal()`: after a cross-app drag TangoDisplay is not the active app,
+    // so a modal alert could sit behind the source app's window while every
+    // further drop into the blocked app silently failed — the DJ only saw
+    // "nothing happens" until a click inside TangoDisplay surfaced the alert.
+    // Activating the app and attaching the sheet keeps the prompt visible.
+    @MainActor
+    private func promptForDuplicates(count: Int, alreadyPlayed: Bool) async -> (shouldAdd: Bool, remember: Bool) {
         let alert = NSAlert()
         alert.messageText = count == 1 ? "Track Already in Setlist" : "Tracks Already in Setlist"
         if count == 1 {
@@ -867,28 +878,46 @@ struct SetlistView: View {
         checkbox.sizeToFit()
         alert.accessoryView = checkbox
 
-        // Set the critical breadcrumb immediately before runModal().
-        // The FreezeWatchdog reads this from a background thread to identify
-        // the stall site if the main thread blocks in the drag-tracking run loop.
         let diagEnabled = settings.diagnosticLoggingEnabled
         if diagEnabled {
-            diagLog.record("drop.promptForDuplicates.runModal")
-            os_log("promptForDuplicates: entering runModal (duplicateCount=%d alreadyPlayed=%{public}@)",
+            diagLog.record("drop.promptForDuplicates.sheet")
+            os_log("promptForDuplicates: presenting sheet (duplicateCount=%d alreadyPlayed=%{public}@)",
                    log: diagLog.dropLog, type: .info, count, String(alreadyPlayed))
         }
-        let result = alert.runModal()
+
+        NSApp.activate(ignoringOtherApps: true)
+        let result: NSApplication.ModalResponse
+        if let window = Self.setlistWindow() {
+            window.makeKeyAndOrderFront(nil)
+            result = await withCheckedContinuation { continuation in
+                alert.beginSheetModal(for: window) { continuation.resume(returning: $0) }
+            }
+        } else {
+            // No setlist window found (should not happen) — fall back to the
+            // app-modal alert, now at least in the activated app.
+            result = alert.runModal()
+        }
+
         if diagEnabled {
             // Restore the enclosing section's crumb rather than clearing: the trail
             // holds a single slot, and the rest of handleIncomingURLs (NAS stat,
             // insert) still deserves attribution. Its defer clears at the end.
             diagLog.record("drop.handleIncomingURLs")
-            os_log("promptForDuplicates: runModal returned result=%d", log: diagLog.dropLog, type: .info,
+            os_log("promptForDuplicates: sheet returned result=%d", log: diagLog.dropLog, type: .info,
                    result == .alertFirstButtonReturn ? 1 : 0)
         }
         return (
             shouldAdd: result == .alertFirstButtonReturn,
             remember: checkbox.state == .on
         )
+    }
+
+    /// The window hosting the setlist — identified by the window-level drop view
+    /// the installer puts in as its content view.
+    private static func setlistWindow() -> NSWindow? {
+        NSApp.windows.first { $0.contentView is MusicAppDropView }
+            ?? NSApp.keyWindow
+            ?? NSApp.mainWindow
     }
 
     // MARK: - Track list
@@ -984,9 +1013,9 @@ struct SetlistView: View {
                 let anchorID: UUID? = offset < entries.count
                     ? entries[offset].id
                     : nil
-                Task {
+                Task { @MainActor in
                     let urls = await loadURLs(from: providers)
-                    handleIncomingURLs(urls, anchorID: anchorID)
+                    await handleIncomingURLs(urls, anchorID: anchorID)
                 }
             }
         }
@@ -1389,7 +1418,7 @@ struct SetlistView: View {
         let urls = (NSPasteboard.general.readObjects(forClasses: [NSURL.self],
                     options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         if !urls.isEmpty {
-            handleIncomingURLs(urls, anchorID: nil)
+            Task { @MainActor in await handleIncomingURLs(urls, anchorID: nil) }
             return
         }
 
@@ -1404,7 +1433,7 @@ struct SetlistView: View {
             }
         }
         if !perItemURLs.isEmpty {
-            handleIncomingURLs(perItemURLs, anchorID: nil)
+            Task { @MainActor in await handleIncomingURLs(perItemURLs, anchorID: nil) }
         }
     }
 
