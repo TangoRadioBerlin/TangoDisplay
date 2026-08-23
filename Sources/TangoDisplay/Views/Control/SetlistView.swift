@@ -26,27 +26,19 @@ private extension Array {
 // return [] from draggingEntered and fall through to SwiftUI's own handlers.
 
 private class MusicAppDropView: NSView {
-    var onDrop: ([URL]) -> Void = { _ in }
+    var onDrop: (DropResolution) -> Void = { _ in }
     var onTargeted: (Bool) -> Void = { _ in }
 
-    // Legacy Music.app drag types (pre-Sequoia / older purchased AAC):
-    private static let pasteboardType     = NSPasteboard.PasteboardType("com.apple.itunes.drag")
-    private static let musicMetadataType  = NSPasteboard.PasteboardType("com.apple.music.metadata")
-    // Music.app on Sequoia for iTunes-purchased AAC: file promise + Music identifier
-    private static let musicJRFSType      = NSPasteboard.PasteboardType("com.apple.Music.JRFS")
-    // Legacy file-promise pasteboard types (Music.app's actual mechanism on Sequoia).
-    // NSFilePromiseReceiver does NOT match these — must use the older
-    // namesOfPromisedFiles(droppedAtDestination:) API.
-    private static let legacyPromiseURLType      = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
-    private static let legacyPromiseContentsType = NSPasteboard.PasteboardType("NSPromiseContentsPboardType")
-    // Plain file URLs from Finder, Swinsian, or AIFF-from-Music drags.
-    private static let fileURLType               = NSPasteboard.PasteboardType.fileURL
-
-    private let promiseQueue: OperationQueue = {
-        let q = OperationQueue()
-        q.qualityOfService = .userInitiated
-        return q
-    }()
+    // Registration covers every flavor the resolver understands (see
+    // DropPasteboardType) plus the modern promise types, so a drag carrying
+    // them registers at all. Acceptance itself is decided by
+    // DropPasteboardRules.classify over the union of all item types.
+    private static var registrationTypes: [NSPasteboard.PasteboardType] {
+        [DropPasteboardType.itunesDrag, DropPasteboardType.musicMetadata, DropPasteboardType.musicJRFS,
+         DropPasteboardType.legacyPromiseURL, DropPasteboardType.legacyPromiseContents,
+         DropPasteboardType.fileURL].map { NSPasteboard.PasteboardType($0) }
+        + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -56,21 +48,7 @@ private class MusicAppDropView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
-            var types: [NSPasteboard.PasteboardType] = [
-                Self.pasteboardType, Self.musicMetadataType, Self.musicJRFSType,
-                Self.legacyPromiseURLType, Self.legacyPromiseContentsType,
-                Self.fileURLType
-            ]
-            // Also include NSFilePromiseReceiver types so a drag carrying them
-            // registers at all. Note: hasAcceptableDrag() deliberately does NOT
-            // accept promise-only drags — it requires one of the concrete flavors
-            // below, so a drag advertising nothing but file promises is rejected
-            // at draggingEntered. Every observed Music.app drag also carries
-            // itunes.drag / music.metadata / JRFS / file-url, which is what
-            // gates acceptance (and the isMusicAppSource classification).
-            types.append(contentsOf: NSFilePromiseReceiver.readableDraggedTypes
-                .map { NSPasteboard.PasteboardType($0) })
-            registerForDraggedTypes(types)
+            registerForDraggedTypes(Self.registrationTypes)
             os_log("register types=%{public}@ frame=%{public}@ subviews=%d isContentView=%{public}@",
                    log: dropLog, type: .info,
                    String(describing: registeredDraggedTypes),
@@ -82,18 +60,19 @@ private class MusicAppDropView: NSView {
         }
     }
 
+    // Promise-only drags (nothing but NSFilePromiseReceiver types) classify
+    // as unsupported and are rejected at draggingEntered; every observed
+    // Music.app drag also carries itunes.drag / music.metadata / JRFS /
+    // file-url, which is what gates acceptance.
     private func hasAcceptableDrag(_ sender: NSDraggingInfo) -> Bool {
-        let types = sender.draggingPasteboard.types ?? []
-        let match = types.contains(Self.pasteboardType)
-            || types.contains(Self.musicMetadataType)
-            || types.contains(Self.musicJRFSType)
-            || types.contains(Self.legacyPromiseURLType)
-            || types.contains(Self.fileURLType)
-        if !match {
+        let types = DropPasteboardResolver.itemTypes(of: sender.draggingPasteboard)
+        let kind = DropPasteboardRules.classify(itemTypes: types,
+                                                modernPromiseTypes: DropPasteboardResolver.modernPromiseTypes)
+        if kind == .unsupported {
             os_log("reject: no acceptable type; types=%{public}@", log: dropLog, type: .info,
-                   String(describing: types))
+                   DropPasteboardRules.typeSummary(itemTypes: types))
         }
-        return match
+        return kind != .unsupported
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -114,9 +93,8 @@ private class MusicAppDropView: NSView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         onTargeted(false)
         let pasteboard = sender.draggingPasteboard
-        let types = pasteboard.types ?? []
         os_log("performDrag types=%{public}@", log: dropLog, type: .info,
-               String(describing: types))
+               String(describing: pasteboard.types ?? []))
 
         let diagEnabled = UserDefaults.standard.bool(forKey: "TangoDisplay.diagnosticLoggingEnabled")
         let t0 = diagEnabled ? Date() : Date.distantFuture
@@ -126,322 +104,27 @@ private class MusicAppDropView: NSView {
             if diagEnabled {
                 diagLog.logTiming("performDragOperation total", elapsed: -t0.timeIntervalSinceNow,
                                   enabled: true)
-                // Any breadcrumb set below marks a synchronous section of this
-                // callout; reaching this defer means it completed without stall.
+                // Any breadcrumb set by the resolver marks a synchronous section
+                // of this callout; reaching this defer means it completed without stall.
                 diagLog.clearBreadcrumb()
             }
         }
 
-        // Every pasteboard DATA read below (readObjects / string(forType:) /
-        // propertyList(forType:)) can force a lazily-declaring source app to
-        // provide the data synchronously — a cross-process wait inside this
-        // drop callout. Each read is therefore preceded by a breadcrumb so a
-        // FreezeWatchdog stall report identifies the exact blocking site.
-
-        // 1. Modern NSFilePromiseReceiver — for future Music.app versions.
-        // Cheap types check first: readObjects forces promise data, so don't
-        // touch it for drags that never advertised a promise flavor.
-        let advertisesModernPromise = NSFilePromiseReceiver.readableDraggedTypes
-            .contains { types.contains(NSPasteboard.PasteboardType($0)) }
-        if advertisesModernPromise {
-            if diagEnabled { diagLog.record("drop.branch1.readFilePromises") }
-            if let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self],
-                                                      options: nil) as? [NSFilePromiseReceiver],
-               !promises.isEmpty
-            {
-                return acceptFilePromises(promises)
-            }
-        }
-
-        // 2. Legacy file-promise — Music.app on Sequoia for iTunes-purchased AAC.
-        if types.contains(Self.legacyPromiseURLType)
-            || types.contains(Self.legacyPromiseContentsType)
-        {
-            return acceptLegacyFilePromise(sender, diagEnabled: diagEnabled)
-        }
-
-        // 3. Legacy plist path — pre-Sequoia purchased AAC.
-        if types.contains(Self.musicMetadataType) {
-            if diagEnabled { diagLog.record("drop.branch3.readMusicMetadata") }
-            let urls = resolveViaMusicMetadata(pasteboard)
-            if !urls.isEmpty { onDrop(urls); return true }
-        }
-
-        // 4. Plain file URL — Finder, Swinsian, AIFF-from-Music drags.
-        if types.contains(Self.fileURLType) {
-            if diagEnabled { diagLog.record("drop.branch4.readFileURLs") }
-            let pbURLs = pasteboard.readObjects(forClasses: [NSURL.self],
-                                                 options: [.urlReadingFileURLsOnly: true]) as? [URL]
-            if let pbURLs = pbURLs, !pbURLs.isEmpty {
-                os_log("file-url path resolved %d url(s)", log: dropLog, type: .info, pbURLs.count)
-                onDrop(pbURLs)
-                return true
-            }
-            // Per-item fallback: foobar2000 writes public.file-url as a bare
-            // POSIX path (readObjects yields nothing for those) — mirror the
-            // ⌘V paste path and parse each item string directly.
-            var itemURLs: [URL] = []
-            for item in pasteboard.pasteboardItems ?? [] {
-                guard let str = item.string(forType: .fileURL),
-                      let url = DropPasteboardRules.fileURL(fromPasteboardString: str)
-                else { continue }
-                itemURLs.append(url)
-            }
-            if !itemURLs.isEmpty {
-                os_log("file-url per-item fallback resolved %d url(s)",
-                       log: dropLog, type: .info, itemURLs.count)
-                onDrop(itemURLs)
-                return true
-            }
-        }
-
-        // 5. AppleScript selection fallback — com.apple.itunes.drag only.
-        // Deferred off-main: NSAppleScript.executeAndReturnError is a blocking
-        // cross-process call and must not run inside the live drag-tracking loop.
-        if types.contains(Self.pasteboardType) {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self else { return }
-                let urls = self.resolveViaMusicSelection()
-                if !urls.isEmpty { DispatchQueue.main.async { self.onDrop(urls) } }
+        // Resolution runs synchronously inside this callout (the drag pasteboard
+        // is live here); the setlist insert itself is deferred by the callback
+        // so nothing modal ever runs inside the drag-tracking loop.
+        switch DropPasteboardResolver.resolve(pasteboard, draggingInfo: sender, diagEnabled: diagEnabled) {
+        case .immediate(let r):
+            DropPasteboardResolver.logSummary(r, entry: "window")
+            onDrop(r)
+            return !r.urls.isEmpty
+        case .deferred(_, let finish):
+            finish { [weak self] r in
+                DropPasteboardResolver.logSummary(r, entry: "window")
+                self?.onDrop(r)
             }
             return true
         }
-
-        os_log("performDrag resolved zero urls", log: dropLog, type: .error)
-        return false
-    }
-
-    // Legacy file-promise path. Music.app on Sequoia advertises
-    // com.apple.pasteboard.promised-file-url on the root pasteboard, but in
-    // practice only a small subset of per-item NSPasteboardItems carry the
-    // promise string — the rest carry just public.file-url. Read file-url
-    // first per item and fall back to the promise string, so multi-track
-    // drags (e.g. an entire 108-track playlist) aren't truncated to the
-    // few items that happen to advertise the promise flavor.
-    //
-    // If unresolved items remain, ask the source to materialise the promised
-    // files — but ONLY for genuine Music.app drags (cloud-only tracks).
-    // namesOfPromisedFilesDropped is synchronous: it blocks this drop callout
-    // while the source app writes each file. For any other source that
-    // advertises a promise flavor alongside file-urls, blocking here risks a
-    // cross-process deadlock (the source's drag loop is waiting for our drop
-    // reply), so DropPasteboardRules.legacyPromiseAction forbids it and we
-    // return whatever resolved instead.
-    private func acceptLegacyFilePromise(_ sender: NSDraggingInfo, diagEnabled: Bool) -> Bool {
-        let pb = sender.draggingPasteboard
-
-        if diagEnabled { diagLog.record("drop.branch2.readLegacyPromiseItems") }
-        let items = pb.pasteboardItems ?? []
-        // How many items advertise a file flavor — the count we expect to resolve.
-        // Cloud-only tracks advertise a file-url/promise but have no on-disk file,
-        // so they pass this filter yet fail per-item resolution below.
-        let advertisedCount = items.filter {
-            $0.string(forType: .fileURL) != nil
-                || $0.string(forType: Self.legacyPromiseURLType) != nil
-        }.count
-
-        var urls: [URL] = []
-        for item in items {
-            // Try public.file-url first, then the promise string. Per-item
-            // fallback (not `??` on the strings) so a broken file-url doesn't
-            // prevent us from trying the promise flavor on the same item —
-            // protects the v3.21.4 iTunes-purchased-AAC drag case.
-            let candidates = [
-                item.string(forType: .fileURL),
-                item.string(forType: Self.legacyPromiseURLType),
-            ].compactMap { $0 }
-            for str in candidates {
-                guard let url = DropPasteboardRules.fileURL(fromPasteboardString: str),
-                      FileManager.default.fileExists(atPath: url.path)
-                else { continue }
-                urls.append(url)
-                break
-            }
-        }
-
-        // Music.app-specific flavors identify the only source whose promises
-        // we are willing to materialise synchronously.
-        let types = pb.types ?? []
-        let isMusicAppSource = types.contains(Self.pasteboardType)
-            || types.contains(Self.musicMetadataType)
-            || types.contains(Self.musicJRFSType)
-
-        switch DropPasteboardRules.legacyPromiseAction(resolved: urls.count,
-                                                       advertised: advertisedCount,
-                                                       isMusicAppSource: isMusicAppSource) {
-        case .acceptResolved:
-            os_log("promise resolved %d url(s) from pasteboard string",
-                   log: dropLog, type: .info, urls.count)
-            onDrop(urls)
-            return true
-
-        case .acceptPartial:
-            os_log("promise partial from non-Music source: using %d of %d advertised (no materialise)",
-                   log: dropLog, type: .info, urls.count, advertisedCount)
-            onDrop(urls)
-            return true
-
-        case .fail:
-            os_log("promise unresolved from non-Music source: rejecting drop (types=%{public}@)",
-                   log: dropLog, type: .error, String(describing: types))
-            return false
-
-        case .materialize:
-            // Cloud-only Music.app tracks — ask Music.app to write cached copies.
-            // Synchronous by API design (the destination URL is bound to `sender`,
-            // so the call cannot be deferred off this callout). We rely on Music
-            // writing the files before returning; if a file were still pending
-            // when the deferred missing-file filter runs, it would be dropped
-            // with a "not found" note (accepted residual risk, never observed).
-            os_log("promise partial: resolved %d of %d advertised — materialising",
-                   log: dropLog, type: .info, urls.count, advertisedCount)
-            if diagEnabled { diagLog.record("drop.branch2.materialisePromises") }
-            let destDir = Self.filePromiseDestination()
-            let names = sender.namesOfPromisedFilesDropped(atDestination: destDir) ?? []
-            let writtenURLs = names.map { destDir.appendingPathComponent($0) }
-            os_log("promise materialised %d file(s) at %{public}@",
-                   log: dropLog, type: .info, names.count, destDir.path)
-            // Union: locally resolved tracks first, then the materialised copies —
-            // Music may only write the subset it actually promised, so dropping
-            // `urls` here would lose the local half of a mixed local+cloud drag.
-            let seen = Set(urls)
-            let combined = urls + writtenURLs.filter { !seen.contains($0) }
-            if !combined.isEmpty {
-                onDrop(combined)
-                return true
-            }
-            guard !urls.isEmpty else { return false }
-            onDrop(urls)
-            return true
-        }
-    }
-
-    // Accept one or more NSFilePromiseReceiver promises, writing the files to a
-    // persistent cache directory inside Application Support. Calls onDrop once all
-    // promises have either resolved or failed. Returns true synchronously so the
-    // drag UI completes immediately; the resulting URLs land asynchronously.
-    private func acceptFilePromises(_ promises: [NSFilePromiseReceiver]) -> Bool {
-        let destDir = Self.filePromiseDestination()
-        os_log("accepting %d file promise(s) to %{public}@",
-               log: dropLog, type: .info, promises.count, destDir.path)
-        let lock = NSLock()
-        var receivedURLs: [URL] = []
-        let group = DispatchGroup()
-        for promise in promises {
-            group.enter()
-            promise.receivePromisedFiles(atDestination: destDir,
-                                          options: [:],
-                                          operationQueue: promiseQueue) { url, error in
-                if let error = error {
-                    os_log("file promise error: %{public}@", log: dropLog, type: .error,
-                           String(describing: error))
-                } else {
-                    os_log("received promised file: %{public}@", log: dropLog, type: .info, url.path)
-                    lock.lock(); receivedURLs.append(url); lock.unlock()
-                }
-                group.leave()
-            }
-        }
-        group.notify(queue: .main) { [weak self] in
-            guard let self = self else { return }
-            if receivedURLs.isEmpty {
-                os_log("file promises yielded zero urls", log: dropLog, type: .error)
-            } else {
-                self.onDrop(receivedURLs)
-            }
-        }
-        return true
-    }
-
-    private static func filePromiseDestination() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory,
-                                            in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let dir = base.appendingPathComponent("TangoDisplay/MusicAppDrops", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    // Music.app puts com.apple.music.metadata on the drag pasteboard for post-2022
-    // purchased AAC tracks. Two known plist structures (varies by Music.app version):
-    //   Newer: {"Tracks": {"12345": {"Location": "…"}}, "Playlists": […]}
-    //   Older: {"12345": {"Location": "…"}, "Playlist Items": […]}
-    // Location is either a "~/…" tilde path or a "file://…" URL (Embrace handles both).
-    // Falls back to reading public.file-url directly if the plist yields nothing.
-    private func resolveViaMusicMetadata(_ pasteboard: NSPasteboard) -> [URL] {
-        var urls: [URL] = []
-        for item in pasteboard.pasteboardItems ?? [] {
-            guard let plist = item.propertyList(forType: Self.musicMetadataType) as? [String: Any]
-            else {
-                os_log("plist cast failed for pasteboard item", log: dropLog, type: .error)
-                continue
-            }
-            // Use the "Tracks" sub-dict if present (newer format), otherwise the root
-            let trackSource = (plist["Tracks"] as? [String: Any]) ?? plist
-            os_log("plist keys=%{public}@ trackSource keys=%{public}@",
-                   log: dropLog, type: .info,
-                   String(describing: Array(plist.keys)),
-                   String(describing: Array(trackSource.keys)))
-            for (_, value) in trackSource {
-                guard let track = value as? [String: Any],
-                      var location = track["Location"] as? String,
-                      !location.isEmpty else { continue }
-                let raw = location
-                if location.hasPrefix("file:") {
-                    location = URL(string: location)?.path ?? location
-                }
-                let path = NSString(string: location).expandingTildeInPath
-                let url = URL(fileURLWithPath: path)
-                let exists = FileManager.default.fileExists(atPath: url.path)
-                os_log("track loc=%{public}@ → url=%{public}@ exists=%{public}@",
-                       log: dropLog, type: .info, raw, url.path, String(exists))
-                // Only accept locations that resolve to a real file: a Location
-                // string URL(string:) mangles (unencoded #/? etc.) yields a
-                // garbage relative URL here — appending it would make this branch
-                // "succeed" and cut off the per-item file-url fallback below.
-                if exists { urls.append(url) }
-            }
-        }
-        os_log("resolveViaMusicMetadata produced %d urls", log: dropLog, type: .info, urls.count)
-        if !urls.isEmpty { return urls }
-
-        // Fallback: Music.app may also offer a direct public.file-url on the same item
-        for item in pasteboard.pasteboardItems ?? [] {
-            if let str = item.string(forType: .fileURL),
-               let url = URL(string: str) {
-                urls.append(url.standardized)
-            }
-        }
-        os_log("fallback file-url produced %d urls", log: dropLog, type: .info, urls.count)
-        return urls
-    }
-
-    private func resolveViaMusicSelection() -> [URL] {
-        let source = """
-        tell application "Music"
-            set paths to {}
-            repeat with t in selection
-                try
-                    set end of paths to POSIX path of (location of t as alias)
-                end try
-            end repeat
-            return paths
-        end tell
-        """
-        let script = NSAppleScript(source: source)
-        var errorInfo: NSDictionary?
-        guard let descriptor = script?.executeAndReturnError(&errorInfo) else { return [] }
-        var urls: [URL] = []
-        if descriptor.numberOfItems > 0 {
-            for i in 1...descriptor.numberOfItems {
-                if let path = descriptor.atIndex(i)?.stringValue {
-                    urls.append(URL(fileURLWithPath: path))
-                }
-            }
-        } else if let path = descriptor.stringValue, !path.isEmpty {
-            urls.append(URL(fileURLWithPath: path))
-        }
-        return urls
     }
 }
 
@@ -459,7 +142,7 @@ private class MusicAppDropView: NSView {
 // MusicAppDropView's performDragOperation.
 private struct MusicAppWindowDropInstaller: NSViewRepresentable {
     @Binding var isTargeted: Bool
-    let onDrop: ([URL]) -> Void
+    let onDrop: (DropResolution) -> Void
 
     func makeNSView(context: Context) -> InstallerSentinel { InstallerSentinel() }
 
@@ -470,7 +153,7 @@ private struct MusicAppWindowDropInstaller: NSViewRepresentable {
     class InstallerSentinel: NSView {
         private weak var dropView: MusicAppDropView?
         private var pendingBinding: Binding<Bool>?
-        private var pendingDrop: (([URL]) -> Void)?
+        private var pendingDrop: ((DropResolution) -> Void)?
         private var contentViewObserver: NSKeyValueObservation?
 
         override init(frame frameRect: NSRect) {
@@ -482,7 +165,7 @@ private struct MusicAppWindowDropInstaller: NSViewRepresentable {
             contentViewObserver?.invalidate()
         }
 
-        func update(isTargetedBinding: Binding<Bool>, onDrop: @escaping ([URL]) -> Void) {
+        func update(isTargetedBinding: Binding<Bool>, onDrop: @escaping (DropResolution) -> Void) {
             pendingBinding = isTargetedBinding
             pendingDrop    = onDrop
             if let dv = dropView {
@@ -544,7 +227,7 @@ private struct MusicAppWindowDropInstaller: NSViewRepresentable {
 
         private func configure(_ dv: MusicAppDropView,
                                 binding: Binding<Bool>,
-                                onDrop: @escaping ([URL]) -> Void) {
+                                onDrop: @escaping (DropResolution) -> Void) {
             dv.onTargeted = { t in DispatchQueue.main.async { binding.wrappedValue = t } }
             dv.onDrop = onDrop
         }
@@ -708,10 +391,10 @@ struct SetlistView: View {
             optionDown = false
         }
         .background(
-            MusicAppWindowDropInstaller(isTargeted: $isDragTargeted) { urls in
+            MusicAppWindowDropInstaller(isTargeted: $isDragTargeted) { resolution in
                 // Defer past the drag-tracking run loop: the duplicate prompt must never
                 // run inside performDragOperation (cross-process drags deadlock there).
-                Task { @MainActor in await handleIncomingURLs(urls, anchorID: nil) }
+                Task { @MainActor in await handleIncomingDrop(resolution, anchorID: nil) }
             }
         )
         .onReceive(player.$currentEntryID) { activeEntryID = $0 }
@@ -765,88 +448,94 @@ struct SetlistView: View {
 
     // MARK: - Drop handling
 
+    /// Convenience for entry points that already hold plain URLs (all of
+    /// them counted as readable).
     @MainActor
     private func handleIncomingURLs(_ urls: [URL], anchorID: UUID?) async {
+        await handleIncomingDrop(DropResolution(urls: urls, requested: urls.count,
+                                                branch: .fileURL, itemTypes: []),
+                                 anchorID: anchorID)
+    }
+
+    /// Shared funnel for every way tracks enter the setlist. Filters
+    /// (unsupported type, missing file, duplicates) are counted, never silent:
+    /// exactly one feedback line is produced at the end, and a resolution
+    /// shortfall (`unreadable`) always shows as "Added N of M".
+    @MainActor
+    private func handleIncomingDrop(_ resolution: DropResolution, anchorID: UUID?) async {
         let diagEnabled = settings.diagnosticLoggingEnabled
         if diagEnabled {
             diagLog.record("drop.handleIncomingURLs")
-            os_log("handleIncomingURLs count=%d anchorID=%{public}@",
+            os_log("handleIncomingDrop branch=%{public}@ requested=%d resolved=%d anchorID=%{public}@",
                    log: diagLog.dropLog, type: .info,
-                   urls.count, anchorID?.uuidString ?? "nil")
+                   resolution.branch.rawValue, resolution.requested, resolution.urls.count,
+                   anchorID?.uuidString ?? "nil")
         }
         defer { if diagEnabled { diagLog.clearBreadcrumb() } }
+
+        // Non-audio files would be dropped silently by the setlist insert.
+        let (supported, unsupportedCount) = SetlistDropRules.partitionSupported(resolution.urls)
 
         // Reject files that no longer exist on disk (e.g. a Music track whose
         // underlying file is missing — shown with a warning triangle in Music).
         // Otherwise they enter the setlist and get silently skipped at playback.
         // Runs post-deferral, so a slow (NAS) stat can beachball but never
         // deadlock the drag; the watchdog attributes it via the breadcrumb.
-        let (valid, missingCount) = SetlistDropRules.partitionExisting(urls) {
+        let (valid, missingCount) = SetlistDropRules.partitionExisting(supported) {
             FileManager.default.fileExists(atPath: $0.path)
-        }
-        func missingOnlyFeedback() {
-            if let msg = SetlistDropRules.dropFeedbackMessage(added: valid.count,
-                                                             skippedDuplicates: 0,
-                                                             missing: missingCount) {
-                showDropFeedback(msg)
-            }
         }
 
         // Import Music's per-track start/stop into trim markers only when the built-in
         // player is active — trim only affects playback there, matching the editor gate.
         let importMusicTimes = appState.localPlayer != nil
 
-        guard !valid.isEmpty else {
-            missingOnlyFeedback()
-            return
+        var toInsert = valid
+        var skippedDuplicates = 0
+        if !valid.isEmpty, settings.duplicateTrackProtection {
+            var existingURLs = Set(setlist.entries.map(\.fileURL))
+            if valid.contains(where: { existingURLs.contains($0) }) {
+                let shouldAddDuplicates: Bool
+                switch setlist.duplicateSessionDecision {
+                case .alwaysAdd:
+                    shouldAddDuplicates = true
+                case .neverAdd:
+                    shouldAddDuplicates = false
+                case nil:
+                    let playedURLs = Set(setlist.entries.compactMap { $0.state == .played ? $0.fileURL : nil })
+                    let dup = SetlistDropRules.duplicateSummary(incoming: valid, existing: existingURLs, played: playedURLs)
+                    let (shouldAdd, remember) = await promptForDuplicates(count: dup.duplicateCount,
+                                                                          alreadyPlayed: dup.anyAlreadyPlayed)
+                    if remember { setlist.setDuplicateSessionDecision(shouldAdd ? .alwaysAdd : .neverAdd) }
+                    shouldAddDuplicates = shouldAdd
+                    // The sheet suspended us; the setlist may have changed meanwhile.
+                    existingURLs = Set(setlist.entries.map(\.fileURL))
+                }
+                if !shouldAddDuplicates {
+                    toInsert = valid.filter { !existingURLs.contains($0) }
+                    skippedDuplicates = valid.count - toInsert.count
+                }
+            }
         }
 
-        guard settings.duplicateTrackProtection else {
-            setlist.insertURLs(valid, before: anchorID, importMusicTimes: importMusicTimes)
-            missingOnlyFeedback()
-            return
+        if !toInsert.isEmpty {
+            setlist.insertURLs(toInsert, before: anchorID, importMusicTimes: importMusicTimes)
         }
-
-        var existingURLs = Set(setlist.entries.map(\.fileURL))
-        guard valid.contains(where: { existingURLs.contains($0) }) else {
-            setlist.insertURLs(valid, before: anchorID, importMusicTimes: importMusicTimes)
-            missingOnlyFeedback()
-            return
-        }
-
-        let shouldAddDuplicates: Bool
-        switch setlist.duplicateSessionDecision {
-        case .alwaysAdd:
-            shouldAddDuplicates = true
-        case .neverAdd:
-            shouldAddDuplicates = false
-        case nil:
-            let playedURLs = Set(setlist.entries.compactMap { $0.state == .played ? $0.fileURL : nil })
-            let dup = SetlistDropRules.duplicateSummary(incoming: valid, existing: existingURLs, played: playedURLs)
-            let (shouldAdd, remember) = await promptForDuplicates(count: dup.duplicateCount,
-                                                                  alreadyPlayed: dup.anyAlreadyPlayed)
-            if remember { setlist.setDuplicateSessionDecision(shouldAdd ? .alwaysAdd : .neverAdd) }
-            shouldAddDuplicates = shouldAdd
-            // The sheet suspended us; the setlist may have changed meanwhile.
-            existingURLs = Set(setlist.entries.map(\.fileURL))
-        }
-
-        let toInsert = shouldAddDuplicates ? valid : valid.filter { !existingURLs.contains($0) }
-        if !toInsert.isEmpty { setlist.insertURLs(toInsert, before: anchorID, importMusicTimes: importMusicTimes) }
 
         if let msg = SetlistDropRules.dropFeedbackMessage(added: toInsert.count,
-                                                          skippedDuplicates: valid.count - toInsert.count,
-                                                          missing: missingCount) {
-            showDropFeedback(msg)
+                                                          skippedDuplicates: skippedDuplicates,
+                                                          missing: missingCount,
+                                                          unreadable: resolution.unreadable,
+                                                          unsupported: unsupportedCount) {
+            showDropFeedback(msg, seconds: resolution.unreadable > 0 ? 6 : 3)
         }
     }
 
     // Brief auto-dismissing note in the bottom drop-hint slot so silently
     // filtered duplicates aren't misread as a failed drag.
-    private func showDropFeedback(_ message: String) {
+    private func showDropFeedback(_ message: String, seconds: Double = 3) {
         withAnimation { dropFeedback = message }
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(seconds))
             withAnimation { dropFeedback = nil }
         }
     }
