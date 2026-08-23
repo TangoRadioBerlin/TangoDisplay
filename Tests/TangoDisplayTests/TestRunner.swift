@@ -3370,6 +3370,7 @@ runDropPayloadClassificationTests()
 runDropResolutionAccountingTests()
 runDropFeedbackCountsTests()
 runMusicMetadataLocationsTests()
+runLevelMeterTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4613,6 +4614,69 @@ func runMusicMetadataLocationsTests() {
             ]
             try expectEqual(DropPasteboardRules.musicMetadataLocations(plist).map(\.lastPathComponent),
                             ["nine.mp3", "ten.mp3"])
+        }
+    }
+}
+
+// MARK: - Room level meter (Core)
+
+func runLevelMeterTests() {
+    suite("LevelAverager — time-windowed energy average") {
+        test("empty window yields zero") {
+            var a = LevelAverager(windowSeconds: 2)
+            try expectEqual(a.meanSquare(at: 10), 0)
+        }
+        test("constant input converges to exactly that power") {
+            var a = LevelAverager(windowSeconds: 2)
+            for i in 0..<20 { a.add(sumSquares: 0.25 * 100, sampleCount: 100, at: Double(i) * 0.1) }
+            try expect(abs(a.meanSquare(at: 1.9) - 0.25) < 1e-9)
+        }
+        test("average is weighted by sample count") {
+            var a = LevelAverager(windowSeconds: 5)
+            a.add(sumSquares: 1.0 * 300, sampleCount: 300, at: 0)   // power 1.0 × 300 samples
+            a.add(sumSquares: 0.0, sampleCount: 100, at: 0.1)       // power 0.0 × 100 samples
+            try expect(abs(a.meanSquare(at: 0.2) - 0.75) < 1e-9)
+        }
+        test("entries older than the window are pruned") {
+            var a = LevelAverager(windowSeconds: 1)
+            a.add(sumSquares: 1.0 * 100, sampleCount: 100, at: 0)
+            a.add(sumSquares: 0.0, sampleCount: 100, at: 0.5)
+            try expect(abs(a.meanSquare(at: 0.9) - 0.5) < 1e-9)
+            try expectEqual(a.meanSquare(at: 1.6), 0)   // the loud entry (t=0) fell out of [0.6, 1.6]
+        }
+        test("a level step is smoothed across the window, not jumped") {
+            var a = LevelAverager(windowSeconds: 2)
+            for i in 0..<10 { a.add(sumSquares: 0.01 * 100, sampleCount: 100, at: Double(i) * 0.2) }
+            a.add(sumSquares: 1.0 * 100, sampleCount: 100, at: 2.0)
+            let m = a.meanSquare(at: 2.0)
+            try expect(m > 0.01 && m < 1.0)
+        }
+        test("window change takes effect on the next read") {
+            var a = LevelAverager(windowSeconds: 10)
+            a.add(sumSquares: 1.0 * 100, sampleCount: 100, at: 0)
+            a.add(sumSquares: 0.0, sampleCount: 100, at: 5)
+            a.windowSeconds = 1
+            try expectEqual(a.meanSquare(at: 5.5), 0)
+        }
+    }
+
+    suite("splDecibels / meterLevel") {
+        test("full scale reads base offset plus calibration") {
+            try expect(abs(splDecibels(meanSquare: 1.0, calibrationOffset: 0) - 90) < 1e-9)
+            try expect(abs(splDecibels(meanSquare: 1.0, calibrationOffset: -7) - 83) < 1e-9)
+            try expect(abs(splDecibels(meanSquare: 1.0, calibrationOffset: 12) - 102) < 1e-9)
+        }
+        test("-20 dBFS power maps to base minus 20") {
+            try expect(abs(splDecibels(meanSquare: 0.01, calibrationOffset: 0) - 70) < 1e-9)
+        }
+        test("silence clamps to the meter floor") {
+            try expectEqual(meterLevel(decibels: splDecibels(meanSquare: 0, calibrationOffset: 0)), 0)
+        }
+        test("meter level rounds and clamps 0…140") {
+            try expectEqual(meterLevel(decibels: 63.4), 63)
+            try expectEqual(meterLevel(decibels: 63.5), 64)
+            try expectEqual(meterLevel(decibels: 180), 140)
+            try expectEqual(meterLevel(decibels: -5), 0)
         }
     }
 }
