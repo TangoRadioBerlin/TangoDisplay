@@ -347,16 +347,27 @@ struct SetlistView: View {
                 .background(Color.blue.opacity(0.1))
                 Divider()
             }
-            if visibleEntries.isEmpty {
-                emptyDropZone
-            } else {
-                ScrollViewReader { proxy in
-                    trackList
-                        .onChange(of: scrollTrigger) { id in
-                            guard let id else { return }
-                            withAnimation { proxy.scrollTo(id, anchor: .center) }
-                            scrollTrigger = nil
-                        }
+            Group {
+                if visibleEntries.isEmpty {
+                    emptyDropZone
+                } else {
+                    ScrollViewReader { proxy in
+                        trackList
+                            .onChange(of: scrollTrigger) { id in
+                                guard let id else { return }
+                                withAnimation { proxy.scrollTo(id, anchor: .center) }
+                                scrollTrigger = nil
+                            }
+                    }
+                }
+            }
+            // Feedback capsule lives above BOTH states: a drop into an empty
+            // setlist that adds nothing ("Nothing added — …") must be visible too.
+            .overlay(alignment: .bottom) {
+                if let dropFeedback {
+                    feedbackCapsule(dropFeedback)
+                } else if !visibleEntries.isEmpty {
+                    dropHint
                 }
             }
 
@@ -734,21 +745,6 @@ struct SetlistView: View {
             }
         }
         .listStyle(.plain)
-        .overlay(alignment: .bottom) {
-            if let dropFeedback {
-                Text(dropFeedback)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Capsule())
-                    .padding(.bottom, 8)
-                    .transition(.opacity)
-            } else {
-                dropHint
-            }
-        }
         .toolbar {
             if settings.decibelMeterEnabled {
                 ToolbarItem(placement: .automatic) {
@@ -1185,6 +1181,18 @@ struct SetlistView: View {
         }
 
         return nil
+    }
+
+    private func feedbackCapsule(_ message: String) -> some View {
+        Text(message)
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .padding(.bottom, 8)
+            .transition(.opacity)
     }
 
     private var dropHint: some View {
