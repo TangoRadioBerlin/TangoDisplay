@@ -702,9 +702,34 @@ struct SetlistView: View {
                 let anchorID: UUID? = offset < entries.count
                     ? entries[offset].id
                     : nil
+                // Same resolver as the window-level drop, read synchronously
+                // while the drag pasteboard is still live in this callout —
+                // SwiftUI's NSItemProvider bridge only sees public.file-url and
+                // silently loses Music.app items that carry something else.
+                // Providers remain the fallback for whatever the resolver could
+                // not read (union by URL; provider↔item index matching is not
+                // reliable).
+                let drag = NSPasteboard(name: .drag)
+                let liveItems = drag.pasteboardItems?.count ?? 0
+                os_log("row drop: providers=%d dragItems=%d changeCount=%d",
+                       log: dropLog, type: .default, providers.count, liveItems, drag.changeCount)
+                let result: DropResolutionResult? = liveItems > 0
+                    ? DropPasteboardResolver.resolve(drag, draggingInfo: nil,
+                                                     diagEnabled: settings.diagnosticLoggingEnabled)
+                    : nil
                 Task { @MainActor in
-                    let urls = await loadURLs(from: providers)
-                    await handleIncomingURLs(urls, anchorID: anchorID)
+                    var r: DropResolution
+                    if let result {
+                        r = await result.value
+                    } else {
+                        r = DropResolution(urls: [], requested: 0, branch: .fileURL, itemTypes: [])
+                    }
+                    if r.unreadable > 0 || r.requested == 0 {
+                        let providerURLs = await loadURLs(from: providers)
+                        r.merge(providerURLs, requestedAtLeast: providers.count)
+                    }
+                    DropPasteboardResolver.logSummary(r, entry: "row")
+                    await handleIncomingDrop(r, anchorID: anchorID)
                 }
             }
         }
@@ -1103,26 +1128,16 @@ struct SetlistView: View {
     }
 
     private func pasteFromClipboard() {
-        // Standard path: works for Finder, Music.app, etc.
-        let urls = (NSPasteboard.general.readObjects(forClasses: [NSURL.self],
-                    options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-        if !urls.isEmpty {
-            Task { @MainActor in await handleIncomingURLs(urls, anchorID: nil) }
-            return
-        }
-
-        // foobar2000 (macOS) writes public.file-url as a bare POSIX path string
-        // rather than a file:// URL, so readObjects yields nothing. Resolve
-        // per-item through the same tested Core rule as the drag path.
-        var perItemURLs: [URL] = []
-        for item in NSPasteboard.general.pasteboardItems ?? [] {
-            if let str = item.string(forType: .fileURL),
-               let url = DropPasteboardRules.fileURL(fromPasteboardString: str) {
-                perItemURLs.append(url)
-            }
-        }
-        if !perItemURLs.isEmpty {
-            Task { @MainActor in await handleIncomingURLs(perItemURLs, anchorID: nil) }
+        // Same resolver as the drop paths (Finder/Music file URLs, foobar2000's
+        // bare POSIX strings, Music selection); no dragging info → no
+        // materialisation, which paste never had anyway.
+        let result = DropPasteboardResolver.resolve(NSPasteboard.general, draggingInfo: nil,
+                                                    diagEnabled: settings.diagnosticLoggingEnabled)
+        Task { @MainActor in
+            let r = await result.value
+            guard r.requested > 0, r.branch != .unsupported else { return }   // nothing file-like on the clipboard
+            DropPasteboardResolver.logSummary(r, entry: "paste")
+            await handleIncomingDrop(r, anchorID: nil)
         }
     }
 

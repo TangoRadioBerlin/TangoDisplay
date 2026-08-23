@@ -46,6 +46,20 @@ enum DropResolutionResult {
     /// selection). `requested`/`branch` are known now; `finish` delivers the
     /// full resolution on the main queue exactly once.
     case deferred(DropResolution, finish: (@escaping @MainActor (DropResolution) -> Void) -> Void)
+
+    /// The resolution, awaiting a deferred branch when necessary.
+    @MainActor
+    var value: DropResolution {
+        get async {
+            switch self {
+            case .immediate(let r): return r
+            case .deferred(_, let finish):
+                return await withCheckedContinuation { continuation in
+                    finish { continuation.resume(returning: $0) }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Resolver
