@@ -45,9 +45,23 @@ Music start times are also applied **live at playback**, no drop required (works
 
 Dragged tracks whose files no longer exist on disk (shown with a warning triangle in Music) are skipped with a brief "N files not found" note, so they can't silently fail at playback later.
 
+#### Drop Feedback
+
+Every drop that adds fewer tracks than you dragged says so in a short note at the bottom of the setlist (also when the setlist is empty):
+
+- **Added 3 of 5 — 2 items could not be read** — Music handed over items without a usable file (typically cloud-only tracks that are not downloaded, or a drag Music stopped serving). Download the tracks in Music and drop again; dropping onto the empty area *below* the list lets Music write a cached copy where it can.
+- **N already in set** — duplicates skipped by your session choice (see below).
+- **N files not found** / **N unsupported file types** — missing on disk, or not an audio format the player accepts (mp3, m4a, aiff/aif, wav, flac, caf, opus).
+
+For troubleshooting, each drop also leaves one line in the macOS unified log (counts and pasteboard types only, never file paths):
+
+```
+log show --last 1d --predicate 'subsystem == "com.tangodisplay" AND category == "musicdrop"'
+```
+
 #### Duplicate Track Protection
 
-When **Duplicate track protection** is enabled in **Player Settings**, dropping a track that is already in the setlist (played or unplayed) shows an alert:
+When **Duplicate track protection** is enabled in **Player Settings**, dropping a track that is already in the setlist (played or unplayed) brings TangoDisplay to the front and shows a prompt attached to the setlist window:
 
 > *This track already exists in this set. Add anyway?*
 
