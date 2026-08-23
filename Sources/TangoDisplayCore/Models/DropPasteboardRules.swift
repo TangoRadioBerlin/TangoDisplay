@@ -148,6 +148,42 @@ public enum DropPasteboardRules {
         return nil
     }
 
+    // MARK: - Music.app metadata plist
+
+    /// Extract track file URLs from Music.app's `com.apple.music.metadata`
+    /// plist. Two known shapes (varies by Music.app version):
+    ///   Newer: {"Tracks": {"12345": {"Location": "…"}}, "Playlists": […]}
+    ///   Older: {"12345": {"Location": "…"}, "Playlist Items": […]}
+    /// `Location` is a `file://` URL or a `~/…` tilde path. `file:` strings go
+    /// through `fileURL(fromPasteboardString:)` — never `URL(string:)`, which
+    /// truncates unencoded `#`/`?`. Entries are ordered by numeric track key so
+    /// the result is deterministic (dictionary iteration is not).
+    public static func musicMetadataLocations(_ plist: [String: Any]) -> [URL] {
+        let trackSource = (plist["Tracks"] as? [String: Any]) ?? plist
+        let keys = trackSource.keys.sorted { a, b in
+            switch (Int(a), Int(b)) {
+            case let (x?, y?): return x < y
+            case (nil, nil):   return a < b
+            case (nil, _):     return false
+            case (_, nil):     return true
+            }
+        }
+        var urls: [URL] = []
+        for key in keys {
+            guard let track = trackSource[key] as? [String: Any],
+                  let location = track["Location"] as? String,
+                  !location.isEmpty else { continue }
+            if location.hasPrefix("file:") {
+                if let url = fileURL(fromPasteboardString: location) { urls.append(url) }
+            } else {
+                let path = NSString(string: location).expandingTildeInPath
+                guard path.hasPrefix("/") else { continue }
+                urls.append(URL(fileURLWithPath: path))
+            }
+        }
+        return urls
+    }
+
     // MARK: - Legacy file-promise decision
 
     /// How the legacy file-promise drop path should proceed after per-item

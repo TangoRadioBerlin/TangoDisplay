@@ -3369,6 +3369,7 @@ runPlatePlacementTests()
 runDropPayloadClassificationTests()
 runDropResolutionAccountingTests()
 runDropFeedbackCountsTests()
+runMusicMetadataLocationsTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4532,6 +4533,60 @@ func runDropFeedbackCountsTests() {
         test("supported extension contract") {
             try expectEqual(SetlistDropRules.supportedAudioExtensions,
                             ["mp3", "m4a", "aiff", "aif", "wav", "flac", "caf", "opus"])
+        }
+    }
+}
+
+// MARK: - Music metadata plist → locations (Core)
+
+func runMusicMetadataLocationsTests() {
+    suite("DropPasteboardRules.musicMetadataLocations") {
+        test("newer format: Tracks sub-dictionary, ordered by track key") {
+            let plist: [String: Any] = [
+                "Tracks": [
+                    "200": ["Location": "file:///Music/b.mp3"],
+                    "100": ["Location": "file:///Music/a.mp3"],
+                ],
+                "Playlists": [],
+            ]
+            try expectEqual(DropPasteboardRules.musicMetadataLocations(plist).map(\.path),
+                            ["/Music/a.mp3", "/Music/b.mp3"])
+        }
+        test("older format: root dictionary with tilde path") {
+            let home = NSString(string: "~").expandingTildeInPath
+            let plist: [String: Any] = [
+                "12345": ["Location": "~/Music/c.mp3"],
+                "Playlist Items": [],
+            ]
+            try expectEqual(DropPasteboardRules.musicMetadataLocations(plist).map(\.path),
+                            ["\(home)/Music/c.mp3"])
+        }
+        test("unencoded # in a file: location survives (no URL(string:) truncation)") {
+            let plist: [String: Any] = ["1": ["Location": "file:///Music/Milonga #2.mp3"]]
+            try expectEqual(DropPasteboardRules.musicMetadataLocations(plist).map(\.path),
+                            ["/Music/Milonga #2.mp3"])
+        }
+        test("percent-encoded location decodes") {
+            let plist: [String: Any] = ["1": ["Location": "file:///Music/La%20Cumparsita.mp3"]]
+            try expectEqual(DropPasteboardRules.musicMetadataLocations(plist).map(\.path),
+                            ["/Music/La Cumparsita.mp3"])
+        }
+        test("entries without a usable Location are ignored") {
+            let plist: [String: Any] = [
+                "1": ["Location": ""],
+                "2": ["Name": "no location"],
+                "3": "not a dictionary",
+                "4": ["Location": "file:///Music/ok.mp3"],
+            ]
+            try expectEqual(DropPasteboardRules.musicMetadataLocations(plist).map(\.path), ["/Music/ok.mp3"])
+        }
+        test("numeric keys sort numerically, not lexically") {
+            let plist: [String: Any] = [
+                "9": ["Location": "file:///Music/nine.mp3"],
+                "10": ["Location": "file:///Music/ten.mp3"],
+            ]
+            try expectEqual(DropPasteboardRules.musicMetadataLocations(plist).map(\.lastPathComponent),
+                            ["nine.mp3", "ten.mp3"])
         }
     }
 }
