@@ -167,6 +167,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         self.configStore = configStore
         super.init()
         setupAudioEngine()
+        // Music start times: enumerate the library in the background once the
+        // launch has settled, then refresh the entries' cached values.
+        setlist.scheduleMusicStartRefresh()
         levelMeter = AudioLevelMeter(mixerNode: audioEngine.mainMixerNode)
         playerNode.volume = max(0, min(1, volume))
         applyOutputDevice(settings.builtInOutputDeviceUID)
@@ -989,16 +992,18 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             // time model; updateTime reasserts it every tick), the scheduled segment and
             // activeWindow enforce the trim. A degenerate window plays the full file.
             let fullSeconds = Double(file.length) / sr
-            // Live Music start time (Song Info → Options): cortinas always start
-            // there, dance tracks per entry opt-in; a manual trim wins. Non-blocking
-            // peek — during the first seconds after launch the table may not be
-            // enumerated yet, in which case this one load starts at the file head.
+            // Live Music start time (Song Info → Options): every track starts
+            // there — cortinas always, dance tracks unless opted out; a manual
+            // trim wins. The entry's cached value covers the window before the
+            // library table is enumerated; the non-blocking peek refines it.
+            SetlistManager.startMusicTrimLoad()
             let detector = settings.makeDetector()
             let effTrimStart = effectiveTrimStart(
                 entryTrimStart: entry.trimStartSeconds,
-                musicStart: SetlistManager.musicTrimIfLoaded(for: entry.fileURL.path)?.start,
+                musicStart: SetlistManager.musicTrimIfLoaded(for: entry.fileURL.path)?.start
+                    ?? entry.musicStartSeconds,
                 isCortina: detector.isCortina(genre: entry.track.genre),
-                useMusicStartTime: entry.useMusicStartTime)
+                ignoresMusicStart: entry.ignoresMusicStartTime)
             let window = playbackWindow(duration: fullSeconds,
                                         trimStart: effTrimStart,
                                         trimEnd: entry.trimEndSeconds,
@@ -1039,9 +1044,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             let inTrimStart = next.flatMap { n in
                 effectiveTrimStart(
                     entryTrimStart: n.trimStartSeconds,
-                    musicStart: SetlistManager.musicTrimIfLoaded(for: n.fileURL.path)?.start,
+                    musicStart: SetlistManager.musicTrimIfLoaded(for: n.fileURL.path)?.start
+                        ?? n.musicStartSeconds,
                     isCortina: detector.isCortina(genre: n.track.genre),
-                    useMusicStartTime: n.useMusicStartTime)
+                    ignoresMusicStart: n.ignoresMusicStartTime)
             }
             autoGapAnalysisTask = Task { [weak self] in
                 let cur = await AudioSilenceAnalyzer.shared.analyze(url: currentURL)

@@ -4240,29 +4240,55 @@ func runMusicTrimTests() {
     suite("effectiveTrimStart — live Music start times") {
         test("manual entry trim always wins, even for cortinas") {
             try expectEqual(effectiveTrimStart(entryTrimStart: 12, musicStart: 30,
-                                               isCortina: true, useMusicStartTime: true), 12)
+                                               isCortina: true, ignoresMusicStart: false), 12)
             try expectEqual(effectiveTrimStart(entryTrimStart: 12, musicStart: 30,
-                                               isCortina: false, useMusicStartTime: false), 12)
+                                               isCortina: false, ignoresMusicStart: true), 12)
         }
 
-        test("cortinas take the Music start without any opt-in") {
+        test("cortinas take the Music start unconditionally") {
             try expectEqual(effectiveTrimStart(entryTrimStart: nil, musicStart: 30,
-                                               isCortina: true, useMusicStartTime: false), 30)
+                                               isCortina: true, ignoresMusicStart: false), 30)
         }
 
-        test("dance tracks ignore the Music start unless opted in") {
+        test("cortinas ignore the per-entry opt-out") {
+            try expectEqual(effectiveTrimStart(entryTrimStart: nil, musicStart: 30,
+                                               isCortina: true, ignoresMusicStart: true), 30)
+        }
+
+        test("dance tracks take the Music start by default") {
+            try expectEqual(effectiveTrimStart(entryTrimStart: nil, musicStart: 30,
+                                               isCortina: false, ignoresMusicStart: false), 30)
+        }
+
+        test("opted-out dance track ignores the Music start") {
             try expectNil(effectiveTrimStart(entryTrimStart: nil, musicStart: 30,
-                                             isCortina: false, useMusicStartTime: false))
-        }
-
-        test("opted-in dance track takes the Music start") {
-            try expectEqual(effectiveTrimStart(entryTrimStart: nil, musicStart: 30,
-                                               isCortina: false, useMusicStartTime: true), 30)
+                                             isCortina: false, ignoresMusicStart: true))
         }
 
         test("no Music start yields nil (start at file beginning)") {
             try expectNil(effectiveTrimStart(entryTrimStart: nil, musicStart: nil,
-                                             isCortina: true, useMusicStartTime: true))
+                                             isCortina: true, ignoresMusicStart: false))
+        }
+    }
+
+    suite("musicStartBadge — setlist row marker") {
+        test("active when a Music start is in effect") {
+            try expectEqual(musicStartBadge(entryTrimStart: nil, musicStart: 12.5,
+                                            isCortina: false, ignoresMusicStart: false), .active(seconds: 12.5))
+            try expectEqual(musicStartBadge(entryTrimStart: nil, musicStart: 12.5,
+                                            isCortina: true, ignoresMusicStart: true), .active(seconds: 12.5))
+        }
+        test("ignored marker for an opted-out dance track") {
+            try expectEqual(musicStartBadge(entryTrimStart: nil, musicStart: 12.5,
+                                            isCortina: false, ignoresMusicStart: true), .ignored(seconds: 12.5))
+        }
+        test("none without a Music start") {
+            try expectEqual(musicStartBadge(entryTrimStart: nil, musicStart: nil,
+                                            isCortina: true, ignoresMusicStart: false), .none)
+        }
+        test("none when a manual trim overrides (trim badge shows instead)") {
+            try expectEqual(musicStartBadge(entryTrimStart: 5, musicStart: 12.5,
+                                            isCortina: false, ignoresMusicStart: false), .none)
         }
     }
 }

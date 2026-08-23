@@ -653,6 +653,11 @@ struct SetlistView: View {
             genreColorRules: settings.genreColorRules,
             genreColorTitleEnabled: settings.genreColorTitleEnabled,
             isCortina: detector.isCortina(genre: entry.track.genre),
+            musicStartBadge: appState.localPlayer == nil ? .none : musicStartBadge(
+                entryTrimStart: entry.trimStartSeconds,
+                musicStart: entry.musicStartSeconds,
+                isCortina: detector.isCortina(genre: entry.track.genre),
+                ignoresMusicStart: entry.ignoresMusicStartTime),
             player: activeEntryID == entry.id && isPlayerActive ? player : nil
         )
         .tag(entry.id)
@@ -1037,7 +1042,7 @@ struct SetlistView: View {
                 setlist.setPerformance(!areAllPerformance, for: performanceTargets)
             }
         }
-        // Music start time opt-in: dance tracks only (cortinas always use it),
+        // Music start time opt-out: dance tracks only (cortinas always use it),
         // built-in player only (only it enforces the start).
         if appState.localPlayer != nil {
             let detector = settings.makeDetector()
@@ -1047,11 +1052,11 @@ struct SetlistView: View {
                     && (e.state != .played || e.id == player.currentEntryID)
             }
             if !musicStartTargets.isEmpty {
-                let allUse = musicStartTargets.allSatisfy { id in
-                    setlist.entries.first(where: { $0.id == id })?.useMusicStartTime ?? false
+                let allIgnore = musicStartTargets.allSatisfy { id in
+                    setlist.entries.first(where: { $0.id == id })?.ignoresMusicStartTime ?? false
                 }
-                Button(allUse ? "Stop Using Music Start Time" : "Use Music Start Time") {
-                    setlist.setUseMusicStartTime(!allUse, for: musicStartTargets)
+                Button(allIgnore ? "Use Music Start Time" : "Ignore Music Start Time") {
+                    setlist.setIgnoresMusicStartTime(!allIgnore, for: musicStartTargets)
                 }
             }
         }
@@ -1537,18 +1542,21 @@ struct SetlistRowView: View {
     var genreColorRules: [GenreColorRule] = []
     var genreColorTitleEnabled: Bool = false
     var isCortina: Bool = false
+    var musicStartBadge: MusicStartBadge = .none
     var player: LocalPlayerSource? = nil
     var onHover: ((Bool) -> Void)? = nil
 
     private var isCurrent: Bool { entry.state == .playing || entry.state == .paused || isActivelyPlaying }
     private var isCurrentPlaying: Bool { entry.state == .playing || isActivelyPlaying }
+    private static func fmtSeconds(_ s: Double) -> String {
+        let i = Int(max(0, s).rounded()); return String(format: "%d:%02d", i / 60, i % 60)
+    }
     private var trimBadgeText: String {
-        func fmt(_ s: Double) -> String {
-            let i = Int(max(0, s).rounded()); return String(format: "%d:%02d", i / 60, i % 60)
-        }
-        let start = entry.trimStartSeconds ?? 0
+        // A live Music start (no manual start trim) is the real window start.
+        let musicStart: Double? = { if case .active(let s) = musicStartBadge { return s }; return nil }()
+        let start = entry.trimStartSeconds ?? musicStart ?? 0
         let end = entry.trimEndSeconds ?? entry.duration ?? 0
-        return "\(fmt(start))–\(fmt(end))"
+        return "\(Self.fmtSeconds(start))–\(Self.fmtSeconds(end))"
     }
     private var isBoldBright: Bool {
         guard entry.state == .queued, !isNextToPlay, !isCurrent else { return false }
@@ -1631,6 +1639,25 @@ struct SetlistRowView: View {
                     Image(systemName: "repeat")
                         .font(.system(size: 11))
                         .foregroundColor(.blue)
+                }
+                // ♪ — the track starts at its Music start time (Song Info → Options).
+                switch musicStartBadge {
+                case .active(let seconds):
+                    Label(Self.fmtSeconds(seconds), systemImage: "music.note")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.teal)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.teal.opacity(0.12))
+                        .clipShape(Capsule())
+                        .help("Starts at the Music start time (\(Self.fmtSeconds(seconds)))")
+                case .ignored(let seconds):
+                    Image(systemName: "music.note")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .help("Music start time (\(Self.fmtSeconds(seconds))) ignored for this track")
+                case .none:
+                    EmptyView()
                 }
                 if entry.trimStartSeconds != nil || entry.trimEndSeconds != nil {
                     Label(trimBadgeText, systemImage: "timeline.selection")

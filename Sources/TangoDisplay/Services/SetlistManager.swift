@@ -28,7 +28,8 @@ struct SetlistEntry: Identifiable, Codable {
     var tagColor: TagColor = .none
     var isPerformance: Bool = false    // track is part of a guest performance
     var repeatTrack: Bool = false      // non-dance track loops until stop-after or un-marked
-    var useMusicStartTime: Bool = false   // dance track opts in to Music's per-song start time (cortinas always use it)
+    var ignoresMusicStartTime: Bool = false   // dance track opts OUT of Music's per-song start time (cortinas always use it)
+    var musicStartSeconds: Double? = nil      // cached Music start time (Song Info → Options); refreshed when the library table loads
     var trimStartSeconds: Double? = nil   // nil = play from file start
     var trimEndSeconds: Double? = nil     // nil = play to file end
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
@@ -36,8 +37,9 @@ struct SetlistEntry: Identifiable, Codable {
     var tandaRef: String? = nil        // opaque grouping hint from a remote controller (echoed)
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, repeatTrack, useMusicStartTime, trimStartSeconds, trimEndSeconds, clientRef, tandaRef
+        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, repeatTrack, ignoresMusicStartTime, musicStartSeconds, trimStartSeconds, trimEndSeconds, clientRef, tandaRef
         // autoGapApplied is intentionally excluded — reset each playback session
+        // useMusicStartTime (3.30.0 opt-in) is no longer read: Music start times now apply by default.
     }
 
     // Legacy one-directional flag (pre-tri-state); read for migration only.
@@ -82,7 +84,8 @@ struct SetlistEntry: Identifiable, Codable {
         }
         isPerformance = try c.decodeIfPresent(Bool.self, forKey: .isPerformance) ?? false
         repeatTrack = try c.decodeIfPresent(Bool.self, forKey: .repeatTrack) ?? false
-        useMusicStartTime = try c.decodeIfPresent(Bool.self, forKey: .useMusicStartTime) ?? false
+        ignoresMusicStartTime = try c.decodeIfPresent(Bool.self, forKey: .ignoresMusicStartTime) ?? false
+        musicStartSeconds = try c.decodeIfPresent(Double.self, forKey: .musicStartSeconds)
         trimStartSeconds = try c.decodeIfPresent(Double.self, forKey: .trimStartSeconds)
         trimEndSeconds = try c.decodeIfPresent(Double.self, forKey: .trimEndSeconds)
         clientRef = try c.decodeIfPresent(String.self, forKey: .clientRef)
@@ -148,16 +151,18 @@ final class SetlistManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let track = await SetlistManager.readMetadata(from: url)
-                // Trim from Music's per-track start/stop (Song Info → Options), only when the
-                // built-in player is active. Read off the main actor — the first call forces a
-                // whole-library ITLibrary enumeration that would otherwise hang the drop.
+                // Music's per-track start/stop (Song Info → Options), only when the built-in
+                // player is active. The START is cached on the entry (applied live via
+                // effectiveTrimStart, shown as the ♪ badge, never a manual trim); the STOP
+                // becomes a trim-end marker. Read off the main actor — the first call forces
+                // a whole-library ITLibrary enumeration that would otherwise hang the drop.
                 let trim = importMusicTimes
                     ? await SetlistManager.musicTrimAsync(url.path)
                     : (start: nil, end: nil)
                 guard let i = self.entries.firstIndex(where: { $0.id == id }) else { return }
                 self.entries[i].track = track
                 if importMusicTimes {
-                    self.entries[i].trimStartSeconds = trim.start
+                    self.entries[i].musicStartSeconds = trim.start
                     self.entries[i].trimEndSeconds = trim.end
                 }
                 // Re-apply genre-colour now that we have a real genre.
@@ -308,12 +313,50 @@ final class SetlistManager: ObservableObject {
         save()
     }
 
-    func setUseMusicStartTime(_ value: Bool, for ids: Set<UUID>) {
+    func setIgnoresMusicStartTime(_ value: Bool, for ids: Set<UUID>) {
         for id in ids {
             guard let i = entries.firstIndex(where: { $0.id == id }) else { continue }
-            entries[i].useMusicStartTime = value
+            entries[i].ignoresMusicStartTime = value
         }
         save()
+    }
+
+    // MARK: - Music start refresh
+
+    /// Bring every entry's cached Music start time in line with the library
+    /// table. Only writes (and saves) when something actually changed, so
+    /// rows re-render just once. Requires the table to be loaded (no-op
+    /// otherwise); `scheduleMusicStartRefresh` awaits the load first.
+    @MainActor
+    func refreshMusicStartTimes() {
+        var changed = false
+        for i in entries.indices {
+            guard let lookup = Self.musicTrimIfLoaded(for: entries[i].fileURL.path) else { return }
+            if entries[i].musicStartSeconds != lookup.start {
+                entries[i].musicStartSeconds = lookup.start
+                changed = true
+            }
+        }
+        if changed { save() }
+    }
+
+    /// Load the Music library table in the background — after `delay`, so a
+    /// cold launch is not slowed by the whole-library enumeration — and then
+    /// refresh the entries' cached Music start times once. Idempotent per
+    /// session: the table loads at most once (`musicTrimTask`).
+    func scheduleMusicStartRefresh(after delay: Duration = .seconds(20)) {
+        Task(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: delay)
+            await Self.musicTrimTask.value
+            guard let self else { return }
+            await MainActor.run { self.refreshMusicStartTimes() }
+        }
+    }
+
+    /// Kick off the library load now (idempotent); the actual refresh of the
+    /// entries still happens through `scheduleMusicStartRefresh`.
+    static func startMusicTrimLoad() {
+        _ = musicTrimTask
     }
 
     func setTrim(start: Double?, end: Double?, for id: UUID) {
@@ -677,18 +720,20 @@ final class SetlistManager: ObservableObject {
     // XML" preference. Times are milliseconds. Whole-library enumeration once per session;
     // if users change Music start/stop mid-session, add an invalidate-on-drop refresh.
     //
-    // Loaded exactly once, off the main actor, by `musicTrimTask` — and only LAZILY, the
-    // first time a track is dropped into the setlist (`musicTrimAsync`). Deliberately not
-    // started at launch: the whole-library enumeration is heavy enough to make app start
-    // sluggish on large libraries. The finished table is mirrored into a lock-guarded
-    // cache so the built-in player can peek at load time WITHOUT blocking (loadEntry runs
-    // synchronously on main); before the first drop of a session the peek yields nil.
+    // Loaded exactly once, off the main actor, by `musicTrimTask` — LAZILY: on the first
+    // drop (`musicTrimAsync`), on the first track load (`startMusicTrimLoad`), or by the
+    // delayed background refresh the built-in player schedules ~20 s after it comes up
+    // (`scheduleMusicStartRefresh`). Deliberately not at launch: the whole-library
+    // enumeration is heavy enough to make a cold start sluggish on large libraries. The
+    // finished table is mirrored into a lock-guarded cache so the built-in player can peek
+    // at load time WITHOUT blocking (loadEntry runs synchronously on main); until loaded
+    // the peek yields nil and entries fall back to their cached `musicStartSeconds`.
     private typealias MusicTrimTable = [String: (startMs: Int, stopMs: Int, totalMs: Int)]
 
     private static let musicTrimLock = NSLock()
     nonisolated(unsafe) private static var musicTrimCache: MusicTrimTable?
 
-    private static let musicTrimTask = Task<Void, Never> {
+    private static let musicTrimTask = Task<Void, Never>(priority: .utility) {
         storeMusicTrimTable(loadMusicTrimTimes())
     }
 

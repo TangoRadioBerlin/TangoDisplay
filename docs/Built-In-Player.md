@@ -39,9 +39,9 @@ You can also **copy** audio files in Finder, Music.app, Swinsian, or Foobar2000 
 
 **Supported formats:** MP3, M4A (AAC), AIFF, WAV, FLAC, CAF, Opus.
 
-When the built-in player is active, dropping tracks from Music also imports each track's **start/stop times** (set in Music under Song Info → Options) as playback trim markers automatically — see [Track Start & End Time](#track-start--end-time) below.
+When the built-in player is active, tracks use the **start and stop times** you set in Music (Song Info → Options): the **start time** is applied live at playback and shown as a teal **♪ m:ss** badge on the row; the **stop time** is imported as a trim-end marker — see [Track Start & End Time](#track-start--end-time) below.
 
-Music start times are also applied **live at playback**, no drop required (works for saved setlists too): **cortinas always** begin at their Music start time, and dance tracks can opt in per track via right-click → **Use Music Start Time**. A manual trim set in the app always takes precedence. To keep app launch fast, the Music library is only read (once per session, in the background) the first time a track is dropped into the setlist; until then, entries from a saved setlist play from the file beginning (or from their manual trim).
+Music start times apply to **every track** — cortinas always, dance tracks by default. To play a dance track from the file beginning instead, right-click it → **Ignore Music Start Time** (the badge turns into a grey ♪; **Use Music Start Time** restores it). A manual start trim set in the app always takes precedence (the blue trim badge shows instead of ♪). Saved setlists keep their Music start times; to keep app launch fast, the Music library itself is read once per session in the background, about 20 seconds after the built-in player comes up (or immediately on the first drop), and the badges are refreshed then. Start/stop times changed in Music during a session are picked up at the next launch.
 
 Dragged tracks whose files no longer exist on disk (shown with a warning triangle in Music) are skipped with a brief "N files not found" note, so they can't silently fail at playback later.
 
@@ -194,7 +194,7 @@ Notes:
 - Playback begins at the start time and stops at the end time, then advances as normal.
 - Combine with **Repeat Track** to loop just the trimmed range continuously.
 - This is enforced by the built-in player only, so the menu action appears when the built-in player is the active source.
-- Tracks dropped from Music while the built-in player is active have their start/stop times (Song Info → Options) imported as trim markers automatically, so you don't need to re-enter them here. You can still adjust or clear them afterwards.
+- Tracks from Music carry their Music **stop time** (Song Info → Options) as a trim-end marker automatically; the Music **start time** is applied live (♪ badge) rather than stored as a trim, so a start you set here always wins over it. You can still adjust or clear trims afterwards.
 - Auto-gap accounts for the trim: silence cut off by a trim is never counted toward the gap between tracks.
 
 ### Clearing the Setlist
