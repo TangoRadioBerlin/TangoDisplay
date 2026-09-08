@@ -139,6 +139,42 @@ public func migratedAutoGapOverride(legacyIgnores: Bool?) -> Bool? {
     legacyIgnores == true ? true : nil
 }
 
+/// Why the player is loading the next track — decides which gap rule applies.
+public enum GapContext {
+    /// A track ended naturally (or the user skipped): normal auto-gap.
+    case natural
+    /// The user stopped/paused playback manually; the pause itself was the gap.
+    case manualStop
+    /// The previous track was faded out (auto-fade cortina or a fade button):
+    /// only a short breather is wanted, never the full auto-gap wait.
+    case afterFade
+}
+
+/// Transition-aware gap decision. `normalPlan` is the regular auto-gap plan
+/// (nil when auto-gap is disabled or the entry opted out).
+///
+/// - `.afterFade` returns a plan with `insert == fadeGap` REGARDLESS of
+///   `autoGapEnabled` — a fade always earns its short breather. Force-mode
+///   head-trimming of the incoming track (`skipLeading`) is kept so leading
+///   silence doesn't stretch the pause; `trimTrailing` is dropped (the faded
+///   track is already gone).
+/// - `.manualStop` suppresses the gap entirely when `skipAfterManualStop` is
+///   on (the user's stop already was the pause), else behaves like `.natural`.
+public func gapPlanForTransition(context: GapContext, skipAfterManualStop: Bool,
+                                 fadeGap: Double, autoGapEnabled: Bool,
+                                 normalPlan: AutoGapPlan?) -> AutoGapPlan? {
+    switch context {
+    case .natural:
+        return normalPlan
+    case .manualStop:
+        return skipAfterManualStop ? nil : normalPlan
+    case .afterFade:
+        return AutoGapPlan(insert: max(0, fadeGap),
+                           skipLeading: normalPlan?.skipLeading ?? 0,
+                           trimTrailing: 0)
+    }
+}
+
 public func autoGapPlan(leading: Double, trailing: Double, prevEnd: Double,
                         target: Double, force: Bool,
                         safetyMargin: Double = AutoGapPlan.defaultSafetyMargin) -> AutoGapPlan {

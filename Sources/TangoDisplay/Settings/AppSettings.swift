@@ -186,6 +186,17 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(autoGapForceLength, forKey: kPrefix + "autoGapForceLength") }
     }
 
+    @Published var autoGapSkipAfterManualStop: Bool {
+        didSet { UserDefaults.standard.set(autoGapSkipAfterManualStop,
+                                           forKey: kPrefix + "autoGapSkipAfterManualStop") }
+    }
+
+    /// Short pause inserted before the next track after a fade-out (auto-fade
+    /// cortina or a fade button) — replaces the full auto-gap wait there.
+    @Published var fadeGapSeconds: Double {
+        didSet { UserDefaults.standard.set(fadeGapSeconds, forKey: kPrefix + "fadeGapSeconds") }
+    }
+
     @Published var autoFadeCortinasEnabled: Bool {
         didSet { UserDefaults.standard.set(autoFadeCortinasEnabled, forKey: kPrefix + "autoFadeCortinasEnabled") }
     }
@@ -473,6 +484,8 @@ final class AppSettings: ObservableObject {
         autoGapDuration = ud.object(forKey: kPrefix + "autoGapDuration").flatMap { $0 as? Double } ?? 4.0
         autoGapIgnoreFirstTrack = ud.object(forKey: kPrefix + "autoGapIgnoreFirstTrack").flatMap { $0 as? Bool } ?? true
         autoGapForceLength = ud.object(forKey: kPrefix + "autoGapForceLength").flatMap { $0 as? Bool } ?? false
+        autoGapSkipAfterManualStop = ud.object(forKey: kPrefix + "autoGapSkipAfterManualStop").flatMap { $0 as? Bool } ?? false
+        fadeGapSeconds = ud.object(forKey: kPrefix + "fadeGapSeconds").flatMap { $0 as? Double } ?? 0.5
         autoFadeCortinasEnabled = ud.object(forKey: kPrefix + "autoFadeCortinasEnabled").flatMap { $0 as? Bool } ?? false
         cortinaPlayTime = ud.object(forKey: kPrefix + "cortinaPlayTime").flatMap { $0 as? Double } ?? 30.0
         cortinaVolumeReductionDb = ud.object(forKey: kPrefix + "cortinaVolumeReductionDb").flatMap { $0 as? Double } ?? 0.0

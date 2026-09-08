@@ -152,6 +152,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     var playbackWindowSeconds: (start: Double, end: Double) { activeWindow ?? (0, duration) }
     private var audioStartSampleTime: AVAudioFramePosition = 0
     private var silencePending: Bool = false
+    /// Why the NEXT loadEntry happens — decides the gap rule (Core `gapPlanForTransition`).
+    /// Set by pause()/stopTrack() (.manualStop) and by AppState's fade paths (.afterFade,
+    /// which outranks the stop that a fade ends in); consumed by loadEntry.
+    private var gapContext: GapContext = .natural
 
     // MARK: - Private — loudness analysis
 
@@ -666,6 +670,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             playerNode.play()
             isActivePlaying = true
         } else if let id = currentEntryID {
+            // Resuming the track that was stopped: the pending stop/fade is spent,
+            // so it must not suppress the following track's gap.
+            gapContext = .natural
             setlist.markPlaying(id: id)
             seekTo(0) { [weak self] in
                 self?.playerNode.play()
@@ -675,7 +682,20 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         reportCurrentState()
     }
 
+    /// The current track is being faded out; the next load gets the short
+    /// fade gap instead of the full auto-gap. Survives the stopTrack() a
+    /// Fade & Stop ends in.
+    func noteFadeTransition() {
+        gapContext = .afterFade
+    }
+
+    /// A cancelled fade must not leak its short gap into the next transition.
+    func clearFadeTransition() {
+        if gapContext == .afterFade { gapContext = .natural }
+    }
+
     func pause() {
+        if gapContext != .afterFade { gapContext = .manualStop }
         scheduleGeneration += 1
         playerNode.stop()
         isActivePlaying = false
@@ -709,6 +729,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     }
 
     func stopTrack() {
+        if gapContext != .afterFade { gapContext = .manualStop }
         if let id = currentEntryID, !earlyMarkedEntryIDs.contains(id), !currentEntryIsPlayed() {
             setlist.markQueued(id: id)
         }
@@ -938,22 +959,36 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
             let autoGapIgnored = entry.autoGapIgnored(isFirstTrack: isFirstTrack,
                                                       ignoreFirstTrack: settings.autoGapIgnoreFirstTrack)
-            if !bypassAutoGap && !autoGapIgnored && settings.autoGapEnabled {
-                do {
+            // A fade transition always gets its short gap, even with auto-gap disabled.
+            let transition = gapContext
+            gapContext = .natural
+            if !bypassAutoGap && !autoGapIgnored
+                && (settings.autoGapEnabled || transition == .afterFade) {
+                gapScope: do {
                     // Use the analysis prepared for this exact (outgoing, incoming) pair.
                     // currentEntryID still holds the outgoing track here (set to the new
                     // entry below). A stale/mismatched pair → conservative full-target
                     // plan with no measured silence credited and nothing trimmed.
-                    let plan = preparedAutoGap?.plan(
-                        currentID: currentEntryID ?? entry.id,
-                        nextID: entry.id,
-                        target: settings.autoGapDuration,
-                        force: settings.autoGapForceLength
-                    ) ?? autoGapPlan(
-                        leading: 0, trailing: 0, prevEnd: 0,
-                        target: settings.autoGapDuration,
-                        force: settings.autoGapForceLength
-                    )
+                    let normalPlan: AutoGapPlan? = settings.autoGapEnabled
+                        ? preparedAutoGap?.plan(
+                            currentID: currentEntryID ?? entry.id,
+                            nextID: entry.id,
+                            target: settings.autoGapDuration,
+                            force: settings.autoGapForceLength
+                        ) ?? autoGapPlan(
+                            leading: 0, trailing: 0, prevEnd: 0,
+                            target: settings.autoGapDuration,
+                            force: settings.autoGapForceLength
+                        )
+                        : nil
+                    // Transition rule: after a fade only the short breather; after a
+                    // manual stop optionally no gap at all (the stop was the pause).
+                    guard let plan = gapPlanForTransition(context: transition,
+                                                          skipAfterManualStop: settings.autoGapSkipAfterManualStop,
+                                                          fadeGap: settings.fadeGapSeconds,
+                                                          autoGapEnabled: settings.autoGapEnabled,
+                                                          normalPlan: normalPlan)
+                    else { break gapScope }
                     // Force mode: trim this track's leading/trailing silence — recorded here,
                     // applied via the combined playback window below.
                     if settings.autoGapForceLength {

@@ -3372,6 +3372,7 @@ runDropFeedbackCountsTests()
 runMusicMetadataLocationsTests()
 runLevelMeterTests()
 runDuplicateKeyTests()
+runGapContextTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4709,6 +4710,50 @@ func runDuplicateKeyTests() {
             let p = SetlistDropRules.partitionDuplicates([nfc, URL(fileURLWithPath: "/x/new.mp3")], existing: [nfd])
             try expectEqual(p.fresh.map(\.path), ["/x/new.mp3"])
             try expectEqual(p.duplicateCount, 1)
+        }
+    }
+}
+
+// MARK: - Gap context (manual stop / after fade)
+
+func runGapContextTests() {
+    let normal = AutoGapPlan(insert: 4.0, skipLeading: 1.2, trimTrailing: 0.7)
+
+    suite("gapPlanForTransition — transition-aware auto-gap") {
+        test("natural transition passes the normal plan through") {
+            try expectEqual(gapPlanForTransition(context: .natural, skipAfterManualStop: true,
+                                                 fadeGap: 0.5, autoGapEnabled: true, normalPlan: normal),
+                            normal)
+            try expectNil(gapPlanForTransition(context: .natural, skipAfterManualStop: false,
+                                               fadeGap: 0.5, autoGapEnabled: false, normalPlan: nil))
+        }
+        test("manual stop keeps the normal gap while the toggle is off") {
+            try expectEqual(gapPlanForTransition(context: .manualStop, skipAfterManualStop: false,
+                                                 fadeGap: 0.5, autoGapEnabled: true, normalPlan: normal),
+                            normal)
+        }
+        test("manual stop with the toggle on suppresses the gap entirely") {
+            try expectNil(gapPlanForTransition(context: .manualStop, skipAfterManualStop: true,
+                                               fadeGap: 0.5, autoGapEnabled: true, normalPlan: normal))
+        }
+        test("after a fade the gap is the short fade gap, not the full target") {
+            try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: false,
+                                                 fadeGap: 0.5, autoGapEnabled: true, normalPlan: normal),
+                            AutoGapPlan(insert: 0.5, skipLeading: 1.2, trimTrailing: 0))
+        }
+        test("fade gap applies even when auto-gap is disabled") {
+            try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: false,
+                                                 fadeGap: 0.75, autoGapEnabled: false, normalPlan: nil),
+                            AutoGapPlan(insert: 0.75, skipLeading: 0, trimTrailing: 0))
+        }
+        test("fade gap of zero inserts nothing but still returns a plan") {
+            try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: true,
+                                                 fadeGap: 0, autoGapEnabled: true, normalPlan: normal),
+                            AutoGapPlan(insert: 0, skipLeading: 1.2, trimTrailing: 0))
+        }
+        test("negative fade gap clamps to zero") {
+            try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: false,
+                                                 fadeGap: -1, autoGapEnabled: true, normalPlan: nil)?.insert, 0)
         }
     }
 }
