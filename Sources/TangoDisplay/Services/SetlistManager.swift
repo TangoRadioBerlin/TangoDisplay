@@ -159,6 +159,12 @@ final class SetlistManager: ObservableObject {
                                       artist: "", genre: "", persistentID: url.path))
         }
         insert(placeholders, before: anchorID)   // calls save() + loadMissingDurations()
+        // Drops without a drag plist (Finder, row drops where Music offered no
+        // metadata) still deserve their Music times: a short-delay refresh looks
+        // the new entries up by library path and backfills IDs + start times.
+        if importMusicTimes, placeholders.contains(where: { musicIDs.persistentID(for: $0.fileURL) == nil }) {
+            scheduleMusicStartRefresh(after: .seconds(2))
+        }
         for p in placeholders {
             let id = p.id, url = p.fileURL
             // Only tracks that came from a Music drag carry a persistent ID, and only

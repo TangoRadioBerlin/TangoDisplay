@@ -1223,6 +1223,12 @@ struct SetlistView: View {
             ? DropPasteboardResolver.resolve(drag, draggingInfo: nil,
                                              diagEnabled: settings.diagnosticLoggingEnabled)
             : nil
+        // Music's metadata plist may sit only on the ROOT pasteboard while the
+        // items carry just the playlist name — and the drag pasteboard must be
+        // read now, inside the callout, not after the provider awaits.
+        let fallbackIDs: MusicDragIDs? = result == nil
+            ? DropPasteboardResolver.musicDragIDs(drag)
+            : nil
         Task { @MainActor in
             var r: DropResolution
             if let result {
@@ -1235,7 +1241,7 @@ struct SetlistView: View {
                 r.merge(providerURLs, requestedAtLeast: providers.count)
                 if r.branch == .unsupported, !providerURLs.isEmpty { r.branch = .fileURL }
             }
-            if r.musicIDs.isEmpty { r.musicIDs = DropPasteboardResolver.musicDragIDs(drag) }
+            if r.musicIDs.isEmpty, let fallbackIDs { r.musicIDs = fallbackIDs }
             DropPasteboardResolver.logSummary(r, entry: "row")
             await handleIncomingDrop(r, anchorID: anchorID)
         }

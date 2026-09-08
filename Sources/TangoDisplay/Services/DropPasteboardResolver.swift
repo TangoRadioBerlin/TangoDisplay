@@ -100,8 +100,12 @@ enum DropPasteboardResolver {
         let types = itemTypes(of: pasteboard)
         let union = types.reduce(into: Set<String>()) { $0.formUnion($1) }
         let kind = DropPasteboardRules.classify(itemTypes: types, modernPromiseTypes: modernPromiseTypes)
+        // The metadata plist is a cross-process lazy read like every other
+        // pasteboard DATA access — breadcrumb it so a stall is attributable.
+        if diagEnabled { diagLog.record("drop.musicDragIDs") }
+        let musicIDs = musicDragIDs(pasteboard)
         var base = DropResolution(urls: [], requested: items.count, branch: kind, itemTypes: types,
-                                  musicIDs: musicDragIDs(pasteboard))
+                                  musicIDs: musicIDs)
 
         os_log("resolve kind=%{public}@ items=%d types=%{public}@", log: log, type: .info,
                kind.rawValue, items.count, DropPasteboardRules.typeSummary(itemTypes: types))
@@ -236,9 +240,9 @@ enum DropPasteboardResolver {
     ///   log show --predicate 'subsystem == "com.tangodisplay" AND category == "musicdrop"' --last 1d
     /// Counts and type identifiers only; never file paths.
     static func logSummary(_ r: DropResolution, entry: String) {
-        os_log("drop entry=%{public}@ branch=%{public}@ requested=%d resolved=%d unreadable=%d types=%{public}@",
+        os_log("drop entry=%{public}@ branch=%{public}@ requested=%d resolved=%d unreadable=%d musicIDs=%d types=%{public}@",
                log: log, type: .default,
-               entry, r.branch.rawValue, r.requested, r.urls.count, r.unreadable,
+               entry, r.branch.rawValue, r.requested, r.urls.count, r.unreadable, r.musicIDs.count,
                DropPasteboardRules.typeSummary(itemTypes: r.itemTypes))
         if r.unreadable > 0 {
             os_log("drop shortfall entry=%{public}@ branch=%{public}@ %d of %d items unreadable; types=%{public}@",
