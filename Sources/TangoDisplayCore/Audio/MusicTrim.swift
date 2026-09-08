@@ -50,17 +50,34 @@ public struct MusicDragIDs {
     public init() {}
 
     /// Accepts both plist shapes Music has used: `{"Tracks": {id: {...}}}` and a bare `{id: {...}}`.
+    /// Keys are Unicode-normalised (NFC) — the plist location and a resolved drop URL can
+    /// disagree on umlaut composition. A basename shared by two different tracks in the same
+    /// drag disables the filename fallback for that name: guessing would import the wrong
+    /// track's times and persist the wrong ID.
     public init(musicMetadataPlist plist: [String: Any]) {
         let tracks = (plist["Tracks"] as? [String: Any]) ?? plist
+        var ambiguousNames = Set<String>()
         for (_, value) in tracks {
             guard let track = value as? [String: Any],
                   let persistentID = track["Persistent ID"] as? String,
                   let location = track["Location"] as? String,
-                  let path = MusicDragIDs.path(fromLocation: location)
+                  let rawPath = MusicDragIDs.path(fromLocation: location)
             else { continue }
+            let path = MusicDragIDs.key(rawPath)
             byPath[path] = persistentID
-            byName[(path as NSString).lastPathComponent] = persistentID
+            let name = (path as NSString).lastPathComponent
+            if ambiguousNames.contains(name) { continue }
+            if byName[name] != nil && byName[name] != persistentID {
+                byName[name] = nil
+                ambiguousNames.insert(name)
+            } else {
+                byName[name] = persistentID
+            }
         }
+    }
+
+    private static func key(_ path: String) -> String {
+        path.precomposedStringWithCanonicalMapping
     }
 
     /// `Location` is either a "file://…" URL or a "~/…" tilde path, depending on Music version.
@@ -80,6 +97,7 @@ public struct MusicDragIDs {
 
     /// nil means this URL wasn't part of a Music drag — no trim import for it.
     public func persistentID(for url: URL) -> String? {
-        byPath[url.path] ?? byName[url.lastPathComponent]
+        let path = MusicDragIDs.key(url.path)
+        return byPath[path] ?? byName[(path as NSString).lastPathComponent]
     }
 }

@@ -4813,6 +4813,30 @@ func runMusicDragIDsTests() {
             try expect(MusicDragIDs().isEmpty)
         }
 
+        test("NFD plist location matches an NFC drop URL (umlaut paths)") {
+            // Music's plist and the resolved drop URL can disagree on Unicode
+            // normalisation (the dc50826 duplicate-detection lesson).
+            let nfd = "file:///Users/dj/Music/Echt%20Bo%CC%88hmisch/Sir%20Duke.m4a"
+            let ids = MusicDragIDs(musicMetadataPlist: [
+                "1": ["Location": nfd, "Persistent ID": "00000000000000BB"],
+            ])
+            try expectEqual(ids.persistentID(for: URL(fileURLWithPath: "/Users/dj/Music/Echt Böhmisch/Sir Duke.m4a")),
+                            "00000000000000BB")
+            try expectEqual(ids.persistentID(for: URL(fileURLWithPath: "/Users/dj/Library/Application Support/TangoDisplay/MusicAppDrops/Sir Duke.m4a")),
+                            "00000000000000BB")
+        }
+        test("ambiguous basenames disable the filename fallback (exact paths still match)") {
+            let ids = MusicDragIDs(musicMetadataPlist: [
+                "1": ["Location": "file:///Music/Canaro/01%20La%20Cumparsita.m4a", "Persistent ID": "00000000000000C1"],
+                "2": ["Location": "file:///Music/DArienzo/01%20La%20Cumparsita.m4a", "Persistent ID": "00000000000000C2"],
+            ])
+            try expectEqual(ids.persistentID(for: URL(fileURLWithPath: "/Music/Canaro/01 La Cumparsita.m4a")),
+                            "00000000000000C1")
+            try expectEqual(ids.persistentID(for: URL(fileURLWithPath: "/Music/DArienzo/01 La Cumparsita.m4a")),
+                            "00000000000000C2")
+            // A materialised copy of either would guess wrong half the time — refuse.
+            try expectNil(ids.persistentID(for: URL(fileURLWithPath: "/tmp/MusicAppDrops/01 La Cumparsita.m4a")))
+        }
         test("unencoded # in a file: location survives (strict parser, not URL(string:))") {
             let ids = MusicDragIDs(musicMetadataPlist: [
                 "1": ["Location": "file:///Music/Milonga #2.mp3", "Persistent ID": "00000000000000AA"],
