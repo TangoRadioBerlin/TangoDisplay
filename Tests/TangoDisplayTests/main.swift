@@ -3374,6 +3374,7 @@ runLevelMeterTests()
 runDuplicateKeyTests()
 runGapContextTests()
 runMusicDragIDsTests()
+runRestorationTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
