@@ -844,6 +844,11 @@ final class AppState: ObservableObject {
             }
         case .pauseArmed:
             cancelPauseArm()
+            // A confirmed pause must win over a running (auto-)fade — otherwise the
+            // fade task's completion would mark the paused entry played and resume
+            // playback with the next track.
+            cancelFade()
+            cancelAutoFade()
             activeSource.pause()
         default:
             break
@@ -879,9 +884,10 @@ final class AppState: ObservableObject {
             self.fadeMode = .none
             // Stop while still silent, then restore the volume setting for the next playback —
             // restoring before the stop briefly replays the faded-out cortina at full volume (click).
-            // The fade note survives the stop: a later restart gets the short fade gap.
-            self.localPlayer?.noteFadeTransition()
+            // The fade note comes AFTER the stop (stopTrack resets the context), so the next
+            // start gets the short fade gap — but a later separate stop can still override it.
             self.localPlayer?.stopTrack()
+            self.localPlayer?.noteFadeTransition()
             player.volume = self.preFadeVolume
         }
     }

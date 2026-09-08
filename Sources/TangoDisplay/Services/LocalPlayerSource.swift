@@ -780,9 +780,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         reportCurrentState()
     }
 
-    /// The current track is being faded out; the next load gets the short
-    /// fade gap instead of the full auto-gap. Survives the stopTrack() a
-    /// Fade & Stop ends in.
+    /// The current track was faded out; the next load gets the short fade gap
+    /// instead of the full auto-gap. Fade & Stop calls this AFTER stopTrack()
+    /// (which resets the context to .manualStop), so a later genuine user stop
+    /// still wins over a long-completed fade.
     func noteFadeTransition() {
         gapContext = .afterFade
     }
@@ -793,7 +794,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     }
 
     func pause() {
-        if gapContext != .afterFade { gapContext = .manualStop }
+        gapContext = .manualStop
         scheduleGeneration += 1
         playerNode.stop()
         isActivePlaying = false
@@ -827,7 +828,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     }
 
     func stopTrack() {
-        if gapContext != .afterFade { gapContext = .manualStop }
+        gapContext = .manualStop
         if let id = currentEntryID, !earlyMarkedEntryIDs.contains(id), !currentEntryIsPlayed() {
             setlist.markQueued(id: id)
         }
@@ -885,6 +886,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             isActivePlaying = true
             reportCurrentState()
         } else {
+            // Nothing to load: consume any pending fade/stop context so it
+            // cannot leak into a later unrelated transition.
+            gapContext = .natural
             currentEntryID = nil
             isActivePlaying = false
             replayGainStatus = ""
@@ -920,6 +924,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             isActivePlaying = true
             reportCurrentState()
         } else {
+            // Nothing to load: consume any pending fade/stop context so it
+            // cannot leak into a later unrelated transition.
+            gapContext = .natural
             currentEntryID = nil
             isActivePlaying = false
             replayGainStatus = ""
