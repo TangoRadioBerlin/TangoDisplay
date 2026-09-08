@@ -1061,17 +1061,19 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
 
             let autoGapIgnored = entry.autoGapIgnored(isFirstTrack: isFirstTrack,
                                                       ignoreFirstTrack: settings.autoGapIgnoreFirstTrack)
-            // A fade transition always gets its short gap, even with auto-gap disabled.
+            // A fade transition always gets its short gap — even with auto-gap
+            // disabled and even for entries that opted out of the auto-gap (the
+            // fade removed the natural pause, so SOME breather must remain).
             let transition = gapContext
             gapContext = .natural
-            if !bypassAutoGap && !autoGapIgnored
-                && (settings.autoGapEnabled || transition == .afterFade) {
+            let gapEligible = settings.autoGapEnabled && !autoGapIgnored
+            if !bypassAutoGap && (gapEligible || transition == .afterFade) {
                 gapScope: do {
                     // Use the analysis prepared for this exact (outgoing, incoming) pair.
                     // currentEntryID still holds the outgoing track here (set to the new
                     // entry below). A stale/mismatched pair → conservative full-target
                     // plan with no measured silence credited and nothing trimmed.
-                    let normalPlan: AutoGapPlan? = settings.autoGapEnabled
+                    let normalPlan: AutoGapPlan? = gapEligible
                         ? preparedAutoGap?.plan(
                             currentID: currentEntryID ?? entry.id,
                             nextID: entry.id,
@@ -1132,8 +1134,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             // Live Music start time (Song Info → Options): every track starts
             // there — cortinas always, dance tracks unless opted out; a manual
             // trim wins. The entry's cached value is the single source here;
-            // drops and the background refresh keep it current by persistent ID.
-            SetlistManager.warmMusicTrims()
+            // drops and the background refresh keep it current by persistent ID
+            // (deliberately no library warm-up per load — that would rescan the
+            // whole library on every track change).
             let detector = settings.makeDetector()
             let effTrimStart = effectiveTrimStart(
                 entryTrimStart: entry.trimStartSeconds,

@@ -4735,14 +4735,21 @@ func runGapContextTests() {
                                                  fadeGap: 0.5, autoGapEnabled: true, normalPlan: normal),
                             normal)
         }
-        test("manual stop with the toggle on suppresses the gap entirely") {
-            try expectNil(gapPlanForTransition(context: .manualStop, skipAfterManualStop: true,
-                                               fadeGap: 0.5, autoGapEnabled: true, normalPlan: normal))
+        test("manual stop with the toggle on drops the insert but keeps the force trims") {
+            try expectEqual(gapPlanForTransition(context: .manualStop, skipAfterManualStop: true,
+                                                 fadeGap: 0.5, autoGapEnabled: true, normalPlan: normal),
+                            AutoGapPlan(insert: 0, skipLeading: 1.2, trimTrailing: 0.7))
         }
-        test("after a fade the gap is the short fade gap, not the full target") {
+        test("manual stop with the toggle on and no plan yields nil") {
+            try expectNil(gapPlanForTransition(context: .manualStop, skipAfterManualStop: true,
+                                               fadeGap: 0.5, autoGapEnabled: false, normalPlan: nil))
+        }
+        test("after a fade the gap is the short fade gap, force trims of the incoming track kept") {
+            // trimTrailing belongs to the INCOMING track (prepares the NEXT transition) —
+            // it must survive the fade rule, or force mode inflates the following gap.
             try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: false,
                                                  fadeGap: 0.5, autoGapEnabled: true, normalPlan: normal),
-                            AutoGapPlan(insert: 0.5, skipLeading: 1.2, trimTrailing: 0))
+                            AutoGapPlan(insert: 0.5, skipLeading: 1.2, trimTrailing: 0.7))
         }
         test("fade gap applies even when auto-gap is disabled") {
             try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: false,
@@ -4752,7 +4759,7 @@ func runGapContextTests() {
         test("fade gap of zero inserts nothing but still returns a plan") {
             try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: true,
                                                  fadeGap: 0, autoGapEnabled: true, normalPlan: normal),
-                            AutoGapPlan(insert: 0, skipLeading: 1.2, trimTrailing: 0))
+                            AutoGapPlan(insert: 0, skipLeading: 1.2, trimTrailing: 0.7))
         }
         test("negative fade gap clamps to zero") {
             try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: false,

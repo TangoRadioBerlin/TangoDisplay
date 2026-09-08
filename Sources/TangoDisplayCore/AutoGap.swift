@@ -153,13 +153,15 @@ public enum GapContext {
 /// Transition-aware gap decision. `normalPlan` is the regular auto-gap plan
 /// (nil when auto-gap is disabled or the entry opted out).
 ///
-/// - `.afterFade` returns a plan with `insert == fadeGap` REGARDLESS of
-///   `autoGapEnabled` — a fade always earns its short breather. Force-mode
-///   head-trimming of the incoming track (`skipLeading`) is kept so leading
-///   silence doesn't stretch the pause; `trimTrailing` is dropped (the faded
-///   track is already gone).
-/// - `.manualStop` suppresses the gap entirely when `skipAfterManualStop` is
-///   on (the user's stop already was the pause), else behaves like `.natural`.
+/// Both special contexts replace only the INSERTED silence; the force-mode
+/// trims of the incoming track (`skipLeading` now, `trimTrailing` as the
+/// preparation for the NEXT transition) are kept, or force mode would
+/// inflate the following gap by the untrimmed tail.
+///
+/// - `.afterFade` inserts `fadeGap` REGARDLESS of `autoGapEnabled` — a fade
+///   always earns its short breather.
+/// - `.manualStop` with `skipAfterManualStop` inserts nothing (the user's
+///   stop already was the pause); without a plan it stays nil.
 public func gapPlanForTransition(context: GapContext, skipAfterManualStop: Bool,
                                  fadeGap: Double, autoGapEnabled: Bool,
                                  normalPlan: AutoGapPlan?) -> AutoGapPlan? {
@@ -167,11 +169,15 @@ public func gapPlanForTransition(context: GapContext, skipAfterManualStop: Bool,
     case .natural:
         return normalPlan
     case .manualStop:
-        return skipAfterManualStop ? nil : normalPlan
+        guard skipAfterManualStop else { return normalPlan }
+        guard let normalPlan else { return nil }
+        return AutoGapPlan(insert: 0,
+                           skipLeading: normalPlan.skipLeading,
+                           trimTrailing: normalPlan.trimTrailing)
     case .afterFade:
         return AutoGapPlan(insert: max(0, fadeGap),
                            skipLeading: normalPlan?.skipLeading ?? 0,
-                           trimTrailing: 0)
+                           trimTrailing: normalPlan?.trimTrailing ?? 0)
     }
 }
 
