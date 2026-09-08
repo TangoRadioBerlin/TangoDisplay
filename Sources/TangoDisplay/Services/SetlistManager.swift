@@ -361,6 +361,10 @@ final class SetlistManager: ObservableObject {
     /// expensive location index on demand) and the ID is backfilled. Writes and
     /// saves only when something actually changed.
     func refreshMusicStartTimes() async {
+        // An unreadable library (TCC denied, Music db missing) must not be
+        // mistaken for "every track lost its start time" — skip the pass
+        // entirely rather than wiping cached values with nils.
+        guard await MusicTrimCache.shared.hasUsableScan() else { return }
         let snapshot = await MainActor.run {
             entries.map { (id: $0.id, path: $0.fileURL.path,
                            pid: $0.musicPersistentID, start: $0.musicStartSeconds) }
@@ -932,6 +936,12 @@ private let id3GenreNames: [String] = [
 private let trimLog = OSLog(subsystem: "com.tangodisplay", category: "musicdrop")
 
 /// One ITLibrary-backed table of Music start/stop times, keyed by persistent ID.
+///
+/// The `ITLibrary` init blocks until the media-library TCC prompt is answered.
+/// Because the actor is first touched from detached tasks, an unanswered prompt
+/// parks those cooperative-pool threads (one per pending trim lookup) — the
+/// main thread and UI stay free, and everything resumes once the user answers.
+/// Accepted trade-off; the prompt appears once per (re-signed) install.
 /// Reading `item.location` for every track is the expensive part of a scan
 /// (~4 s of a ~5.3 s pass on a 24k-track library); the ID + three time fields
 /// cost ~45 ms on top of the unavoidable `allMediaItems` (~1.3 s). The
@@ -952,6 +962,15 @@ private actor MusicTrimCache {
         if loadedAt == nil { reload() }
         guard let t = times[id] else { return (nil, nil) }
         return musicTrimSeconds(startMs: t.startMs, stopMs: t.stopMs, totalMs: t.totalMs)
+    }
+
+    /// Whether the last scan produced data worth acting on. False when the
+    /// library is unreadable (TCC denied, no Music db) or genuinely empty —
+    /// a caller that would otherwise interpret misses as "start time removed"
+    /// (the entry refresh) must skip its pass then.
+    func hasUsableScan() -> Bool {
+        if loadedAt == nil { reload() }
+        return !times.isEmpty
     }
 
     /// Persistent ID for a library file path (legacy entries without a stored ID).
