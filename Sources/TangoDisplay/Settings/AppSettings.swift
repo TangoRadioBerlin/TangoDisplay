@@ -372,6 +372,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    // MARK: - Shellac restoration
+
+    /// Declick/dehum settings, persisted as one JSON blob (same shape as the
+    /// plugin chain and genre colour rules). Off by default.
+    @Published var restoration: RestorationSettings {
+        didSet {
+            if let data = try? JSONEncoder().encode(restoration) {
+                UserDefaults.standard.set(data, forKey: kPrefix + "restoration")
+            }
+        }
+    }
+
     // MARK: - Decibel meter
 
     @Published var decibelMeterEnabled: Bool {
@@ -563,6 +575,12 @@ final class AppSettings: ObservableObject {
             ud.removeObject(forKey: kPrefix + "lastUsedAUPresetName")
         } else {
             audioUnitPluginChain = []
+        }
+        if let data = ud.data(forKey: kPrefix + "restoration"),
+           let decoded = try? JSONDecoder().decode(RestorationSettings.self, from: data) {
+            restoration = decoded
+        } else {
+            restoration = .defaults
         }
         decibelMeterEnabled = ud.object(forKey: kPrefix + "decibelMeterEnabled").flatMap { $0 as? Bool } ?? false
         decibelMeterLowThreshold  = ud.object(forKey: kPrefix + "decibelMeterLowThreshold").flatMap { $0 as? Int } ?? 60
