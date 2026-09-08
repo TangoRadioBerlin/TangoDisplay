@@ -397,6 +397,72 @@ Saves a snapshot of the current setlist as a named report. The report captures e
 
 ---
 
+## Shellac Restoration
+
+Click the **Restoration** button (sparkles icon) in the Setlist toolbar to open the restoration popover. It hosts two filters aimed squarely at 78 rpm transfers, and they run **before** the equaliser — the record is repaired first, then shaped.
+
+Like the ReplayGain button, Restoration is **never disabled** — you can set it up while building the setlist, before playback has started.
+
+Both come from [ShellacFilters](https://github.com/shaforostoff/shellacfilters) by Nick Shaforostov (MIT), trained on shellac transfers including those from tangotunes.com and tangotimetravel.be. The DSP cores are built on the [Airwindows](https://www.airwindows.com) framework by Chris Johnson, and the Audio Unit wrapper TangoDisplay runs them in is adapted from [EmbraceNG](https://github.com/shaforostoff/EmbraceNG)'s `RestorationAudioUnit.mm` (© 2024 Ricci Adams, MIT / 1-clause BSD).
+
+> **Screenshot placeholder:** Restoration popover with Declick and Dehum sections
+
+**Restoration is off by default.** Nothing about playback changes until you switch it on.
+
+### Declick
+
+Removes the clicks and pops of surface wear. It fits a predictive model to each block of audio, spots clicks as the samples that model cannot explain, and reconstructs what the waveform should have been — rather than smoothing over what is there.
+
+| Control | What it does |
+|---|---|
+| **Sensitivity** | How readily a sample is called a click. The default puts the trigger at 3.9 sigma above the local noise estimate; on 78 rpm tango transfers that takes impulsive events from roughly 71 per second down to 14. |
+| **Extent** | How far each detection spreads into the tail of the click. |
+| **Max repair** | The longest stretch that may be reconstructed. Damage longer than this is left alone rather than guessed at. |
+| **Repair depth** | How much of the estimated click is subtracted. 0 is the setting measured to add the least error of its own; raising it removes more of each click but substitutes more guesswork. |
+| **Passes** | How many times the detector sweeps each block. A second pass catches clicks the first pass's repairs uncover. |
+| **Model order** | Taps in the predictive model — the lever that pays most, and the one that costs most CPU. The default stops at 64. |
+| **Dry/Wet** | Blend against the original. 0 passes the input through untouched, for A/B. |
+
+Declick adds about **18 ms of latency** while it is engaged — inaudible in the room, and below the resolution of every timing feature in the app. Note that Dry/Wet at 0 still runs the filter, so that A/B lines up sample for sample; to stop paying the CPU cost, switch Declick off.
+
+### Dehum
+
+Removes continuous narrowband tones — mains hum, and the off-frequency drones that turn up on speed-corrected disc transfers — without being told which frequency to look for. It finds the line, tracks it, and cancels it. Latency is zero.
+
+| Control | What it does |
+|---|---|
+| **Sensitivity** | How far a peak must stand above its surroundings before it counts as a tone. Past about 0.7, clean material starts qualifying. |
+| **Rumble** | High-pass corner for broadband turntable rumble — a separate defect that shares the band. 0 turns it off. The 67 Hz default goes after rumble properly and takes the bottom octave of a double bass with it; wind it back towards 40 where the low end is worth keeping. |
+| **Bandwidth** | Half width of each notch. 1 Hz costs nothing musically — a partial 5 Hz away loses 0.15 dB. |
+| **Search to** | Top of the automatic search range. Hum lives low; searching higher finds sustained musical notes instead. |
+| **Harmonics** | Multiples of each line to cancel as well. Mains buzz has them; disc-transfer drones usually do not. |
+| **Frequency** | 0 detects the line automatically. Set a frequency to pin the notch when you already know what you are removing. |
+| **Dry/Wet** | Blend against the original. At 0 the detector keeps tracking, so switching back is instant. |
+
+Finding a hum takes time — from a few seconds for an obvious line to the better part of a minute for one buried in rumble. TangoDisplay scans the opening of each track in the background as it loads, so the line is usually cancelled from the first bar rather than a minute in.
+
+### Skip on cortinas
+
+On by default. Cortinas are almost always modern digital files, where a declicker only substitutes guesswork and the rumble filter costs real bass, so they play unprocessed while the tandas around them are restored.
+
+### Per-Track Override
+
+Restoration is a global switch, but shellac transfers and modern masters sit side by side in most sets. Right-click any track:
+
+- **Restore this Track** — force restoration on, even if it is off for the set
+- **Skip Restoration for this Track** — force it off
+- **Use Default Restoration** — clear the override and follow the global rule again
+
+An override outranks both the master switch and the cortina rule, so a single shellac transfer can be repaired in an otherwise unrestored set. Overridden tracks show a small badge in the row — a sparkles icon when restoration is forced on, a no-entry icon when it is forced off. Tracks following the global rule carry no badge.
+
+The toolbar button shows the master switch at a glance: tinted with a dot when restoration is on, plain grey when it is off.
+
+Overrides are saved with the setlist and survive a restart.
+
+---
+
+---
+
 ## 5-Band Equaliser
 
 Click the **Equaliser** button in the toolbar to open the EQ popover.
