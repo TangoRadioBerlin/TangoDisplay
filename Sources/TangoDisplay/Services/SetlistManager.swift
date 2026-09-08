@@ -32,6 +32,7 @@ struct SetlistEntry: Identifiable, Codable {
     var ignoresMusicStartTime: Bool = false   // dance track opts OUT of Music's per-song start time (cortinas always use it)
     var musicStartSeconds: Double? = nil      // cached Music start time (Song Info → Options); refreshed when the library table loads
     var musicPersistentID: String? = nil      // Music's persistent ID (from the drag plist or a one-time path lookup); keys all trim refreshes
+    var restorationOverride: Bool? = nil      // nil = follow global rule; true = force skip; false = force apply
     var trimStartSeconds: Double? = nil   // nil = play from file start
     var trimEndSeconds: Double? = nil     // nil = play to file end
     var autoGapApplied: Bool = false   // transient: true while auto-gap preroll is scheduled before this track
@@ -39,7 +40,7 @@ struct SetlistEntry: Identifiable, Codable {
     var tandaRef: String? = nil        // opaque grouping hint from a remote controller (echoed)
 
     enum CodingKeys: String, CodingKey {
-        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, repeatTrack, ignoresMusicStartTime, musicStartSeconds, musicPersistentID, trimStartSeconds, trimEndSeconds, clientRef, tandaRef
+        case id, fileURL, track, state, duration, autoGapOverride, ignoresAutoFade, isLastTanda, pluginConfigurationID, tagColor, isPerformance, repeatTrack, ignoresMusicStartTime, musicStartSeconds, musicPersistentID, restorationOverride, trimStartSeconds, trimEndSeconds, clientRef, tandaRef
         // autoGapApplied is intentionally excluded — reset each playback session
         // useMusicStartTime (3.30.0 opt-in) is no longer read: Music start times now apply by default.
     }
@@ -52,6 +53,13 @@ struct SetlistEntry: Identifiable, Codable {
         effectiveAutoGapIgnored(override: autoGapOverride,
                                 isFirstTrack: isFirstTrack,
                                 ignoreFirstTrack: ignoreFirstTrack)
+    }
+
+    /// Effective "restore this track". `globalDefault` already folds in the master
+    /// switch and the cortina rule; an explicit override outranks both.
+    func restorationApplied(globalDefault: Bool) -> Bool {
+        if let o = restorationOverride { return !o }
+        return globalDefault
     }
 
     init(id: UUID = UUID(), fileURL: URL, track: Track, state: SetlistEntryState = .queued) {
@@ -89,6 +97,7 @@ struct SetlistEntry: Identifiable, Codable {
         ignoresMusicStartTime = try c.decodeIfPresent(Bool.self, forKey: .ignoresMusicStartTime) ?? false
         musicStartSeconds = try c.decodeIfPresent(Double.self, forKey: .musicStartSeconds)
         musicPersistentID = try c.decodeIfPresent(String.self, forKey: .musicPersistentID)
+        restorationOverride = try c.decodeIfPresent(Bool.self, forKey: .restorationOverride)
         trimStartSeconds = try c.decodeIfPresent(Double.self, forKey: .trimStartSeconds)
         trimEndSeconds = try c.decodeIfPresent(Double.self, forKey: .trimEndSeconds)
         clientRef = try c.decodeIfPresent(String.self, forKey: .clientRef)
@@ -316,6 +325,13 @@ final class SetlistManager: ObservableObject {
     func setAutoGapOverride(id: UUID, ignore: Bool) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[i].autoGapOverride = ignore
+        save()
+    }
+
+    /// `skip` of nil clears the override and returns the track to the global rule.
+    func setRestorationOverride(id: UUID, skip: Bool?) {
+        guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[i].restorationOverride = skip
         save()
     }
 
