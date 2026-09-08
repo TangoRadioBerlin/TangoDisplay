@@ -237,6 +237,14 @@ Auto-gap analyses the silence at track boundaries and schedules a silent preroll
 2. Under **Built-in Player**, enable the **Auto-gap** toggle
 3. Use the **Minimum gap** slider to set your target (0.5–5 s; default 4 s)
 
+### Skip Gap After Manual Stop
+
+When **Skip gap after manual stop** is enabled, the next start after you stopped or paused playback yourself begins without the auto-gap preroll — your stop already was the pause. Off by default.
+
+### Gap After Fade-Out
+
+After a track is faded out (an auto-faded cortina, **Fade & Next**, or a restart following **Fade & Stop**), the full auto-gap wait would double the pause the fade already created. Instead, TangoDisplay inserts only a short breather — the **Gap after fade-out** slider (0–2 s, default 0.5 s), found under **Settings › Player › Auto-gap**. It applies even when auto-gap itself is off. (Earlier versions always waited a fixed 1 s plus the full auto-gap after fades.)
+
 ### Skip Gap Before First Track
 
 When **Skip gap before first track** is enabled (the default), the opening track of the setlist starts immediately with no silence preroll — the gap only applies between consecutive tracks. Disable this if you want the same treatment from the very first song.

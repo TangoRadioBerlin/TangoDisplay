@@ -275,7 +275,22 @@ struct PlayerSettingsView: View {
                         Text("The first track in the setlist starts immediately with no silence preroll.")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                        Toggle("Skip gap after manual stop", isOn: $settings.autoGapSkipAfterManualStop)
+                        Text("After you stop or pause playback yourself, the next start begins without the auto-gap — the stop already was the pause.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
+                    LabeledContent("Gap after fade-out") {
+                        HStack(spacing: 8) {
+                            Slider(value: $settings.fadeGapSeconds, in: 0...2, step: 0.1)
+                            Text("\(settings.fadeGapSeconds, specifier: "%.1f")s")
+                                .font(.system(size: 12, design: .monospaced))
+                                .frame(width: 36, alignment: .trailing)
+                        }
+                    }
+                    Text("Pause before the next track after a fade-out (auto-fade cortinas and the fade buttons). Replaces the full auto-gap there and applies even when auto-gap is off.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                     Text("Analyzes silence at track boundaries and adds padding so the gap between tracks meets the minimum. Only adds silence, never removes it.")
                         .font(.caption)
                         .foregroundColor(.secondary)

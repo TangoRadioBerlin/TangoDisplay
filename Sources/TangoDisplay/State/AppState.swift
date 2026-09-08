@@ -395,6 +395,7 @@ final class AppState: ObservableObject {
         fadeTask?.cancel()
         fadeTask = nil
         localPlayer?.volume = preFadeVolume
+        localPlayer?.clearFadeTransition()
         fadeMode = .none
     }
 
@@ -878,6 +879,8 @@ final class AppState: ObservableObject {
             self.fadeMode = .none
             // Stop while still silent, then restore the volume setting for the next playback —
             // restoring before the stop briefly replays the faded-out cortina at full volume (click).
+            // The fade note survives the stop: a later restart gets the short fade gap.
+            self.localPlayer?.noteFadeTransition()
             self.localPlayer?.stopTrack()
             player.volume = self.preFadeVolume
         }
@@ -894,12 +897,13 @@ final class AppState: ObservableObject {
             guard let self else { return }
             await self.performFade(player: player)
             guard !Task.isCancelled, self.fadeMode == .fadeAndContinue else { return }
-            try? await Task.sleep(for: .seconds(1.0))
-            guard !Task.isCancelled, self.fadeMode == .fadeAndContinue else { return }
             self.fadeMode = .none
             self.cancelPauseArm()
             // Switch while still silent so the old cortina isn't briefly replayed at full volume and
             // the engine's stop/restart in loadEntry is masked, then ramp the new track up.
+            // The pause before the next track is the scheduled fade gap (Settings → Auto-gap),
+            // not a hard-coded sleep here.
+            self.localPlayer?.noteFadeTransition()
             self.activeSource.skipNext()
             await self.rampVolumeUp(player: player, to: self.preFadeVolume)
         }
@@ -950,11 +954,11 @@ final class AppState: ObservableObject {
             guard let self else { return }
             await self.performFade(player: player)
             guard !Task.isCancelled, self.fadeMode == .fadeAndContinue else { return }
-            try? await Task.sleep(for: .seconds(1.0))
-            guard !Task.isCancelled, self.fadeMode == .fadeAndContinue else { return }
             self.fadeMode = .none
             player.volume = self.preFadeVolume
             self.cancelPauseArm()
+            // The pause before the next track is the scheduled fade gap, not a sleep here.
+            self.localPlayer?.noteFadeTransition()
             self.activeSource.skipNext()
         }
     }
