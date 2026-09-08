@@ -273,6 +273,7 @@ struct SetlistView: View {
     @State private var showBalancePopover = false
     @State private var showAutoGapPopover = false
     @State private var showReplayGainPopover = false
+    @State private var showRestorationPopover = false
     @State private var showPluginChainPopover = false
     @State private var scrollTrigger: UUID? = nil
     @State private var pendingRepeatID: UUID? = nil   // repeat requested on a stop-after track → confirm switch
@@ -789,6 +790,31 @@ struct SetlistView: View {
                             .environmentObject(settings)
                     }
                     .help("ReplayGain normalisation")
+                    // Like ReplayGain, restoration is never disabled — it's something you
+                    // set up before starting, not a live-only control like EQ or Balance.
+                    // State has to be readable without opening the popover, hence the tint
+                    // plus a dot — a toolbar button style can drop the tint, but an overlay
+                    // always draws.
+                    Button { showRestorationPopover.toggle() } label: {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(settings.restoration.enabled ? Color.accentColor : Color.secondary)
+                            .overlay(alignment: .topTrailing) {
+                                if settings.restoration.enabled {
+                                    Circle()
+                                        .fill(Color.accentColor)
+                                        .frame(width: 5, height: 5)
+                                        .offset(x: 3, y: -2)
+                                }
+                            }
+                            .accessibilityLabel(settings.restoration.enabled
+                                                ? "Restoration on" : "Restoration off")
+                    }
+                    .popover(isPresented: $showRestorationPopover) {
+                        RestorationPopoverView().environmentObject(settings)
+                    }
+                    .help(settings.restoration.enabled
+                          ? "Shellac restoration — on (declick and dehum)"
+                          : "Shellac restoration — off")
                     if !settings.audioUnitPluginChain.isEmpty {
                         Button { showPluginChainPopover.toggle() } label: {
                             Label("Plugins", systemImage: "puzzlepiece.fill")
@@ -1032,6 +1058,23 @@ struct SetlistView: View {
                 }
                 Button(allIgnore ? "Use Music Start Time" : "Ignore Music Start Time") {
                     setlist.setIgnoresMusicStartTime(!allIgnore, for: musicStartTargets)
+                }
+            }
+            // Shellac restoration override — single selection, built-in player only.
+            // An override outranks both the master switch and the cortina rule.
+            if targets.count == 1, let id = targets.first,
+               let e = setlist.entries.first(where: { $0.id == id }) {
+                Divider()
+                let byDefault = settings.restoration.appliesByDefault(
+                    isCortina: detector.isCortina(genre: e.track.genre))
+                let applied = e.restorationApplied(globalDefault: byDefault)
+                Button(applied ? "Skip Restoration for this Track" : "Restore this Track") {
+                    setlist.setRestorationOverride(id: id, skip: applied)
+                }
+                if e.restorationOverride != nil {
+                    Button("Use Default Restoration") {
+                        setlist.setRestorationOverride(id: id, skip: nil)
+                    }
                 }
             }
         }
@@ -1668,6 +1711,14 @@ struct SetlistRowView: View {
                         .help("Music start time (\(Self.fmtSeconds(seconds))) ignored for this track")
                 case .none:
                     EmptyView()
+                }
+                if let skip = entry.restorationOverride {
+                    // "sparkles.slash" is not an SF Symbol — it renders blank. nosign is.
+                    Image(systemName: skip ? "nosign" : "sparkles")
+                        .font(.system(size: 10))
+                        .foregroundColor(skip ? .secondary : .teal)
+                        .help(skip ? "Restoration skipped for this track"
+                                   : "Restoration applied to this track")
                 }
                 if entry.trimStartSeconds != nil || entry.trimEndSeconds != nil {
                     Label(trimBadgeText, systemImage: "timeline.selection")
