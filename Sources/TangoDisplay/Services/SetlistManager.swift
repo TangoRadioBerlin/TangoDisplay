@@ -351,10 +351,6 @@ final class SetlistManager: ObservableObject {
 
     // MARK: - Music start refresh
 
-    /// Bring every entry's cached Music start time in line with the library
-    /// table. Only writes (and saves) when something actually changed, so
-    /// rows re-render just once. Requires the table to be loaded (no-op
-    /// otherwise); `scheduleMusicStartRefresh` awaits the load first.
     /// Bring every entry's cached Music start time (and persistent ID) in line
     /// with the library. Entries carrying an ID are looked up directly; legacy
     /// entries without one get a one-time path lookup (which builds the

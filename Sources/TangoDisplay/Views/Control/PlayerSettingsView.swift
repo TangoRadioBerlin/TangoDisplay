@@ -280,6 +280,11 @@ struct PlayerSettingsView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                    Text(settings.autoGapForceLength
+                         ? "Analyzes silence at track boundaries and trims or pads it so the gap is exactly the set length."
+                         : "Analyzes silence at track boundaries and adds padding so the gap between tracks meets the minimum. Only adds silence, never removes it.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                     LabeledContent("Gap after fade-out") {
                         HStack(spacing: 8) {
                             Slider(value: $settings.fadeGapSeconds, in: 0...2, step: 0.1)
@@ -289,9 +294,6 @@ struct PlayerSettingsView: View {
                         }
                     }
                     Text("Pause before the next track after a fade-out (auto-fade cortinas and the fade buttons). Replaces the full auto-gap there and applies even when auto-gap is off.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text("Analyzes silence at track boundaries and adds padding so the gap between tracks meets the minimum. Only adds silence, never removes it.")
                         .font(.caption)
                         .foregroundColor(.secondary)
 

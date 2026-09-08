@@ -43,7 +43,7 @@ When the built-in player is active, tracks use the **start and stop times** you 
 
 Music times are matched by the track's **persistent ID** from the drag itself (not by file path), so they also arrive for cloud tracks that Music materialises as cached copies. The library is scanned in the background the moment a drag enters the window.
 
-Music start times apply to **every track** — cortinas always, dance tracks by default. To play a dance track from the file beginning instead, right-click it → **Ignore Music Start Time** (the badge turns into a grey ♪; **Use Music Start Time** restores it). A manual start trim set in the app always takes precedence (the blue trim badge shows instead of ♪). Saved setlists keep their Music start times; to keep app launch fast, the Music library itself is read once per session in the background, about 20 seconds after the built-in player comes up (or immediately on the first drop), and the badges are refreshed then. Start/stop times changed in Music during a session are picked up at the next launch.
+Music start times apply to **every track** — cortinas always, dance tracks by default. To play a dance track from the file beginning instead, right-click it → **Ignore Music Start Time** (the badge turns into a grey ♪; **Use Music Start Time** restores it). A manual start trim set in the app always takes precedence (the blue trim badge shows instead of ♪). Saved setlists keep their Music start times: the library is scanned in the background shortly after the built-in player comes up (and on every drag), the badges refresh then, and times you change in Music are picked up by the next scan.
 
 Dragged tracks whose files no longer exist on disk (shown with a warning triangle in Music) are skipped with a brief "N files not found" note, so they can't silently fail at playback later.
 
@@ -245,7 +245,7 @@ When **Skip gap after manual stop** is enabled, the next start after you stopped
 
 ### Gap After Fade-Out
 
-After a track is faded out (an auto-faded cortina, **Fade & Next**, or a restart following **Fade & Stop**), the full auto-gap wait would double the pause the fade already created. Instead, TangoDisplay inserts only a short breather — the **Gap after fade-out** slider (0–2 s, default 0.5 s), found under **Settings › Player › Auto-gap**. It applies even when auto-gap itself is off. (Earlier versions always waited a fixed 1 s plus the full auto-gap after fades.)
+After a track is faded out (an auto-faded cortina, **Fade & Next**, or a restart following **Fade & Stop**), the full auto-gap wait would double the pause the fade already created. Instead, TangoDisplay inserts only a short breather — the **Gap after fade-out** slider (0–2 s, default 0.5 s), found under **Settings › Player › Auto-gap**. It applies even when auto-gap itself is off, and the row's gap indicator lights up for this short gap too. (Earlier versions always waited a fixed 1 s plus the full auto-gap after fades.)
 
 ### Skip Gap Before First Track
 
@@ -458,8 +458,6 @@ An override outranks both the master switch and the cortina rule, so a single sh
 The toolbar button shows the master switch at a glance: tinted with a dot when restoration is on, plain grey when it is off.
 
 Overrides are saved with the setlist and survive a restart.
-
----
 
 ---
 
