@@ -3373,6 +3373,7 @@ runMusicMetadataLocationsTests()
 runLevelMeterTests()
 runDuplicateKeyTests()
 runGapContextTests()
+runMusicDragIDsTests()
 
 print("\n════════════════════════════════")
 let icon = totalFailed == 0 ? "✓" : "✗"
@@ -4754,6 +4755,60 @@ func runGapContextTests() {
         test("negative fade gap clamps to zero") {
             try expectEqual(gapPlanForTransition(context: .afterFade, skipAfterManualStop: false,
                                                  fadeGap: -1, autoGapEnabled: true, normalPlan: nil)?.insert, 0)
+        }
+    }
+}
+
+// MARK: - Music drag persistent IDs (Core)
+
+func runMusicDragIDsTests() {
+    suite("MusicDragIDs — persistent IDs off the Music drag pasteboard") {
+        // Shaped like the real com.apple.tv.metadata plist Music writes.
+        let ids = MusicDragIDs(musicMetadataPlist: [
+            "Tracks": [
+                "26405": [
+                    "Location": "file:///Users/dj/Music/Music/iTunes/iTunes%20Media/Music/Canaro/Poema.m4a",
+                    "Persistent ID": "76DD4E72A603757F",
+                    "Total Time": 252313,
+                ],
+                "26406": [
+                    "Location": "~/Music/Music/iTunes/iTunes Media/Music/Biagi/Indiferencia.mp3",
+                    "Persistent ID": "AABBCCDDEEFF0011",
+                ],
+            ],
+        ])
+        test("file:// location, percent-decoded, exact path hit") {
+            try expectEqual(ids.persistentID(for: URL(fileURLWithPath: "/Users/dj/Music/Music/iTunes/iTunes Media/Music/Canaro/Poema.m4a")),
+                            "76DD4E72A603757F")
+        }
+        test("tilde location is expanded") {
+            let expanded = ("~/Music/Music/iTunes/iTunes Media/Music/Biagi/Indiferencia.mp3" as NSString).expandingTildeInPath
+            try expectEqual(ids.persistentID(for: URL(fileURLWithPath: expanded)), "AABBCCDDEEFF0011")
+        }
+        test("filename fallback for materialised promise copies") {
+            // Music writes promise drops into our app-support cache, so the path differs.
+            try expectEqual(ids.persistentID(for: URL(fileURLWithPath: "/Users/dj/Library/Application Support/TangoDisplay/MusicAppDrops/Poema.m4a")),
+                            "76DD4E72A603757F")
+        }
+        test("miss returns nil — no trim import for non-Music drops") {
+            try expectNil(ids.persistentID(for: URL(fileURLWithPath: "/Users/dj/Other/Milonga.mp3")))
+        }
+        test("bare {id: track} plist shape is also accepted") {
+            let bare = MusicDragIDs(musicMetadataPlist: [
+                "99": ["Location": "file:///tmp/x.m4a", "Persistent ID": "0123456789ABCDEF"],
+            ])
+            try expectEqual(bare.persistentID(for: URL(fileURLWithPath: "/tmp/x.m4a")), "0123456789ABCDEF")
+        }
+        test("empty plist is empty") {
+            try expect(MusicDragIDs(musicMetadataPlist: [:]).isEmpty)
+            try expect(MusicDragIDs().isEmpty)
+        }
+
+        test("unencoded # in a file: location survives (strict parser, not URL(string:))") {
+            let ids = MusicDragIDs(musicMetadataPlist: [
+                "1": ["Location": "file:///Music/Milonga #2.mp3", "Persistent ID": "00000000000000AA"],
+            ])
+            try expectEqual(ids.persistentID(for: URL(fileURLWithPath: "/Music/Milonga #2.mp3")), "00000000000000AA")
         }
     }
 }

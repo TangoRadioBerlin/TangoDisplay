@@ -14,6 +14,10 @@ public enum DropPasteboardType {
     public static let legacyPromiseContents = "NSPromiseContentsPboardType"
     /// Plain file URL (Finder, Swinsian, foobar2000, AIFF-from-Music).
     public static let fileURL = "public.file-url"
+    /// Music.app track metadata incl. persistent IDs (newer flavor name).
+    public static let tvMetadata = "com.apple.tv.metadata"
+    /// Same plist under the legacy four-char flavor 'itun'.
+    public static let itunMetadata = "CorePasteboardFlavorType 0x6974756E"
 }
 
 /// Which branch of the drop resolver a pasteboard payload takes. Ordered by
