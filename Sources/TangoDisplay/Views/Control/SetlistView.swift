@@ -79,6 +79,9 @@ private class MusicAppDropView: NSView {
         os_log("draggingEntered types=%{public}@", log: dropLog, type: .info,
                String(describing: sender.draggingPasteboard.types ?? []))
         guard hasAcceptableDrag(sender) else { return [] }
+        // Start the ID-keyed library scan now; by the time the user lets go
+        // the Music start/stop times are usually warm.
+        SetlistManager.warmMusicTrims()
         onTargeted(true)
         return .copy
     }
@@ -530,7 +533,8 @@ struct SetlistView: View {
         }
 
         if !toInsert.isEmpty {
-            setlist.insertURLs(toInsert, before: anchorID, importMusicTimes: importMusicTimes)
+            setlist.insertURLs(toInsert, before: anchorID, importMusicTimes: importMusicTimes,
+                               musicIDs: resolution.musicIDs)
         }
 
         if let msg = SetlistDropRules.dropFeedbackMessage(added: toInsert.count,
@@ -1103,6 +1107,7 @@ struct SetlistView: View {
         // Same resolver as the drop paths (Finder/Music file URLs, foobar2000's
         // bare POSIX strings, Music selection); no dragging info → no
         // materialisation, which paste never had anyway.
+        SetlistManager.warmMusicTrims()
         let result = DropPasteboardResolver.resolve(NSPasteboard.general, draggingInfo: nil,
                                                     diagEnabled: settings.diagnosticLoggingEnabled)
         Task { @MainActor in
@@ -1187,6 +1192,7 @@ struct SetlistView: View {
                 r.merge(providerURLs, requestedAtLeast: providers.count)
                 if r.branch == .unsupported, !providerURLs.isEmpty { r.branch = .fileURL }
             }
+            if r.musicIDs.isEmpty { r.musicIDs = DropPasteboardResolver.musicDragIDs(drag) }
             DropPasteboardResolver.logSummary(r, entry: "row")
             await handleIncomingDrop(r, anchorID: anchorID)
         }

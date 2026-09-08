@@ -41,6 +41,8 @@ You can also **copy** audio files in Finder, Music.app, Swinsian, or Foobar2000 
 
 When the built-in player is active, tracks use the **start and stop times** you set in Music (Song Info → Options): the **start time** is applied live at playback and shown as a teal **♪ m:ss** badge on the row; the **stop time** is imported as a trim-end marker — see [Track Start & End Time](#track-start--end-time) below.
 
+Music times are matched by the track's **persistent ID** from the drag itself (not by file path), so they also arrive for cloud tracks that Music materialises as cached copies. The library is scanned in the background the moment a drag enters the window.
+
 Music start times apply to **every track** — cortinas always, dance tracks by default. To play a dance track from the file beginning instead, right-click it → **Ignore Music Start Time** (the badge turns into a grey ♪; **Use Music Start Time** restores it). A manual start trim set in the app always takes precedence (the blue trim badge shows instead of ♪). Saved setlists keep their Music start times; to keep app launch fast, the Music library itself is read once per session in the background, about 20 seconds after the built-in player comes up (or immediately on the first drop), and the badges are refreshed then. Start/stop times changed in Music during a session are picked up at the next launch.
 
 Dragged tracks whose files no longer exist on disk (shown with a warning triangle in Music) are skipped with a brief "N files not found" note, so they can't silently fail at playback later.

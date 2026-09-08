@@ -1029,14 +1029,13 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             let fullSeconds = Double(file.length) / sr
             // Live Music start time (Song Info → Options): every track starts
             // there — cortinas always, dance tracks unless opted out; a manual
-            // trim wins. The entry's cached value covers the window before the
-            // library table is enumerated; the non-blocking peek refines it.
-            SetlistManager.startMusicTrimLoad()
+            // trim wins. The entry's cached value is the single source here;
+            // drops and the background refresh keep it current by persistent ID.
+            SetlistManager.warmMusicTrims()
             let detector = settings.makeDetector()
             let effTrimStart = effectiveTrimStart(
                 entryTrimStart: entry.trimStartSeconds,
-                musicStart: SetlistManager.musicTrimIfLoaded(for: entry.fileURL.path)?.start
-                    ?? entry.musicStartSeconds,
+                musicStart: entry.musicStartSeconds,
                 isCortina: detector.isCortina(genre: entry.track.genre),
                 ignoresMusicStart: entry.ignoresMusicStartTime)
             let window = playbackWindow(duration: fullSeconds,
@@ -1079,8 +1078,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             let inTrimStart = next.flatMap { n in
                 effectiveTrimStart(
                     entryTrimStart: n.trimStartSeconds,
-                    musicStart: SetlistManager.musicTrimIfLoaded(for: n.fileURL.path)?.start
-                        ?? n.musicStartSeconds,
+                    musicStart: n.musicStartSeconds,
                     isCortina: detector.isCortina(genre: n.track.genre),
                     ignoresMusicStart: n.ignoresMusicStartTime)
             }

@@ -29,6 +29,9 @@ struct DropResolution {
     var branch: DropPayloadKind
     /// Per-item pasteboard types — for the persisted log only, never paths.
     var itemTypes: [Set<String>]
+    /// Music persistent IDs read off the drag's metadata plist — lets the
+    /// setlist import Music start/stop times without any path matching.
+    var musicIDs = MusicDragIDs()
 
     /// Items that did not yield a file URL.
     var unreadable: Int { max(0, requested - urls.count) }
@@ -97,7 +100,8 @@ enum DropPasteboardResolver {
         let types = itemTypes(of: pasteboard)
         let union = types.reduce(into: Set<String>()) { $0.formUnion($1) }
         let kind = DropPasteboardRules.classify(itemTypes: types, modernPromiseTypes: modernPromiseTypes)
-        var base = DropResolution(urls: [], requested: items.count, branch: kind, itemTypes: types)
+        var base = DropResolution(urls: [], requested: items.count, branch: kind, itemTypes: types,
+                                  musicIDs: musicDragIDs(pasteboard))
 
         os_log("resolve kind=%{public}@ items=%d types=%{public}@", log: log, type: .info,
                kind.rawValue, items.count, DropPasteboardRules.typeSummary(itemTypes: types))
@@ -188,6 +192,41 @@ enum DropPasteboardResolver {
         os_log("resolve yielded zero urls (kind=%{public}@)", log: log, type: .error, kind.rawValue)
         base.branch = .unsupported
         return .immediate(base)
+    }
+
+    // MARK: - Music persistent IDs
+
+    /// Music puts a metadata plist with per-track `Persistent ID` + `Location`
+    /// on the drag pasteboard (`com.apple.tv.metadata` on current macOS, the
+    /// legacy 'itun' flavor, or `com.apple.music.metadata`). Try per-item
+    /// property lists first, then the root pasteboard data.
+    static func musicDragIDs(_ pasteboard: NSPasteboard) -> MusicDragIDs {
+        let flavors = [DropPasteboardType.tvMetadata, DropPasteboardType.itunMetadata,
+                       DropPasteboardType.musicMetadata].map { NSPasteboard.PasteboardType($0) }
+        for item in pasteboard.pasteboardItems ?? [] {
+            for flavor in flavors {
+                if let plist = item.propertyList(forType: flavor) as? [String: Any] {
+                    let ids = MusicDragIDs(musicMetadataPlist: plist)
+                    if !ids.isEmpty {
+                        os_log("music drag ids: %d from per-item %{public}@", log: log, type: .info,
+                               ids.count, flavor.rawValue)
+                        return ids
+                    }
+                }
+            }
+        }
+        for flavor in flavors {
+            if let data = pasteboard.data(forType: flavor),
+               let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] {
+                let ids = MusicDragIDs(musicMetadataPlist: plist)
+                if !ids.isEmpty {
+                    os_log("music drag ids: %d from root %{public}@", log: log, type: .info,
+                           ids.count, flavor.rawValue)
+                    return ids
+                }
+            }
+        }
+        return MusicDragIDs()
     }
 
     // MARK: - Persisted summary
