@@ -614,6 +614,14 @@ func runReplayGainTests() {
         test("returns nil for empty string") {
             try expectNil(parseReplayGainDb(""))
         }
+        test("returns nil for non-finite values instead of propagating NaN/Inf") {
+            try expectNil(parseReplayGainDb("nan dB"))
+            try expectNil(parseReplayGainDb("inf dB"))
+            try expectNil(parseReplayGainDb("-inf dB"))
+        }
+        test("a large but finite value still parses (regression guard)") {
+            try expectEqual(parseReplayGainDb("1234567.89 dB"), 1234567.89)
+        }
     }
 
     suite("calculateReplayGainLinear — mode off") {

@@ -151,5 +151,6 @@ public func parseReplayGainDb(_ value: String?) -> Double? {
     let cleaned = value
         .replacingOccurrences(of: "db", with: "", options: .caseInsensitive)
         .trimmingCharacters(in: .whitespaces)
-    return Double(cleaned)
+    guard let parsed = Double(cleaned), parsed.isFinite else { return nil }
+    return parsed
 }
