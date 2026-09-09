@@ -154,7 +154,14 @@ final class AppleScriptBridge {
     /// Must NOT be called from the main thread — dispatches on `queue` internally.
     func fetchCurrentTrack(completion: @escaping (Result<(Track?, PlayerState), Error>) -> Void) {
         queue.async { [weak self] in
-            guard let self else { return }
+            // Must still call completion when self is already gone — MusicPoller's
+            // reschedule chain lives in this callback; silently dropping it here
+            // stalls polling until something else (a notification) kicks it again.
+            guard let self else {
+                completion(.failure(NSError(domain: "TangoDisplay", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "AppleScriptBridge deallocated"])))
+                return
+            }
             var errorInfo: NSDictionary?
             guard let script = self.trackScript else {
                 completion(.failure(NSError(domain: "TangoDisplay", code: 1,
@@ -182,7 +189,12 @@ final class AppleScriptBridge {
     /// Music.app is not playing from a fixed playlist (shuffle, library view, etc.).
     func fetchPlaylistContext(completion: @escaping (Result<(tracks: [Track], currentIndex: Int)?, Error>) -> Void) {
         queue.async { [weak self] in
-            guard let self else { return }
+            // See fetchCurrentTrack: completion must still fire when self is gone.
+            guard let self else {
+                completion(.failure(NSError(domain: "TangoDisplay", code: 4,
+                    userInfo: [NSLocalizedDescriptionKey: "AppleScriptBridge deallocated"])))
+                return
+            }
             var errorInfo: NSDictionary?
             guard let script = self.playlistScript else {
                 completion(.failure(NSError(domain: "TangoDisplay", code: 2,

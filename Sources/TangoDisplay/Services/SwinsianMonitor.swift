@@ -95,15 +95,23 @@ final class SwinsianMonitor: @unchecked Sendable {
         end tell
         """
 
-    private func runOsascript(_ script: String) -> String? {
+    private func runOsascript(_ script: String, timeout: TimeInterval = 5.0) -> String? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         proc.arguments = ["-e", script]
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = Pipe()
+        // Bounded wait, not waitUntilExit(): a hung Swinsian must not block this call
+        // (and whichever global-queue thread happens to be running it) forever.
+        let exited = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in exited.signal() }
         do { try proc.run() } catch { return nil }
-        proc.waitUntilExit()
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            NSLog("TangoDisplay: Swinsian osascript timed out after %.1fs, terminating", timeout)
+            proc.terminate()
+            return nil
+        }
         guard proc.terminationStatus == 0 else { return nil }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         // Bound the parse: a runaway/compromised player app returning a huge stdout

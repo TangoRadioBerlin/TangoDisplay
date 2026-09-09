@@ -30,6 +30,14 @@ final class MusicPoller {
     private let failuresBeforeWatchdog = 3
     private let playlistPollEvery = 10  // poll playlist every Nth track poll
 
+    // Bumped at the start of every doPoll() (and on stop()); a completion or stuck-poll
+    // watchdog whose captured generation no longer matches the current one is stale and
+    // discarded. NSAppleScript has no cancellation API — a genuinely frozen Music.app
+    // cannot be unblocked — but this lets the watchdog reflect reality and polling
+    // resume on schedule instead of waiting forever for a call that may never return.
+    private var pollGeneration = 0
+    private let stuckPollTimeout: TimeInterval = 8.0
+
     // MARK: - Callbacks (always delivered on main queue)
 
     var onTrackUpdate: ((Track?, PlayerState) -> Void)?
@@ -57,6 +65,9 @@ final class MusicPoller {
     func stop() {
         timer?.cancel()
         timer = nil
+        // Invalidate any in-flight poll's stuck-poll watchdog/completion — without this,
+        // a watchdog scheduled before stop() could still fire afterward and re-arm a timer.
+        pollGeneration += 1
         if let observer = notificationObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
             notificationObserver = nil
@@ -107,9 +118,27 @@ final class MusicPoller {
     private func doPoll() {
         pollCount += 1
         let shouldPollPlaylist = (pollCount % playlistPollEvery == 0)
+        pollGeneration += 1
+        let gen = pollGeneration
+
+        // See pollGeneration's doc comment: a frozen Music.app can't be cancelled, so
+        // detect it by timeout instead. If the real completion below fires later after
+        // all, its generation check discards it — this watchdog has already moved on.
+        timerQueue.asyncAfter(deadline: .now() + stuckPollTimeout) { [weak self] in
+            guard let self, self.pollGeneration == gen else { return }
+            self.pollGeneration += 1
+            NSLog("TangoDisplay: Music.app poll appears stuck (no response after %.0fs)", self.stuckPollTimeout)
+            self.handleFailure()
+            DispatchQueue.main.async { self.onTrackUpdate?(nil, .stopped) }
+            self.schedulePoll(after: self.currentInterval)
+        }
 
         bridge.fetchCurrentTrack { [weak self] result in
-            guard let self else { return }
+            guard let self, self.pollGeneration == gen else { return }
+            // A real response arrived before the watchdog above timed out — invalidate
+            // this generation now so that watchdog closure (still pending until
+            // stuckPollTimeout elapses) recognizes it's obsolete when it fires.
+            self.pollGeneration += 1
             switch result {
             case .success(let (track, state)):
                 self.handleSuccess()

@@ -298,7 +298,7 @@ final class EmbracMonitor: @unchecked Sendable {
         runOsascript(Self.trackScript)
     }
 
-    private func runOsascript(_ script: String) -> String? {
+    private func runOsascript(_ script: String, timeout: TimeInterval = 5.0) -> String? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         proc.arguments = ["-e", script]
@@ -308,6 +308,13 @@ final class EmbracMonitor: @unchecked Sendable {
         proc.standardOutput = stdoutPipe
         proc.standardError  = stderrPipe
 
+        // A bounded wait, not waitUntilExit(): every poll (including notification-
+        // triggered ones) funnels through this same serial queue, so a hung/frozen
+        // Embrace would otherwise wedge waitUntilExit() forever — silently blocking
+        // the very mechanism (a failed poll) that should have told the watchdog.
+        let exited = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in exited.signal() }
+
         do {
             try proc.run()
         } catch {
@@ -315,7 +322,11 @@ final class EmbracMonitor: @unchecked Sendable {
             return nil
         }
 
-        proc.waitUntilExit()
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            NSLog("TangoDisplay: Embrace osascript timed out after %.1fs, terminating", timeout)
+            proc.terminate()
+            return nil
+        }
 
         guard proc.terminationStatus == 0 else {
             let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
