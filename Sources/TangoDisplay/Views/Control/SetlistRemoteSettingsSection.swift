@@ -96,6 +96,7 @@ struct SetlistRemoteSettingsSection: View {
             HStack(spacing: 8) {
                 Button("Regenerate PIN") {
                     settings.regenerateRemoteControlPin()
+                    bridge.disconnectAllClients()
                 }
                 Button("Refresh URL") {
                     refreshNetworkInfo()

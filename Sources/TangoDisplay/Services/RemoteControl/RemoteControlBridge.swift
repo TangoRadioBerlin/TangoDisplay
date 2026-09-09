@@ -79,6 +79,14 @@ final class RemoteControlBridge: NSObject, ObservableObject {
     func pause() {
         guard isRunning else { return }
         isAcceptingClients = false
+        disconnectAllClients()
+    }
+
+    /// Kick every currently-authenticated client without touching `isAcceptingClients` —
+    /// the feature stays on, only existing sessions are forced to re-authenticate. Used
+    /// after regenerating the PIN, since a connected client would otherwise keep working
+    /// with the now-stale PIN's already-established session.
+    func disconnectAllClients() {
         guard let transport else { return }
         for clientID in authenticatedClients {
             transport.disconnect(clientID)
