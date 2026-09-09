@@ -24,6 +24,8 @@ public enum RemoteRejectReason {
     public static let builtInPlayerNotActive = "builtInPlayerNotActive"
     public static let unknownEntry = "unknownEntry"
     public static let malformed = "malformed"
+    /// Sent on `auth` while the PIN limiter is locked (before the PIN is even compared).
+    public static let locked = "locked"
     // Slice 2 (loadSetlist / ordering edits)
     public static let entryImmutable = "entryImmutable"
     public static let immutablePosition = "immutablePosition"

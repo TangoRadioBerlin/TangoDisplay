@@ -2160,6 +2160,59 @@ func runPinRateLimiterTests() {
             try expect(!limiter.isLocked(at: 14), "Counter must reset on success")
         }
     }
+
+    suite("PinRateLimiterRegistry — per-identity lockout") {
+        test("two different keys have fully independent lockouts") {
+            var reg = PinRateLimiterRegistry(maxAttempts: 5, baseLockout: 5, maxLockout: 300)
+            for _ in 0..<5 { reg.registerFailure(key: "attacker", at: 0) }
+            try expect(reg.isLocked(key: "attacker", at: 0), "The failing key must be locked")
+            // The DJ's own key never failed — must be unaffected by the attacker's lockout.
+            try expect(!reg.isLocked(key: "dj", at: 0), "An unrelated key must not be locked")
+            reg.registerSuccess(key: "dj")
+            try expect(!reg.isLocked(key: "dj", at: 0))
+        }
+
+        test("a fresh key starts unlocked") {
+            var reg = PinRateLimiterRegistry(maxAttempts: 5, baseLockout: 5, maxLockout: 300)
+            try expect(!reg.isLocked(key: "new", at: 0))
+        }
+
+        test("repeated failures on the same key escalate exactly like a lone PinRateLimiter") {
+            var reg = PinRateLimiterRegistry(maxAttempts: 5, baseLockout: 5, maxLockout: 300)
+            for _ in 0..<5 { reg.registerFailure(key: "x", at: 0) }
+            try expect(reg.isLocked(key: "x", at: 4.9))
+            try expect(!reg.isLocked(key: "x", at: 5.1))
+            reg.registerFailure(key: "x", at: 5.1)   // re-locks immediately, doubled
+            try expect(reg.isLocked(key: "x", at: 14.9))
+            try expect(!reg.isLocked(key: "x", at: 15.1))
+        }
+
+        test("bucket count never exceeds maxBuckets") {
+            var reg = PinRateLimiterRegistry(maxAttempts: 1, baseLockout: 5, maxLockout: 300, maxBuckets: 3)
+            for i in 0..<10 { reg.registerFailure(key: "k\(i)", at: 0) }
+            try expectEqual(reg.bucketCount, 3)
+        }
+
+        test("exceeding maxBuckets evicts the least-recently-touched key, not a live attacker's") {
+            var reg = PinRateLimiterRegistry(maxAttempts: 1, baseLockout: 100, maxLockout: 300, maxBuckets: 2)
+            reg.registerFailure(key: "old", at: 0)     // locked until 100
+            reg.registerFailure(key: "mid", at: 1)     // locked until 101
+            // Touching "old" again (still locked, so this just re-locks/refreshes it) should
+            // count as recent activity, keeping it from being the eviction target.
+            reg.registerFailure(key: "old", at: 2)
+            reg.registerFailure(key: "new", at: 3)     // pushes bucket count to 3 → evict LRU
+            try expectEqual(reg.bucketCount, 2)
+            // "mid" was least recently touched (touched only once, at t=1) → evicted, unlocked.
+            try expect(!reg.isLocked(key: "mid", at: 3))
+            try expect(reg.isLocked(key: "old", at: 3))
+        }
+
+        test("an unknown host falls back to a shared bucket rather than being unprotected") {
+            var reg = PinRateLimiterRegistry(maxAttempts: 5, baseLockout: 5, maxLockout: 300)
+            for _ in 0..<5 { reg.registerFailure(key: PinRateLimiterRegistry.unknownHostKey, at: 0) }
+            try expect(reg.isLocked(key: PinRateLimiterRegistry.unknownHostKey, at: 0))
+        }
+    }
 }
 
 // MARK: - TDJ name tests

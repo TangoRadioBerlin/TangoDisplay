@@ -24,6 +24,10 @@ protocol RemoteTransport: AnyObject {
 
     /// Forcibly drop a client (used after auth failure).
     func disconnect(_ clientID: UUID)
+
+    /// The remote host (IP address) of a connected client, or nil if unknown/already
+    /// disconnected. Used to key PIN rate-limiting per identity rather than globally.
+    func remoteHost(for clientID: UUID) -> String?
 }
 
 protocol RemoteTransportDelegate: AnyObject {

@@ -21,7 +21,7 @@ final class RemoteControlBridge: NSObject, ObservableObject {
     private var stateCancellables = Set<AnyCancellable>()
     private var transportCancellables = Set<AnyCancellable>()
     private var authenticatedClients = Set<UUID>()
-    private var pinLimiter = PinRateLimiter()
+    private var pinLimiters = PinRateLimiterRegistry()
 
     private let stateChangeSubject = PassthroughSubject<Void, Never>()
 
@@ -550,25 +550,29 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             transport.disconnect(clientID)
             return
         }
-        // Brute-force throttle: while locked, refuse without even checking the
-        // PIN. Global on purpose — reconnecting clients get fresh UUIDs, so a
-        // per-client limit would be trivially bypassed.
+        // Brute-force throttle: while locked, refuse without even checking the PIN.
+        // Keyed by remote host (falling back to a shared bucket when unknown) rather
+        // than a single global limiter — a global limiter meant any device on the LAN
+        // could keep the real DJ's own correct PIN locked out forever, since isLocked
+        // is checked before the PIN comparison. Reconnects from the SAME host still
+        // land in the same bucket (a fresh connection UUID doesn't help an attacker).
         let now = ProcessInfo.processInfo.systemUptime
-        guard !pinLimiter.isLocked(at: now) else {
-            let nack = #"{"type":"auth","ok":false,"reason":"locked"}"#
+        let key = transport.remoteHost(for: clientID) ?? PinRateLimiterRegistry.unknownHostKey
+        guard !pinLimiters.isLocked(key: key, at: now) else {
+            let nack = "{\"type\":\"auth\",\"ok\":false,\"reason\":\"\(RemoteRejectReason.locked)\"}"
             transport.send(nack, to: clientID)
             transport.disconnect(clientID)
             return
         }
         let expected = settings.remoteControlPin
         guard let pin, !expected.isEmpty, pin == expected else {
-            pinLimiter.registerFailure(at: now)
+            pinLimiters.registerFailure(key: key, at: now)
             let nack = #"{"type":"auth","ok":false}"#
             transport.send(nack, to: clientID)
             transport.disconnect(clientID)
             return
         }
-        pinLimiter.registerSuccess()
+        pinLimiters.registerSuccess(key: key)
         authenticatedClients.insert(clientID)
         let ack = #"{"type":"auth","ok":true}"#
         transport.send(ack, to: clientID)

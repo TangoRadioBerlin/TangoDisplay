@@ -101,6 +101,18 @@ final class HTTPServerTransport: RemoteTransport {
         }
     }
 
+    /// `clients` is confined to `queue`, so this bridges to it synchronously — a
+    /// plain in-memory dictionary lookup + property read, not I/O, so blocking the
+    /// caller briefly is safe (matches the cost of any other queue-confined-state read).
+    func remoteHost(for clientID: UUID) -> String? {
+        queue.sync {
+            guard let client = clients[clientID],
+                  case let .hostPort(host, _) = client.connection.currentPath?.remoteEndpoint
+            else { return nil }
+            return "\(host)"
+        }
+    }
+
     func disconnect(_ clientID: UUID) {
         queue.async { [weak self] in
             guard let self, let client = self.clients[clientID] else { return }
