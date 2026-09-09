@@ -285,26 +285,38 @@ struct PresentationView: View {
     /// the same corner they stack. The counter keeps its position-tab offsets.
     @ViewBuilder
     private func cornerItems(for corner: TrackCounterPosition, geo: GeometryProxy) -> some View {
-        let mode = appState.displayState.mode
+        // effectiveDisplayState (not appState.displayState directly) so the mirrored
+        // presentation screen and the Position-tab preview show the simulated scene here too.
+        let mode = effectiveDisplayState.mode
         let showTdj = tdjNameVisible(in: mode) && settings.tdjNamePosition == corner
         let counterPos = settings.showTrackCounter && mode == .playing
             && settings.trackCounterPosition == corner
-            ? appState.displayState.tandaPosition : nil
+            ? effectiveDisplayState.tandaPosition : nil
         if showTdj || counterPos != nil {
             VStack(spacing: 12) {
                 if showTdj {
+                    // renderProfile (not activeProfile) so a per-genre/cortina position
+                    // override reaches the TDJ name here too — it previously never did in
+                    // this (default) corner layout, only in the centred layout.
                     Text(settings.tdjName)
-                        .font(activeProfile.tdjNameFont(geo.size.height))
-                        .foregroundColor(activeProfile.tdjNameSwiftUIColor)
+                        .font(renderProfile.tdjNameFont(geo.size.height))
+                        .foregroundColor(renderProfile.tdjNameSwiftUIColor)
                         .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
+                        // Plain offset, not `.positioned(...)`: that helper's
+                        // `.frame(maxWidth: .infinity)` (used when boxWidth == 0) would fight
+                        // this corner's own `.frame(maxWidth: .infinity, alignment:
+                        // corner.overlayAlignment)` and re-centre the text. Box width/alignment
+                        // for the TDJ name remain a centred-layout-only feature for now.
+                        .offset(x: renderProfile.tdjNameOffsetX / 100 * geo.size.width,
+                                y: renderProfile.tdjNameOffsetY / 100 * geo.size.height)
                 }
                 if let pos = counterPos {
                     Text(pos.label)
-                        .font(activeProfile.trackCounterFont(geo.size.height))
-                        .foregroundColor(activeProfile.trackCounterSwiftUIColor)
+                        .font(renderProfile.trackCounterFont(geo.size.height))
+                        .foregroundColor(renderProfile.trackCounterSwiftUIColor)
                         .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
-                        .offset(x: activeProfile.trackCounterOffsetX / 100 * geo.size.width,
-                                y: activeProfile.trackCounterOffsetY / 100 * geo.size.height)
+                        .offset(x: renderProfile.trackCounterOffsetX / 100 * geo.size.width,
+                                y: renderProfile.trackCounterOffsetY / 100 * geo.size.height)
                 }
             }
             .padding(24)
