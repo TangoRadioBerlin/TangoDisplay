@@ -1,4 +1,5 @@
 import SwiftUI
+import TangoDisplayCore
 
 struct PlayerControlsView: View {
     @ObservedObject var player: LocalPlayerSource

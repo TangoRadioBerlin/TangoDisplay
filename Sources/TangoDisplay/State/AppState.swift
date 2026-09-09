@@ -4,7 +4,8 @@ import AppKit
 import Combine
 import TangoDisplayCore
 
-enum FadeMode: Equatable { case none, fadeAndStop, fadeAndContinue }
+// FadeMode lives in TangoDisplayCore (FadeModeRules.swift) so its mutual-exclusion
+// invariant is unit-testable.
 
 /// Which presentation scene the configuration preview simulates, so the DJ can
 /// position text for each scene and see it exactly as it will render at runtime
@@ -872,6 +873,11 @@ final class AppState: ObservableObject {
 
     func transportFadeAndStop() {
         if fadeMode == .fadeAndStop { cancelFade(); rescheduleAutoFadeIfNeeded(); return }
+        // Only one fade direction at a time — without this, a Fade & Continue arriving
+        // while Fade & Stop is running (reachable via RemoteControlBridge, which has no
+        // UI .disabled() to stop it) overwrote fadeTask without cancelling the old one
+        // and re-sampled preFadeVolume from the already-faded-down volume.
+        guard FadeModeRules.canStart(.fadeAndStop, given: fadeMode) else { return }
         cancelAutoFade()
         guard displayState.mode == .cortina, let player = localPlayer else { return }
         if let id = player.currentEntryID { setlist.setRepeat(false, for: id) }
@@ -894,6 +900,8 @@ final class AppState: ObservableObject {
 
     func transportFadeAndContinue() {
         if fadeMode == .fadeAndContinue { cancelFade(); rescheduleAutoFadeIfNeeded(); return }
+        // See transportFadeAndStop() — the same cross-mode guard applies in both directions.
+        guard FadeModeRules.canStart(.fadeAndContinue, given: fadeMode) else { return }
         cancelAutoFade()
         guard displayState.mode == .cortina, let player = localPlayer else { return }
         if let id = player.currentEntryID { setlist.setRepeat(false, for: id) }

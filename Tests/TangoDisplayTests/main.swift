@@ -3377,6 +3377,7 @@ runMusicMetadataLocationsTests()
 runLevelMeterTests()
 runDuplicateKeyTests()
 runGapContextTests()
+runFadeModeRulesTests()
 runMusicDragIDsTests()
 runRestorationTests()
 runSliderSnapTests()
@@ -4876,6 +4877,28 @@ func runMusicDragIDsTests() {
                 "1": ["Location": "file:///Music/Milonga #2.mp3", "Persistent ID": "00000000000000AA"],
             ])
             try expectEqual(ids.persistentID(for: URL(fileURLWithPath: "/Music/Milonga #2.mp3")), "00000000000000AA")
+        }
+    }
+}
+
+// MARK: - Fade mode mutual exclusion (Core)
+
+func runFadeModeRulesTests() {
+    suite("FadeModeRules.canStart — only one fade direction at a time") {
+        test("from .none, either fade direction may start") {
+            try expect(FadeModeRules.canStart(.fadeAndStop, given: .none))
+            try expect(FadeModeRules.canStart(.fadeAndContinue, given: .none))
+        }
+        test("requesting the SAME mode again is allowed (the toggle-to-cancel path)") {
+            try expect(FadeModeRules.canStart(.fadeAndStop, given: .fadeAndStop))
+            try expect(FadeModeRules.canStart(.fadeAndContinue, given: .fadeAndContinue))
+        }
+        test("requesting the OTHER mode while one is active is blocked") {
+            // This is exactly the gap that let a remote client fire fadeAndStop then
+            // fadeAndContinue back to back: the old task was never cancelled, and
+            // preFadeVolume got re-sampled from the already-faded-down volume.
+            try expect(!FadeModeRules.canStart(.fadeAndContinue, given: .fadeAndStop))
+            try expect(!FadeModeRules.canStart(.fadeAndStop, given: .fadeAndContinue))
         }
     }
 }
