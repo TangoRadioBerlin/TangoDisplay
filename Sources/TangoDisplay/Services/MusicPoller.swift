@@ -48,6 +48,7 @@ final class MusicPoller {
     // MARK: - Lifecycle
 
     func start() {
+        onWatchdogChanged?(false)   // clear any stale watchdog state from a previous source
         bridge.compile()
 
         let observer = DistributedNotificationCenter.default().addObserver(
@@ -59,26 +60,38 @@ final class MusicPoller {
         }
         notificationObserver = observer
 
-        schedulePoll(after: normalInterval)
+        // `timer`/`pollGeneration` are owned by timerQueue (doPoll/schedulePoll/the stuck-poll
+        // watchdog all touch them there) — start()/stop()/pollNow() are called from main by
+        // convention, so they must hop onto timerQueue too instead of touching that state directly.
+        timerQueue.async { [weak self] in
+            guard let self else { return }
+            self.schedulePoll(after: self.normalInterval)
+        }
     }
 
     func stop() {
-        timer?.cancel()
-        timer = nil
-        // Invalidate any in-flight poll's stuck-poll watchdog/completion — without this,
-        // a watchdog scheduled before stop() could still fire afterward and re-arm a timer.
-        pollGeneration += 1
         if let observer = notificationObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
             notificationObserver = nil
+        }
+        timerQueue.async { [weak self] in
+            guard let self else { return }
+            self.timer?.cancel()
+            self.timer = nil
+            // Invalidate any in-flight poll's stuck-poll watchdog/completion — without this,
+            // a watchdog scheduled before stop() could still fire afterward and re-arm a timer.
+            self.pollGeneration += 1
         }
     }
 
     /// Trigger an immediate poll (e.g. from ⌘⇧R hotkey).
     func pollNow() {
-        timer?.cancel()
-        timer = nil
-        doPoll()
+        timerQueue.async { [weak self] in
+            guard let self else { return }
+            self.timer?.cancel()
+            self.timer = nil
+            self.doPoll()
+        }
     }
 
     /// Immediately fetch playlist context outside the normal poll cycle.

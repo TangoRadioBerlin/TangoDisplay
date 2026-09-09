@@ -42,18 +42,30 @@ final class JRiverPoller: MusicPlayerSource {
     // MARK: - Lifecycle
 
     func start() {
-        schedulePoll(after: normalInterval)
+        onWatchdogChanged?(false)   // clear any stale watchdog state from a previous source
+        // `timer` is owned by timerQueue (schedulePoll/doPoll's reschedule both touch it
+        // there); start()/stop()/pollNow() are called from main by convention, so they must
+        // hop onto timerQueue too instead of touching that state directly.
+        timerQueue.async { [weak self] in
+            guard let self else { return }
+            self.schedulePoll(after: self.normalInterval)
+        }
     }
 
     func stop() {
-        timer?.cancel()
-        timer = nil
+        timerQueue.async { [weak self] in
+            self?.timer?.cancel()
+            self?.timer = nil
+        }
     }
 
     func pollNow() {
-        timer?.cancel()
-        timer = nil
-        doPoll()
+        timerQueue.async { [weak self] in
+            guard let self else { return }
+            self.timer?.cancel()
+            self.timer = nil
+            self.doPoll()
+        }
     }
 
     func triggerPlaylistFetch() {

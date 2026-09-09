@@ -72,15 +72,22 @@ final class MegaSegMonitor: @unchecked Sendable {
         }
         notificationObserver = observer
 
-        schedulePoll(after: 0)
+        // `timer` is owned by fileQueue (doPoll/notificationTriggeredPoll's reschedule both
+        // touch it there); start()/stop() are called from main by convention, so they must hop
+        // onto fileQueue too instead of touching that state directly.
+        fileQueue.async { [weak self] in
+            self?.schedulePoll(after: 0)
+        }
     }
 
     func stop() {
-        timer?.cancel()
-        timer = nil
         if let observer = notificationObserver {
             DistributedNotificationCenter.default().removeObserver(observer)
             notificationObserver = nil
+        }
+        fileQueue.async { [weak self] in
+            self?.timer?.cancel()
+            self?.timer = nil
         }
     }
 
