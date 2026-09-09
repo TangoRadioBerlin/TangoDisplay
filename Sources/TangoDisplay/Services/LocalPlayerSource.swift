@@ -831,6 +831,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     func pause() {
         gapContext = .manualStop
         scheduleGeneration += 1
+        cancelInFlightAnalyses()
         playerNode.stop()
         isActivePlaying = false
         if let id = currentEntryID, !earlyMarkedEntryIDs.contains(id), !currentEntryIsPlayed() {
@@ -868,6 +869,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             setlist.markQueued(id: id)
         }
         scheduleGeneration += 1
+        cancelInFlightAnalyses()
         currentEntryID = nil
         currentRuleTrack = nil
         isCurrentEntryMarkedAsPlayed = false
