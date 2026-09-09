@@ -576,12 +576,8 @@ final class AppSettings: ObservableObject {
         } else {
             audioUnitPluginChain = []
         }
-        if let data = ud.data(forKey: kPrefix + "restoration"),
-           let decoded = try? JSONDecoder().decode(RestorationSettings.self, from: data) {
-            restoration = decoded
-        } else {
-            restoration = .defaults
-        }
+        restoration = AppSettings.decodeOrQuarantine(
+            RestorationSettings.self, key: kPrefix + "restoration") ?? .defaults
         decibelMeterEnabled = ud.object(forKey: kPrefix + "decibelMeterEnabled").flatMap { $0 as? Bool } ?? false
         decibelMeterLowThreshold  = ud.object(forKey: kPrefix + "decibelMeterLowThreshold").flatMap { $0 as? Int } ?? 60
         decibelMeterHighThreshold = ud.object(forKey: kPrefix + "decibelMeterHighThreshold").flatMap { $0 as? Int } ?? 80
