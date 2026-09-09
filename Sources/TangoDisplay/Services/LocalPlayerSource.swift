@@ -1115,13 +1115,21 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                             completionCallbackType: .dataConsumed
                         ) { [weak self] _ in
                             DispatchQueue.main.async {
-                                guard let self,
-                                      let nodeTime = self.playerNode.lastRenderTime,
+                                // Unlike every other async completion in this file, this one
+                                // used to skip the staleness check — a fast transition while
+                                // the pad was still in flight could stamp this (possibly
+                                // reconnected) engine's state under a stale entryID. `gen` is
+                                // the same generation captured for the segment completion below.
+                                guard let self, gen == self.scheduleGeneration else { return }
+                                // Clear unconditionally on a live generation — if lastRenderTime
+                                // isn't available yet, silencePending must not stay stuck true,
+                                // or updateTime()'s `guard !silencePending` pins elapsed at 0.
+                                self.silencePending = false
+                                self.setlist.setAutoGapApplied(id: entryID, applied: false)
+                                guard let nodeTime = self.playerNode.lastRenderTime,
                                       nodeTime.isSampleTimeValid,
                                       let pt = self.playerNode.playerTime(forNodeTime: nodeTime) else { return }
                                 self.audioStartSampleTime = pt.sampleTime
-                                self.silencePending = false
-                                self.setlist.setAutoGapApplied(id: entryID, applied: false)
                             }
                         }
                         currentPaddingFrames = frames
