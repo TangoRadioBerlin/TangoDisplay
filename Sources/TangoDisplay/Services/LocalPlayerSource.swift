@@ -1118,7 +1118,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             // disabled and even for entries that opted out of the auto-gap (the
             // fade removed the natural pause, so SOME breather must remain).
             let transition = gapContext
-            gapContext = .natural
+            // A repeat-track reload (bypassAutoGap) doesn't consume this transition — it isn't
+            // the real advance the pending `.afterFade` note is for, so leave it standing for
+            // the next genuine transition instead of silently discarding it here.
+            if !bypassAutoGap { gapContext = .natural }
             let gapEligible = settings.autoGapEnabled && !autoGapIgnored
             if !bypassAutoGap && (gapEligible || transition == .afterFade) {
                 gapScope: do {
