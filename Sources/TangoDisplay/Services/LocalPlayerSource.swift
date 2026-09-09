@@ -114,6 +114,20 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     private var scheduleGeneration: Int = 0
     private var hoggedDeviceUID: String? = nil
     private let audioDeviceQueue = DispatchQueue(label: "com.tangodisplay.audio-device", qos: .userInitiated)
+    // Serializes the actual graph-topology transitions (audioEngine.stop()/start(),
+    // connectAudioGraph, and the playerNode.stop() immediately preceding them) between
+    // audioDeviceQueue (device switches, engine-config-change restarts) and the main
+    // thread (loadEntry, rewireGraphSafely, stop, transport). Without this, a device
+    // switch and a track transition landing at the same moment could mutate the same
+    // AVAudioEngine instance from two threads concurrently — undefined behavior AVFoundation
+    // never documents as safe. Deliberately narrow: EQ/balance/ReplayGain/bypass-flag writes
+    // are plain property sets on already-attached nodes and are NOT covered — only actual
+    // stop/reconnect/start sequences take this lock, so it costs nothing on the (overwhelmingly
+    // common) path where no device change is in flight, and only blocks main briefly in the
+    // rare case where one genuinely overlaps a track transition. Every call site takes it
+    // for a short, non-reentrant span (nothing it calls tries to take it again), so it
+    // cannot deadlock.
+    private let engineTopologyLock = NSLock()
 
     // MARK: - Private — Audio Unit plugin chain
 
@@ -316,9 +330,21 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             // (e.g. headphone removal on System Default) doesn't spuriously fire handleTrackEnd → skipNext().
             self.scheduleGeneration += 1
             // Graph rewire must happen with engine stopped; engine is already stopped when this fires.
+            // Locked against a concurrent engine mutation elsewhere (see engineTopologyLock).
+            // Released before dispatching to audioDeviceQueue below rather than held across
+            // that async boundary — audioDeviceQueue's own stop/start sequence takes the same
+            // lock separately. That leaves a narrow gap where a competing main-thread caller
+            // could run its own complete, locked stop→reconnect→start in between; the residual
+            // risk is a stale/overwritten graph connection (self-corrects on the next loadEntry),
+            // never two threads mutating the engine at the same instant — the actual hazard
+            // this lock exists to remove. The alternative (a hand-rolled lock spanning the async
+            // gap, unlocked from three separate exit paths) is a much easier way to introduce a
+            // permanent deadlock than the race it would close.
+            self.engineTopologyLock.lock()
             if self.audioFile != nil {
                 self.connectAudioGraph(format: self.audioFile?.processingFormat)
             }
+            self.engineTopologyLock.unlock()
 
             // Capture all state before leaving the main thread.
             guard let audioUnit = self.audioEngine.outputNode.audioUnit else { return }
@@ -343,6 +369,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                     deviceStolenByOther = false
                 }
 
+                self.engineTopologyLock.lock()
                 if deviceStolenByOther && wasPlaying {
                     self.playerNode.stop()
                 }
@@ -352,6 +379,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 } catch {
                     os_log(.error, "TangoDisplay: engine restart failed: %{public}@", error.localizedDescription)
                 }
+                self.engineTopologyLock.unlock()
 
                 DispatchQueue.main.async {
                     if deviceStolenByOther {
@@ -409,7 +437,11 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 self.hoggedDeviceUID = nil
             }
 
-            // CoreAudio stop/start can block — must be off the main thread.
+            // CoreAudio stop/start can block — must be off the main thread. Locked against a
+            // concurrent main-thread engine mutation (loadEntry, rewireGraphSafely, stop) —
+            // see engineTopologyLock; both branches of the do/catch below converge before
+            // the matching unlock, so a plain lock/unlock pair suffices.
+            self.engineTopologyLock.lock()
             if self.audioEngine.isRunning {
                 self.playerNode.stop()
                 self.audioEngine.stop()
@@ -445,6 +477,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                        error.localizedDescription)
                 DispatchQueue.main.async { self.isChangingDevice = false }
             }
+            self.engineTopologyLock.unlock()
         }
     }
 
@@ -699,8 +732,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         replayGainMixer.outputVolume = 1.0
         cancelInFlightAnalyses()
         inFlightAnalysisURLs.removeAll()
+        engineTopologyLock.lock()
         playerNode.stop()
         audioEngine.stop()
+        engineTopologyLock.unlock()
         levelMeter.reset()
         audioFile = nil
         elapsed = 0
@@ -1037,12 +1072,21 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             // scheduleFile requires the file format to exactly match the output bus format.
             // Stop the engine before reconnecting so the graph is in a clean state; a mono
             // AIFF scheduled against the stereo-defaulted startup connection produces silence.
-            audioEngine.stop()
-            // startRestorationForTrack owns the scout for a track load, so don't fire a
-            // second one from here.
-            applyRestorationEngagement(restorationNodes(for: entry), scoutIfNewlyOn: false)
-            connectAudioGraph(format: file.processingFormat)
-            try audioEngine.start()
+            // Locked against a concurrent device-change restart (see engineTopologyLock);
+            // re-thrown so the existing catch below still handles a failed engine start.
+            engineTopologyLock.lock()
+            do {
+                audioEngine.stop()
+                // startRestorationForTrack owns the scout for a track load, so don't fire a
+                // second one from here.
+                applyRestorationEngagement(restorationNodes(for: entry), scoutIfNewlyOn: false)
+                connectAudioGraph(format: file.processingFormat)
+                try audioEngine.start()
+            } catch {
+                engineTopologyLock.unlock()
+                throw error
+            }
+            engineTopologyLock.unlock()
             levelMeter.reinstallTap()
             startRestorationForTrack(entry)
             applyReplayGain(for: entry)
@@ -1429,6 +1473,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         let savedElapsed = elapsed
         let format = audioFile?.processingFormat
 
+        // Locked against a concurrent device-change restart (see engineTopologyLock);
+        // the retry loop below never throws out of this function, so a plain
+        // lock/unlock pair (no defer, no catch-and-rethrow) is enough.
+        engineTopologyLock.lock()
         playerNode.stop()
         audioEngine.stop()
         connectAudioGraph(format: format)
@@ -1455,6 +1503,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 connectAudioGraph(format: format)
             }
         }
+        engineTopologyLock.unlock()
 
         levelMeter.reinstallTap()
         applyBalance(_balance)
