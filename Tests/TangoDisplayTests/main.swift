@@ -3140,6 +3140,10 @@ func runAutoGapTests() {
             let p = autoGapPlan(leading: 3.0, trailing: 0, prevEnd: 2.0, target: 4.0, force: false)
             try expect(p.insert == 0)                  // existing 5 ≥ 4
         }
+        test("existing silence exactly at the target inserts nothing (boundary, not just exceedance)") {
+            let p = autoGapPlan(leading: 1.5, trailing: 0, prevEnd: 2.5, target: 4.0, force: false)
+            try expect(p.insert == 0)                  // existing 4 == target 4
+        }
         test("target <= 0 inserts nothing") {
             try expect(autoGapPlan(leading: 0, trailing: 0, prevEnd: 0, target: 0, force: false).insert == 0)
         }
@@ -4130,6 +4134,13 @@ func runPreparedAutoGapTests() {
             try expectEqual(plan?.trimTrailing, 3.5)  // 4.0 − 0.5 margin
         }
 
+        test("a non-default safety margin actually threads through plan(), not just the free function") {
+            let plan = prepared.plan(currentID: curID, nextID: nextID, target: 5.0, force: true,
+                                     safetyMargin: 1.5)
+            try expectEqual(plan?.skipLeading, 0.5)   // 2.0 − 1.5 margin
+            try expectEqual(plan?.trimTrailing, 2.5)  // 4.0 − 1.5 margin
+        }
+
         test("stale current ID yields nil") {
             try expectNil(prepared.plan(currentID: UUID(), nextID: nextID, target: 5.0, force: false))
         }
@@ -4241,6 +4252,15 @@ func runMusicTrimTests() {
             try expectNil(r.start)
             try expectNil(r.end)
         }
+        test("negative values (never emitted by Music, but not guarded against) fail safe to no trim") {
+            let r = musicTrimSeconds(startMs: -1, stopMs: -1, totalMs: 180000)
+            try expectNil(r.start)
+            try expectNil(r.end)
+        }
+        test("stop beyond total is out of range and yields no trim") {
+            let r = musicTrimSeconds(startMs: 0, stopMs: 200_000, totalMs: 180_000)
+            try expectNil(r.end)
+        }
     }
 
     suite("effectiveTrimStart — live Music start times") {
@@ -4343,6 +4363,20 @@ func runSeekTargetTests() {
             try expectEqual(seekTarget(seconds: 90, windowStart: 60, windowEnd: 120), 90)
         }
 
+        test("an inverted window (start > end — a manual trim past the stop point) rejects any seek at or past the end") {
+            // playbackWindow can produce start > end (e.g. trimStart pushed past a
+            // small trimEnd); seekTarget must fail safe rather than clamp into
+            // a nonsensical window.
+            try expectNil(seekTarget(seconds: 5, windowStart: 8, windowEnd: 2))
+            try expectNil(seekTarget(seconds: 2, windowStart: 8, windowEnd: 2))
+        }
+        test("KNOWN EDGE CASE — an inverted window can still clamp past its own end when seconds < windowEnd") {
+            // seconds=1 < windowEnd=2 passes the guard, then clamps to windowStart=8 —
+            // a target beyond the (already nonsensical) window's own end. Pinned here
+            // as documentation of current behavior, not an endorsement: an inverted
+            // window shouldn't reach seekTarget in practice (see 2026-09-09 audit).
+            try expectEqual(seekTarget(seconds: 1, windowStart: 8, windowEnd: 2), 8)
+        }
         test("seek at or past the window end is rejected") {
             try expectNil(seekTarget(seconds: 120, windowStart: 60, windowEnd: 120))
             try expectNil(seekTarget(seconds: 500, windowStart: 60, windowEnd: 120))

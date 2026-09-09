@@ -204,4 +204,47 @@ func runRestorationTests() {
             try expectEqual(old.declickOrder, RestorationSettings.defaults.declickOrder)
         }
     }
+
+    // Coverage gap found in the 2026-09-09 audit: appliesByDefault (the actual
+    // engagement decision LocalPlayerSource makes per track) and the
+    // parameter-order arrays (silently corrupting the DSP if ever reordered
+    // relative to TDDeclickParam/TDDehumParam) had zero direct tests.
+    suite("RestorationSettings — appliesByDefault") {
+        test("disabled never applies, regardless of the cortina rule") {
+            var r = RestorationSettings.defaults
+            r.enabled = false
+            r.skipOnCortinas = false
+            try expect(!r.appliesByDefault(isCortina: false))
+            try expect(!r.appliesByDefault(isCortina: true))
+        }
+        test("enabled + skipOnCortinas skips only cortinas") {
+            var r = RestorationSettings.defaults
+            r.enabled = true
+            r.skipOnCortinas = true
+            try expect(r.appliesByDefault(isCortina: false))
+            try expect(!r.appliesByDefault(isCortina: true))
+        }
+        test("enabled without skipOnCortinas applies to everything") {
+            var r = RestorationSettings.defaults
+            r.enabled = true
+            r.skipOnCortinas = false
+            try expect(r.appliesByDefault(isCortina: false))
+            try expect(r.appliesByDefault(isCortina: true))
+        }
+    }
+
+    suite("RestorationSettings — parameter order (must match TDDeclickParam/TDDehumParam)") {
+        test("declickValues is [sensitivity, extent, maxLengthMs, depth, passes, order, dryWet]") {
+            var r = RestorationSettings.defaults
+            r.declickSensitivity = 1; r.declickExtent = 2; r.declickMaxLengthMs = 3
+            r.declickDepth = 4; r.declickPasses = 5; r.declickOrder = 6; r.declickDryWet = 7
+            try expectEqual(r.declickValues, [1, 2, 3, 4, 5, 6, 7])
+        }
+        test("dehumValues is [sensitivity, bandwidth, searchTo, harmonics, frequency, rumbleHz, dryWet]") {
+            var r = RestorationSettings.defaults
+            r.dehumSensitivity = 1; r.dehumBandwidth = 2; r.dehumSearchTo = 3
+            r.dehumHarmonics = 4; r.dehumFrequency = 5; r.dehumRumbleHz = 6; r.dehumDryWet = 7
+            try expectEqual(r.dehumValues, [1, 2, 3, 4, 5, 6, 7])
+        }
+    }
 }
