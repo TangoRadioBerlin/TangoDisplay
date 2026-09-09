@@ -1,7 +1,6 @@
 import Foundation
 import Combine
 import TangoDisplayCore
-import UniformTypeIdentifiers
 
 /// Mediates between the TangoDisplay app state and a `RemoteTransport`.
 ///
@@ -370,21 +369,24 @@ final class RemoteControlBridge: NSObject, ObservableObject {
 
     /// Validates a controller-supplied path: absolute, existing, readable regular file, audio type.
     /// Returns a rejection reason, or nil when the path is acceptable.
-    private func validateLoadPath(_ path: String) -> String? {
-        guard path.hasPrefix("/") else { return RemoteRejectReason.pathNotAllowed }
+    /// Gathers the raw filesystem facts `RemoteLoadPathRules.reason` needs. `nonisolated` and
+    /// static so it touches no actor state — safe to run inside `Task.detached`, which is the
+    /// point: `FileManager` calls against an unreachable network mount can block for the SMB/AFP
+    /// timeout, and this keeps that off the MainActor instead of stalling every other remote
+    /// command (and the whole UI, since this actor is MainActor-bound) for the duration.
+    nonisolated private static func probe(_ path: String) -> RemoteLoadPathRules.FileProbeResult {
         let url = URL(fileURLWithPath: path)
         var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
-            return RemoteRejectReason.fileNotFound
-        }
-        if isDir.boolValue { return RemoteRejectReason.unsupportedType }
-        guard FileManager.default.isReadableFile(atPath: url.path) else {
-            return RemoteRejectReason.unreadable
-        }
-        guard let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .audio) else {
-            return RemoteRejectReason.unsupportedType
-        }
-        return nil
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        let readable = exists && FileManager.default.isReadableFile(atPath: url.path)
+        return RemoteLoadPathRules.FileProbeResult(exists: exists, isDirectory: isDir.boolValue,
+                                                    isReadable: readable)
+    }
+
+    private func validateLoadPath(_ path: String) async -> String? {
+        let probe = await Task.detached(priority: .utility) { Self.probe(path) }.value
+        return RemoteLoadPathRules.reason(for: path, probe: probe,
+                                          supportedExtensions: SetlistDropRules.supportedAudioExtensions)
     }
 
     /// Builds a SetlistEntry from a validated load entry (path already checked). Reads file tags,
@@ -471,12 +473,16 @@ final class RemoteControlBridge: NSObject, ObservableObject {
             sendAck(id: nil, ok: false, reason: RemoteRejectReason.malformed, to: clientID); return
         }
         guard authorizeWrite(id: cmd.id, from: clientID) else { return }
-        // validateLoadPath is pure (no I/O) — fail-fast before spawning the task.
-        if let reason = validateLoadPath(cmd.entry.path) {
-            sendAck(id: cmd.id, ok: false, reason: reason, to: clientID); return
-        }
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // validateLoadPath does real (potentially slow, unreachable-mount) filesystem I/O —
+            // it belongs inside the task like the other awaits here, not as a synchronous
+            // fail-fast before spawning it.
+            if let reason = await self.validateLoadPath(cmd.entry.path) {
+                self.sendAck(id: cmd.id, ok: false, reason: reason, to: clientID); return
+            }
+            // A1: re-assert auth/accept after the await.
+            guard self.authorizeWrite(id: cmd.id, from: clientID) else { return }
             // Build the single entry (one metadata read).
             let entry = await self.buildEntry(from: cmd.entry)
             // A1: re-assert auth/accept after the await.
@@ -540,7 +546,7 @@ final class RemoteControlBridge: NSObject, ObservableObject {
         var resolved: [RemoteAck.Resolved] = []
         var failed: [RemoteAck.Failed] = []
         for le in entries {
-            if let reason = validateLoadPath(le.path) {
+            if let reason = await validateLoadPath(le.path) {
                 failed.append(.init(clientRef: le.clientRef, reason: reason))
                 continue
             }

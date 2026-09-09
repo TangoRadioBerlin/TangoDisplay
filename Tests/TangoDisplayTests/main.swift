@@ -3666,6 +3666,41 @@ func runRemoteLoadLimitsTests() {
             try expect(RemoteLoadLimits.maxSetlistEntries <= 10_000)
         }
     }
+
+    suite("RemoteLoadPathRules — pure decision over pre-fetched filesystem facts") {
+        let ok = RemoteLoadPathRules.FileProbeResult(exists: true, isDirectory: false, isReadable: true)
+        let exts: Set<String> = ["mp3", "wav"]
+
+        test("a relative path is rejected before even looking at the probe") {
+            try expectEqual(RemoteLoadPathRules.reason(for: "song.mp3", probe: ok, supportedExtensions: exts),
+                            RemoteRejectReason.pathNotAllowed)
+        }
+        test("a nonexistent path is reported as not found") {
+            let missing = RemoteLoadPathRules.FileProbeResult(exists: false, isDirectory: false, isReadable: false)
+            try expectEqual(RemoteLoadPathRules.reason(for: "/a/song.mp3", probe: missing, supportedExtensions: exts),
+                            RemoteRejectReason.fileNotFound)
+        }
+        test("a directory is rejected as an unsupported type") {
+            let dir = RemoteLoadPathRules.FileProbeResult(exists: true, isDirectory: true, isReadable: true)
+            try expectEqual(RemoteLoadPathRules.reason(for: "/a/dir", probe: dir, supportedExtensions: exts),
+                            RemoteRejectReason.unsupportedType)
+        }
+        test("an unreadable file is reported as unreadable") {
+            let unreadable = RemoteLoadPathRules.FileProbeResult(exists: true, isDirectory: false, isReadable: false)
+            try expectEqual(RemoteLoadPathRules.reason(for: "/a/song.mp3", probe: unreadable, supportedExtensions: exts),
+                            RemoteRejectReason.unreadable)
+        }
+        test("an unsupported extension is rejected even though the file exists and is readable") {
+            try expectEqual(RemoteLoadPathRules.reason(for: "/a/song.txt", probe: ok, supportedExtensions: exts),
+                            RemoteRejectReason.unsupportedType)
+        }
+        test("extension matching is case-insensitive") {
+            try expectNil(RemoteLoadPathRules.reason(for: "/a/song.MP3", probe: ok, supportedExtensions: exts))
+        }
+        test("a valid absolute path to a readable supported file is accepted") {
+            try expectNil(RemoteLoadPathRules.reason(for: "/a/song.mp3", probe: ok, supportedExtensions: exts))
+        }
+    }
 }
 
 // MARK: - SetlistDropRules tests
