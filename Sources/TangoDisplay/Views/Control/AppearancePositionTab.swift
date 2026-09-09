@@ -118,8 +118,10 @@ struct AppearancePositionTab: View {
                     return
                 }
                 var set = working.genreBackgrounds[idx].positions ?? PositionSet()
-                set.artwork = newValue
-                working.genreBackgrounds[idx].positions = set
+                // Remove the entry when the value has been returned to the dance-scene base —
+                // it carries no information and keeps sceneHasOverride true incorrectly (B6).
+                set.artwork = (newValue == working.currentArtworkPlacement()) ? nil : newValue
+                working.genreBackgrounds[idx].positions = set.hasContent ? set : nil
             }
         )
     }
@@ -290,7 +292,7 @@ struct AppearancePositionTab: View {
                     .tag(PreviewScene.genre(entry.genreKey))
             }
             let cortinaSet = working.genreBackgrounds.first { $0.isCortinaEntry }?.positions
-            Text(appState.settings.cortinaLabel + (cortinaSet != nil ? "  ✓" : ""))
+            Text(appState.settings.cortinaLabel + (cortinaSet?.hasContent == true ? "  ✓" : ""))
                 .tag(PreviewScene.cortina)
         }
         .pickerStyle(.menu)
