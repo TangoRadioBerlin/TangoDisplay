@@ -4237,6 +4237,29 @@ func runRepeatTrackRulesTests() {
             try expect(!SetlistOrderRules.shouldRepeat(repeatTrack: false, shouldStop: false))
         }
     }
+
+    suite("SetlistOrderRules — shouldStopAfter consolidates the stop-after formula") {
+        test("neither condition → no stop") {
+            try expect(!SetlistOrderRules.shouldStopAfter(
+                isStopAfterTarget: false, isPerformance: false, stopAfterEachPerformanceTrack: false))
+        }
+        test("explicit one-shot stop-after target always stops") {
+            try expect(SetlistOrderRules.shouldStopAfter(
+                isStopAfterTarget: true, isPerformance: false, stopAfterEachPerformanceTrack: false))
+            try expect(SetlistOrderRules.shouldStopAfter(
+                isStopAfterTarget: true, isPerformance: true, stopAfterEachPerformanceTrack: false))
+        }
+        test("performance track stops only when the global rule is on") {
+            try expect(!SetlistOrderRules.shouldStopAfter(
+                isStopAfterTarget: false, isPerformance: true, stopAfterEachPerformanceTrack: false))
+            try expect(SetlistOrderRules.shouldStopAfter(
+                isStopAfterTarget: false, isPerformance: true, stopAfterEachPerformanceTrack: true))
+        }
+        test("global rule alone does nothing to a non-performance track") {
+            try expect(!SetlistOrderRules.shouldStopAfter(
+                isStopAfterTarget: false, isPerformance: false, stopAfterEachPerformanceTrack: true))
+        }
+    }
 }
 
 // MARK: - Playback window (user trim × force-trim)

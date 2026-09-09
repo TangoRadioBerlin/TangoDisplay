@@ -277,6 +277,7 @@ struct SetlistView: View {
     @State private var showPluginChainPopover = false
     @State private var scrollTrigger: UUID? = nil
     @State private var pendingRepeatID: UUID? = nil   // repeat requested on a stop-after track → confirm switch
+    @State private var showRepeatBlockedByPerformance = false   // repeat requested on a track the global performance-stop rule will stop anyway
     @Environment(\.openWindow) private var openWindow
     @State private var showLastTandaWarning = false
     @State private var pasteMonitor: Any? = nil
@@ -639,10 +640,13 @@ struct SetlistView: View {
     @ViewBuilder
     private func rowView(for entry: SetlistEntry, wouldSkipAutoGap: Bool) -> some View {
         let detector = settings.makeDetector()
+        let isStopAfter: Bool = SetlistOrderRules.shouldStopAfter(
+            isStopAfterTarget: entry.id == setlist.stopAfterEntryID,
+            isPerformance: entry.isPerformance,
+            stopAfterEachPerformanceTrack: settings.stopAfterEachPerformanceTrack)
         SetlistRowView(
             entry: entry,
-            isStopAfter: entry.id == setlist.stopAfterEntryID
-                      || (entry.isPerformance && settings.stopAfterEachPerformanceTrack),
+            isStopAfter: isStopAfter,
             isActivelyPlaying: activeEntryID == entry.id && isPlayerActive,
             isNextToPlay: entry.id == nextToPlayID,
             showYear: settings.showYear,
@@ -903,17 +907,9 @@ struct SetlistView: View {
         } message: {
             Text("Set the Last Tanda label text in Appearance Settings before marking a Last Tanda.")
         }
-        .alert("Track Set to Stop after Playing",
-               isPresented: Binding(get: { pendingRepeatID != nil },
-                                    set: { if !$0 { pendingRepeatID = nil } })) {
-            Button("Repeat Instead") {
-                if let id = pendingRepeatID { setlist.setRepeat(true, for: id) }
-                pendingRepeatID = nil
-            }
-            Button("Cancel", role: .cancel) { pendingRepeatID = nil }
-        } message: {
-            Text("This track is marked Stop after Playing. Remove that and repeat it instead?")
-        }
+        .modifier(RepeatConflictAlerts(pendingRepeatID: $pendingRepeatID,
+                                       showRepeatBlockedByPerformance: $showRepeatBlockedByPerformance,
+                                       setlist: setlist))
     }
 
     private var deleteConfirmationTitle: String {
@@ -955,6 +951,15 @@ struct SetlistView: View {
                 Button(e.repeatTrack ? "Stop Repeating" : "Repeat Track") {
                     if !e.repeatTrack && setlist.stopAfterEntryID == id {
                         pendingRepeatID = id
+                    } else if !e.repeatTrack
+                                && SetlistOrderRules.shouldStopAfter(
+                                    isStopAfterTarget: false,
+                                    isPerformance: e.isPerformance,
+                                    stopAfterEachPerformanceTrack: settings.stopAfterEachPerformanceTrack) {
+                        // No per-track override exists for this — the global rule would stop
+                        // playback right after this track anyway, so a repeat here would never
+                        // actually fire. Explain instead of silently offering a no-op.
+                        showRepeatBlockedByPerformance = true
                     } else {
                         setlist.setRepeat(!e.repeatTrack, for: id)
                     }
@@ -1273,6 +1278,36 @@ struct SetlistView: View {
         .background(.ultraThinMaterial)
         .clipShape(Capsule())
         .padding(.bottom, 8)
+    }
+}
+
+// MARK: - Repeat-conflict alerts (factored out of `trackList` — folding these two `.alert`s
+// directly into that already very long modifier chain pushed the type-checker over its
+// time budget; a single `.modifier(...)` call keeps the chain short).
+
+private struct RepeatConflictAlerts: ViewModifier {
+    @Binding var pendingRepeatID: UUID?
+    @Binding var showRepeatBlockedByPerformance: Bool
+    let setlist: SetlistManager
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Track Set to Stop after Playing",
+                   isPresented: Binding(get: { pendingRepeatID != nil },
+                                        set: { if !$0 { pendingRepeatID = nil } })) {
+                Button("Repeat Instead") {
+                    if let id = pendingRepeatID { setlist.setRepeat(true, for: id) }
+                    pendingRepeatID = nil
+                }
+                Button("Cancel", role: .cancel) { pendingRepeatID = nil }
+            } message: {
+                Text("This track is marked Stop after Playing. Remove that and repeat it instead?")
+            }
+            .alert("Repeat Won't Play Here", isPresented: $showRepeatBlockedByPerformance) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("\"Stop after each performance track\" is on for this setlist, so playback stops right after this track finishes — Repeat would never get a chance to fire.")
+            }
     }
 }
 

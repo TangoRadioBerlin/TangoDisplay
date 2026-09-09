@@ -81,4 +81,14 @@ public enum SetlistOrderRules {
     public static func shouldRepeat(repeatTrack: Bool, shouldStop: Bool) -> Bool {
         repeatTrack && !shouldStop
     }
+
+    /// Whether playback stops after this entry: an explicit one-shot stop-after target,
+    /// or a performance track when the global "stop after each performance" rule is on.
+    /// The single source of truth for this formula — it previously existed twice
+    /// (`LocalPlayerSource.shouldStopAfter` and a UI badge in `SetlistView`), risking
+    /// silent divergence between what actually stops playback and what the UI shows.
+    public static func shouldStopAfter(isStopAfterTarget: Bool, isPerformance: Bool,
+                                       stopAfterEachPerformanceTrack: Bool) -> Bool {
+        isStopAfterTarget || (isPerformance && stopAfterEachPerformanceTrack)
+    }
 }

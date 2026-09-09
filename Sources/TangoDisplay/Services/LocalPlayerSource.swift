@@ -898,8 +898,10 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     /// stop-after-each-performance setting is on. Shared by both skip paths.
     private func shouldStopAfter(_ id: UUID) -> Bool {
         let isPerformance = setlist.entries.first(where: { $0.id == id })?.isPerformance == true
-        return id == setlist.stopAfterEntryID
-            || (isPerformance && settings.stopAfterEachPerformanceTrack)
+        return SetlistOrderRules.shouldStopAfter(
+            isStopAfterTarget: id == setlist.stopAfterEntryID,
+            isPerformance: isPerformance,
+            stopAfterEachPerformanceTrack: settings.stopAfterEachPerformanceTrack)
     }
 
     func skipNext() {
