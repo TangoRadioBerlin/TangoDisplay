@@ -539,12 +539,18 @@ struct SetlistView: View {
                                musicIDs: resolution.musicIDs)
         }
 
-        if let msg = SetlistDropRules.dropFeedbackMessage(added: toInsert.count,
-                                                          skippedDuplicates: skippedDuplicates,
-                                                          missing: missingCount,
-                                                          unreadable: resolution.unreadable,
-                                                          unsupported: unsupportedCount) {
-            showDropFeedback(msg, seconds: resolution.unreadable > 0 ? 6 : 3)
+        var msg = SetlistDropRules.dropFeedbackMessage(added: toInsert.count,
+                                                       skippedDuplicates: skippedDuplicates,
+                                                       missing: missingCount,
+                                                       unreadable: resolution.unreadable,
+                                                       unsupported: unsupportedCount)
+        if resolution.branch == .musicSelection, !toInsert.isEmpty {
+            // The resolver had to guess from Music's highlighted rows — say so,
+            // because those may not be the rows that were dragged.
+            msg = "Added \(toInsert.count) from Music's current selection" + (msg.map { " — \($0)" } ?? "")
+        }
+        if let msg {
+            showDropFeedback(msg, seconds: resolution.unreadable > 0 || resolution.branch == .musicSelection ? 6 : 3)
         }
     }
 
@@ -1228,7 +1234,8 @@ struct SetlistView: View {
                log: dropLog, type: .default, providers.count, liveItems, drag.changeCount)
         let result: DropResolutionResult? = liveItems > 0
             ? DropPasteboardResolver.resolve(drag, draggingInfo: nil,
-                                             diagEnabled: settings.diagnosticLoggingEnabled)
+                                             diagEnabled: settings.diagnosticLoggingEnabled,
+                                             allowMusicSelection: false)
             : nil
         // Music's metadata plist may sit only on the ROOT pasteboard while the
         // items carry just the playlist name — and the drag pasteboard must be

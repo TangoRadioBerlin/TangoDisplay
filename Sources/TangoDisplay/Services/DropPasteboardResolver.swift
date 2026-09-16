@@ -87,9 +87,13 @@ enum DropPasteboardResolver {
     /// Synchronous; MUST run inside the drop callout. `draggingInfo == nil`
     /// (row drops, paste) disables legacy materialisation — the destination
     /// URL of `namesOfPromisedFilesDropped` is bound to the dragging info.
+    /// `allowMusicSelection` permits the AppleScript current-selection guess
+    /// (branch 5) as the very last resort; row drops pass `false` because the
+    /// SwiftUI providers already carry the real payload there.
     static func resolve(_ pasteboard: NSPasteboard,
                         draggingInfo: NSDraggingInfo?,
-                        diagEnabled: Bool) -> DropResolutionResult {
+                        diagEnabled: Bool,
+                        allowMusicSelection: Bool = true) -> DropResolutionResult {
         let items = pasteboard.pasteboardItems ?? []
         let types = itemTypes(of: pasteboard)
         let union = types.reduce(into: Set<String>()) { $0.formUnion($1) }
@@ -181,8 +185,13 @@ enum DropPasteboardResolver {
         // 5. AppleScript selection fallback — com.apple.itunes.drag only.
         // Deferred off-main: NSAppleScript.executeAndReturnError is a blocking
         // cross-process call and must not run inside the live drag-tracking loop.
-        // Reads Music's CURRENT selection, so it is the last resort only.
-        if union.contains(DropPasteboardType.itunesDrag) {
+        // Reads Music's CURRENT selection — which is NOT what was dragged when
+        // the DJ drags an unhighlighted row (Music leaves the highlight where it
+        // was). So: last resort only, never for row drops (the providers are the
+        // payload there), and never when a metadata plist was present — a plist
+        // whose Locations didn't resolve is a real shortfall to report, not a
+        // licence to guess.
+        if allowMusicSelection, musicIDs.isEmpty, union.contains(DropPasteboardType.itunesDrag) {
             base.branch = .musicSelection
             return .deferred(base) { finish in
                 DispatchQueue.global(qos: .userInitiated).async {
