@@ -4585,6 +4585,16 @@ func runDropPayloadClassificationTests() {
             try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.itunesDrag]],
                                                          modernPromiseTypes: modern), .musicSelection)
         }
+        test("current-macOS tv.metadata / legacy 'itun' flavors classify as musicMetadata, never musicSelection") {
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.itunesDrag, T.tvMetadata]],
+                                                         modernPromiseTypes: modern), .musicMetadata)
+            try expectEqual(DropPasteboardRules.classify(itemTypes: [[T.itunesDrag, T.itunMetadata]],
+                                                         modernPromiseTypes: modern), .musicMetadata)
+        }
+        test("every Music metadata flavor is listed once, in the order the resolver tries them") {
+            try expectEqual(DropPasteboardType.musicMetadataFlavors,
+                            [T.tvMetadata, T.itunMetadata, T.musicMetadata])
+        }
         test("plain text or no items → unsupported") {
             try expectEqual(DropPasteboardRules.classify(itemTypes: [["public.utf8-plain-text"]],
                                                          modernPromiseTypes: modern), .unsupported)
@@ -4597,6 +4607,8 @@ func runDropPayloadClassificationTests() {
             try expect(DropPasteboardRules.isMusicAppSource(itemTypes: [[T.fileURL], [T.itunesDrag]]))
             try expect(DropPasteboardRules.isMusicAppSource(itemTypes: [[T.musicMetadata]]))
             try expect(DropPasteboardRules.isMusicAppSource(itemTypes: [[T.musicJRFS, T.legacyPromiseURL]]))
+            try expect(DropPasteboardRules.isMusicAppSource(itemTypes: [[T.tvMetadata]]))
+            try expect(DropPasteboardRules.isMusicAppSource(itemTypes: [[T.itunMetadata]]))
         }
         test("file-url only is not Music.app") {
             try expect(!DropPasteboardRules.isMusicAppSource(itemTypes: [[T.fileURL], [T.fileURL, T.legacyPromiseURL]]))

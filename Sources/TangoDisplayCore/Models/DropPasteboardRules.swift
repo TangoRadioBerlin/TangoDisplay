@@ -18,6 +18,12 @@ public enum DropPasteboardType {
     public static let tvMetadata = "com.apple.tv.metadata"
     /// Same plist under the legacy four-char flavor 'itun'.
     public static let itunMetadata = "CorePasteboardFlavorType 0x6974756E"
+
+    /// Every flavor under which Music has shipped its per-track metadata plist
+    /// (`Persistent ID` + `Location`), newest first. Any of them is enough to
+    /// resolve file URLs — none of them should ever fall through to the
+    /// AppleScript current-selection guess.
+    public static let musicMetadataFlavors = [tvMetadata, itunMetadata, musicMetadata]
 }
 
 /// Which branch of the drop resolver a pasteboard payload takes. Ordered by
@@ -46,7 +52,7 @@ public enum DropPasteboardRules {
         if !union.isDisjoint(with: modernPromiseTypes) { return .modernFilePromise }
         if union.contains(DropPasteboardType.legacyPromiseURL)
             || union.contains(DropPasteboardType.legacyPromiseContents) { return .legacyFilePromise }
-        if union.contains(DropPasteboardType.musicMetadata) { return .musicMetadata }
+        if !union.isDisjoint(with: DropPasteboardType.musicMetadataFlavors) { return .musicMetadata }
         if union.contains(DropPasteboardType.fileURL) { return .fileURL }
         if union.contains(DropPasteboardType.itunesDrag) { return .musicSelection }
         return .unsupported
@@ -57,8 +63,8 @@ public enum DropPasteboardRules {
     public static func isMusicAppSource(itemTypes: [Set<String>]) -> Bool {
         itemTypes.contains { types in
             types.contains(DropPasteboardType.itunesDrag)
-                || types.contains(DropPasteboardType.musicMetadata)
                 || types.contains(DropPasteboardType.musicJRFS)
+                || !types.isDisjoint(with: DropPasteboardType.musicMetadataFlavors)
         }
     }
 

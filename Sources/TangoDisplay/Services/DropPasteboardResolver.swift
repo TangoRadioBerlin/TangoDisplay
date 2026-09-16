@@ -73,7 +73,7 @@ enum DropPasteboardResolver {
     }()
 
     private static let legacyPromiseURLType      = NSPasteboard.PasteboardType(DropPasteboardType.legacyPromiseURL)
-    private static let musicMetadataType         = NSPasteboard.PasteboardType(DropPasteboardType.musicMetadata)
+    private static let musicMetadataFlavorTypes  = DropPasteboardType.musicMetadataFlavors.map { NSPasteboard.PasteboardType($0) }
 
     /// Types of every item on the pasteboard, in item order.
     static func itemTypes(of pasteboard: NSPasteboard) -> [Set<String>] {
@@ -130,10 +130,17 @@ enum DropPasteboardResolver {
                                                       draggingInfo: draggingInfo, diagEnabled: diagEnabled))
         }
 
-        // 3. Legacy plist path — pre-Sequoia purchased AAC.
-        if union.contains(DropPasteboardType.musicMetadata) {
+        // 3. Music metadata plist — every flavor Music has used (com.apple.tv.metadata
+        // on current macOS, 'itun', com.apple.music.metadata), per item and on the
+        // root pasteboard. Lists a `Location` per track, so a drag that carries no
+        // file-url/promise strings still resolves to the DRAGGED files here instead
+        // of falling through to the AppleScript current-selection guess (branch 5).
+        let rootTypes = Set((pasteboard.types ?? []).map(\.rawValue))
+        if !union.isDisjoint(with: DropPasteboardType.musicMetadataFlavors)
+            || !rootTypes.isDisjoint(with: DropPasteboardType.musicMetadataFlavors)
+        {
             if diagEnabled { diagLog.record("drop.branch3.readMusicMetadata") }
-            let (urls, listed) = resolveViaMusicMetadata(items: items)
+            let (urls, listed) = resolveViaMusicMetadata(pasteboard, items: items)
             if !urls.isEmpty {
                 base.branch = .musicMetadata
                 base.urls = urls
@@ -199,8 +206,7 @@ enum DropPasteboardResolver {
     /// legacy 'itun' flavor, or `com.apple.music.metadata`). Try per-item
     /// property lists first, then the root pasteboard data.
     static func musicDragIDs(_ pasteboard: NSPasteboard) -> MusicDragIDs {
-        let flavors = [DropPasteboardType.tvMetadata, DropPasteboardType.itunMetadata,
-                       DropPasteboardType.musicMetadata].map { NSPasteboard.PasteboardType($0) }
+        let flavors = musicMetadataFlavorTypes
         for item in pasteboard.pasteboardItems ?? [] {
             for flavor in flavors {
                 if let plist = item.propertyList(forType: flavor) as? [String: Any] {
@@ -387,17 +393,36 @@ enum DropPasteboardResolver {
 
     // MARK: - Branch 3: Music metadata plist
 
-    /// Returns the on-disk URLs listed in the items' metadata plists plus the
-    /// number of distinct locations listed (for the requested count — a plist
-    /// can list more tracks than there are pasteboard items).
-    private static func resolveViaMusicMetadata(items: [NSPasteboardItem]) -> (urls: [URL], listed: Int) {
+    /// Returns the on-disk URLs listed in the metadata plists plus the number of
+    /// distinct locations listed (for the requested count — a plist can list
+    /// more tracks than there are pasteboard items). Per-item plists first, then
+    /// the root pasteboard data (Music has put the plist in either place).
+    private static func resolveViaMusicMetadata(_ pasteboard: NSPasteboard,
+                                                items: [NSPasteboardItem]) -> (urls: [URL], listed: Int) {
         var listed: [URL] = []
         for item in items {
-            guard let plist = item.propertyList(forType: musicMetadataType) as? [String: Any] else {
-                os_log("plist cast failed for pasteboard item", log: log, type: .error)
-                continue
+            for flavor in musicMetadataFlavorTypes {
+                guard let plist = item.propertyList(forType: flavor) as? [String: Any] else { continue }
+                let locations = DropPasteboardRules.musicMetadataLocations(plist)
+                if !locations.isEmpty {
+                    listed.append(contentsOf: locations)
+                    break
+                }
             }
-            listed.append(contentsOf: DropPasteboardRules.musicMetadataLocations(plist))
+        }
+        if listed.isEmpty {
+            for flavor in musicMetadataFlavorTypes {
+                guard let data = pasteboard.data(forType: flavor),
+                      let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+                else { continue }
+                let locations = DropPasteboardRules.musicMetadataLocations(plist)
+                if !locations.isEmpty {
+                    os_log("music metadata: %d location(s) from root %{public}@", log: log, type: .info,
+                           locations.count, flavor.rawValue)
+                    listed.append(contentsOf: locations)
+                    break
+                }
+            }
         }
         listed = DropPasteboardRules.dedupe(listed)
         // Only accept locations that resolve to a real file; the rest count as
