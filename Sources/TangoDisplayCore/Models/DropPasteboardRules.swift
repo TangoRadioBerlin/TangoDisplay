@@ -116,6 +116,49 @@ public enum DropPasteboardRules {
         return out
     }
 
+    // MARK: - Row drop: providers vs. drag pasteboard
+
+    public struct RowDropMerge: Equatable {
+        public let urls: [URL]
+        public let requested: Int
+        /// The providers settled the drop on their own; whatever the drag
+        /// pasteboard said was discarded (and must not be trusted for IDs either).
+        public let providersAuthoritative: Bool
+    }
+
+    /// Decide what a SwiftUI row drop inserts. The `NSItemProvider`s SwiftUI hands
+    /// to `.onInsert` describe THIS drop; `NSPasteboard(.drag)` is a global that is
+    /// only reliably this drop's payload while the drag session is live — by the
+    /// time `.onInsert` runs it may hold the previous drag's items, or whatever the
+    /// source app wrote after letting go. Reading it as authoritative inserted the
+    /// PREVIOUS drag's tracks whenever it still resolved to files.
+    ///
+    /// - providers all resolved → providers only.
+    /// - providers partially resolved and the pasteboard shares a file with them →
+    ///   same drop, union (fills cloud-only items the provider bridge drops).
+    /// - providers partially resolved and the pasteboard is disjoint → another
+    ///   drag's leftovers, discarded; the shortfall stays visible via `requested`.
+    /// - no provider resolved → the pasteboard reading is all there is.
+    public static func mergeRowDrop(pasteboardURLs: [URL], pasteboardRequested: Int,
+                                    providerURLs: [URL], providerCount: Int) -> RowDropMerge {
+        let providers = dedupe(providerURLs)
+        if providerCount > 0, providers.count >= providerCount {
+            return RowDropMerge(urls: providers, requested: providerCount, providersAuthoritative: true)
+        }
+        let requested = max(pasteboardRequested, providerCount)
+        guard !providers.isEmpty else {
+            return RowDropMerge(urls: dedupe(pasteboardURLs), requested: requested,
+                                providersAuthoritative: false)
+        }
+        let providerKeys = Set(providers.map(\.standardizedFileURL))
+        let sameDrop = pasteboardURLs.contains { providerKeys.contains($0.standardizedFileURL) }
+        guard sameDrop else {
+            return RowDropMerge(urls: providers, requested: requested, providersAuthoritative: true)
+        }
+        return RowDropMerge(urls: dedupe(providers + pasteboardURLs), requested: requested,
+                            providersAuthoritative: false)
+    }
+
     // MARK: - Pasteboard string → file URL
 
     /// Parse a pasteboard string into a local file URL.

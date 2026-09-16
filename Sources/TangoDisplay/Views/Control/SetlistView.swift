@@ -1212,13 +1212,15 @@ struct SetlistView: View {
         return nil
     }
 
-    /// Row-level drop (SwiftUI `.onInsert`). Runs the shared resolver over the
-    /// drag pasteboard synchronously inside the callout (SwiftUI's
-    /// NSItemProvider bridge only sees public.file-url), then falls back to
-    /// the providers for whatever the resolver could not read — union by URL,
-    /// since provider↔item index matching is not reliable. Field note: for
-    /// Music.app drags the drag pasteboard here carries only the playlist
-    /// name, so the providers are the real payload in that case.
+    /// Row-level drop (SwiftUI `.onInsert`). The providers ARE this drop's
+    /// payload. The drag pasteboard is read synchronously inside the callout as
+    /// a supplement only (SwiftUI's NSItemProvider bridge sees just
+    /// public.file-url, so cloud-only Music items and the metadata plist live
+    /// only there) — but it is a global that, by the time `.onInsert` runs, can
+    /// still hold the PREVIOUS drag's items. `DropPasteboardRules.mergeRowDrop`
+    /// decides how far to trust it; it never replaces providers that resolved.
+    /// Field note: for Music.app drags the drag pasteboard here carries only
+    /// the playlist name, so the providers are the whole payload in that case.
     private func handleRowInsert(providers: [NSItemProvider], anchorID: UUID?) {
         let drag = NSPasteboard(name: .drag)
         let liveItems = drag.pasteboardItems?.count ?? 0
@@ -1241,10 +1243,19 @@ struct SetlistView: View {
             } else {
                 r = DropResolution(urls: [], requested: 0, branch: .fileURL, itemTypes: [])
             }
-            if r.unreadable > 0 || r.requested == 0 {
-                let providerURLs = await loadURLs(from: providers)
-                r.merge(providerURLs, requestedAtLeast: providers.count)
-                if r.branch == .unsupported, !providerURLs.isEmpty { r.branch = .fileURL }
+            let providerURLs = await loadURLs(from: providers)
+            let merged = DropPasteboardRules.mergeRowDrop(pasteboardURLs: r.urls,
+                                                          pasteboardRequested: r.requested,
+                                                          providerURLs: providerURLs,
+                                                          providerCount: providers.count)
+            os_log("row drop merge: pasteboard=%d/%d providers=%d/%d → %d urls, providersAuthoritative=%{public}@",
+                   log: dropLog, type: .default,
+                   r.urls.count, r.requested, providerURLs.count, providers.count,
+                   merged.urls.count, String(merged.providersAuthoritative))
+            r.urls = merged.urls
+            r.requested = merged.requested
+            if merged.providersAuthoritative || (r.branch == .unsupported && !providerURLs.isEmpty) {
+                r.branch = .fileURL
             }
             if r.musicIDs.isEmpty, let fallbackIDs { r.musicIDs = fallbackIDs }
             DropPasteboardResolver.logSummary(r, entry: "row")

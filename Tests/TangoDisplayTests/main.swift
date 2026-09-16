@@ -4657,6 +4657,68 @@ func runDropResolutionAccountingTests() {
             try expectEqual(DropPasteboardRules.dedupe([a, a2]).count, 1)
         }
     }
+
+    suite("DropPasteboardRules.mergeRowDrop — SwiftUI providers are this drop's payload") {
+        let a = URL(fileURLWithPath: "/Music/a.mp3")
+        let b = URL(fileURLWithPath: "/Music/b.mp3")
+        let stale1 = URL(fileURLWithPath: "/Music/old1.mp3")
+        let stale2 = URL(fileURLWithPath: "/Music/old2.mp3")
+
+        test("providers that all resolved win outright — a stale drag pasteboard is discarded") {
+            let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [stale1, stale2], pasteboardRequested: 2,
+                                                     providerURLs: [a], providerCount: 1)
+            try expectEqual(m.urls, [a])
+            try expectEqual(m.requested, 1)
+            try expect(m.providersAuthoritative)
+        }
+        test("providers that all resolved win even when the pasteboard resolved the same files") {
+            let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [a, b], pasteboardRequested: 2,
+                                                     providerURLs: [a, b], providerCount: 2)
+            try expectEqual(m.urls, [a, b])
+            try expectEqual(m.requested, 2)
+            try expect(m.providersAuthoritative)
+        }
+        test("partial providers + pasteboard from the SAME drop → union fills the cloud-only gap") {
+            // Pasteboard resolved a and b; only a came through the provider bridge.
+            let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [a, b], pasteboardRequested: 2,
+                                                     providerURLs: [a], providerCount: 2)
+            try expectEqual(m.urls, [a, b])
+            try expectEqual(m.requested, 2)
+            try expect(!m.providersAuthoritative)
+        }
+        test("partial providers + pasteboard from ANOTHER drop (disjoint) → pasteboard discarded") {
+            let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [stale1, stale2], pasteboardRequested: 2,
+                                                     providerURLs: [a], providerCount: 2)
+            try expectEqual(m.urls, [a])
+            try expectEqual(m.requested, 2)   // the shortfall stays visible: 1 of 2
+            try expect(m.providersAuthoritative)
+        }
+        test("no provider resolved anything → pasteboard result is all we have") {
+            let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [a, b], pasteboardRequested: 2,
+                                                     providerURLs: [], providerCount: 2)
+            try expectEqual(m.urls, [a, b])
+            try expectEqual(m.requested, 2)
+            try expect(!m.providersAuthoritative)
+        }
+        test("no providers at all → pasteboard result, requested kept") {
+            let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [a], pasteboardRequested: 3,
+                                                     providerURLs: [], providerCount: 0)
+            try expectEqual(m.urls, [a])
+            try expectEqual(m.requested, 3)
+            try expect(!m.providersAuthoritative)
+        }
+        test("nothing anywhere → empty, requested is the larger advertised count") {
+            let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [], pasteboardRequested: 1,
+                                                     providerURLs: [], providerCount: 2)
+            try expectEqual(m.urls, [])
+            try expectEqual(m.requested, 2)
+        }
+        test("union is de-duplicated and provider order comes first") {
+            let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [b, a], pasteboardRequested: 2,
+                                                     providerURLs: [a], providerCount: 2)
+            try expectEqual(m.urls, [a, b])
+        }
+    }
 }
 
 // MARK: - Drop feedback with unreadable / unsupported counts (Core)

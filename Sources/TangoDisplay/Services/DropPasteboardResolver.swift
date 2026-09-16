@@ -35,12 +35,6 @@ struct DropResolution {
 
     /// Items that did not yield a file URL.
     var unreadable: Int { max(0, requested - urls.count) }
-
-    /// Union in URLs from a second source (e.g. NSItemProvider fallback).
-    mutating func merge(_ extra: [URL], requestedAtLeast: Int) {
-        urls = DropPasteboardRules.dedupe(urls + extra)
-        requested = max(requested, requestedAtLeast)
-    }
 }
 
 enum DropResolutionResult {
