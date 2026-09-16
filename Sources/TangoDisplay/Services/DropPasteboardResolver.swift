@@ -244,15 +244,19 @@ enum DropPasteboardResolver {
 
     // MARK: - Persisted summary
 
-    /// One `.default`-level line per drop — persisted by the unified log, so an
-    /// incident can be reconstructed afterwards without the diagnostics toggle:
+    /// One `.default`-level line per drop in the unified log:
     ///   log show --predicate 'subsystem == "com.tangodisplay" AND category == "musicdrop"' --last 1d
-    /// Counts and type identifiers only; never file paths.
+    /// plus the same line in `DropJournal` (Application Support/TangoDisplay/drop-log.txt),
+    /// because the unified log does not persist these on every Mac. Counts and
+    /// type identifiers only; never file paths.
     static func logSummary(_ r: DropResolution, entry: String) {
+        let types = DropPasteboardRules.typeSummary(itemTypes: r.itemTypes)
         os_log("drop entry=%{public}@ branch=%{public}@ requested=%d resolved=%d unreadable=%d musicIDs=%d types=%{public}@",
                log: log, type: .default,
-               entry, r.branch.rawValue, r.requested, r.urls.count, r.unreadable, r.musicIDs.count,
-               DropPasteboardRules.typeSummary(itemTypes: r.itemTypes))
+               entry, r.branch.rawValue, r.requested, r.urls.count, r.unreadable, r.musicIDs.count, types)
+        DropJournal.append(entry: entry, branch: r.branch.rawValue, requested: r.requested,
+                           resolved: r.urls.count, unreadable: r.unreadable, musicIDs: r.musicIDs.count,
+                           types: types)
         if r.unreadable > 0 {
             os_log("drop shortfall entry=%{public}@ branch=%{public}@ %d of %d items unreadable; types=%{public}@",
                    log: log, type: .error,

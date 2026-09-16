@@ -55,11 +55,13 @@ Every drop that adds fewer tracks than you dragged says so in a short note at th
 - **N already in set** — duplicates skipped by your session choice (see below).
 - **N files not found** / **N unsupported file types** — missing on disk, or not an audio format the player accepts (mp3, m4a, aiff/aif, wav, flac, caf, opus).
 
-For troubleshooting, each drop also leaves one line in the macOS unified log (counts and pasteboard types only, never file paths):
+For troubleshooting, each drop also leaves one line (counts and pasteboard types only, never file paths) in `~/Library/Application Support/TangoDisplay/drop-log.txt` — kept to a few hundred KB, oldest lines dropped first — and in the macOS unified log:
 
 ```
 log show --last 1d --predicate 'subsystem == "com.tangodisplay" AND category == "musicdrop"'
 ```
+
+If a drop ever added tracks you did not drag, that file shows which path the drop took (`branch=`) and whether the row's own payload or a fallback was used.
 
 #### Duplicate Track Protection
 

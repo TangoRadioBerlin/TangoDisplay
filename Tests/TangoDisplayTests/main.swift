@@ -3419,6 +3419,7 @@ runSetlistDropRulesTests()
 runAppearanceProfileResolutionTests()
 runMainThreadStallDetectorTests()
 runDropPasteboardRulesTests()
+runDropJournalRulesTests()
 runPlaylistIndexClampTests()
 runGenreListCodecTests()
 runMissingFileDropTests()
@@ -4729,6 +4730,40 @@ func runDropResolutionAccountingTests() {
             let m = DropPasteboardRules.mergeRowDrop(pasteboardURLs: [b, a], pasteboardRequested: 2,
                                                      providerURLs: [a], providerCount: 2)
             try expectEqual(m.urls, [a, b])
+        }
+    }
+}
+
+// MARK: - Drop journal (Core)
+
+func runDropJournalRulesTests() {
+    suite("DropJournalRules — on-disk drop journal") {
+        test("line carries timestamp, entry point and the counts, never paths") {
+            let line = DropJournalRules.line(timestamp: "2026-09-13T15:02:11Z", entry: "row", branch: "fileURL",
+                                             requested: 3, resolved: 2, unreadable: 1, musicIDs: 3,
+                                             types: "2x[public.file-url] 1x[com.apple.itunes.drag]")
+            try expectEqual(line, "2026-09-13T15:02:11Z entry=row branch=fileURL requested=3 resolved=2 unreadable=1 musicIDs=3 types=2x[public.file-url] 1x[com.apple.itunes.drag]")
+            try expect(!line.contains("\n"))
+        }
+        test("a journal under the cap is returned unchanged") {
+            let text = "a\nb\nc\n"
+            try expectEqual(DropJournalRules.trimmedToTail(text, maxBytes: 100), text)
+        }
+        test("an oversized journal is cut to whole lines from the front, about half the cap, newest kept") {
+            let lines = (1...100).map { "line \($0) xxxxxxxxxxxxxxxxxxxx" }
+            let text = lines.joined(separator: "\n") + "\n"
+            let trimmed = DropJournalRules.trimmedToTail(text, maxBytes: 1000)
+            try expect(trimmed.utf8.count <= 1000)
+            try expect(trimmed.utf8.count >= 400)
+            try expect(trimmed.hasPrefix("line "))            // starts at a line boundary
+            try expect(trimmed.hasSuffix("line 100 xxxxxxxxxxxxxxxxxxxx\n"))
+            try expect(!trimmed.contains("line 1 x"))
+        }
+        test("a single line longer than the cap collapses to that line's tail") {
+            let text = String(repeating: "x", count: 50) + "\n"
+            let trimmed = DropJournalRules.trimmedToTail(text, maxBytes: 20)
+            try expect(trimmed.utf8.count <= 20)
+            try expect(trimmed.hasSuffix("\n"))
         }
     }
 }
