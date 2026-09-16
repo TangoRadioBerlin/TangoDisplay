@@ -5030,6 +5030,16 @@ func runMusicDragIDsTests() {
         test("miss returns nil — no trim import for non-Music drops") {
             try expectNil(ids.persistentID(for: URL(fileURLWithPath: "/Users/dj/Other/Milonga.mp3")))
         }
+        test("exactPathsOnly keeps exact hits but refuses the filename guess (stale-plist safety)") {
+            // Row drops never materialise promise copies, and the drag pasteboard they
+            // read may belong to an earlier drag — a basename match there could pin a
+            // different track's ID (and start/stop times) onto the dropped file.
+            let strict = ids.exactPathsOnly()
+            try expectEqual(strict.persistentID(for: URL(fileURLWithPath: "/Users/dj/Music/Music/iTunes/iTunes Media/Music/Canaro/Poema.m4a")),
+                            "76DD4E72A603757F")
+            try expectNil(strict.persistentID(for: URL(fileURLWithPath: "/Users/dj/Library/Application Support/TangoDisplay/MusicAppDrops/Poema.m4a")))
+            try expectEqual(strict.count, ids.count)
+        }
         test("bare {id: track} plist shape is also accepted") {
             let bare = MusicDragIDs(musicMetadataPlist: [
                 "99": ["Location": "file:///tmp/x.m4a", "Persistent ID": "0123456789ABCDEF"],

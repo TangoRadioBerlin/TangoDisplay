@@ -1265,6 +1265,9 @@ struct SetlistView: View {
                 r.branch = .fileURL
             }
             if r.musicIDs.isEmpty, let fallbackIDs { r.musicIDs = fallbackIDs }
+            // No promise copies on this path, and the plist may be another drag's:
+            // exact path hits only, never the basename guess.
+            r.musicIDs = r.musicIDs.exactPathsOnly()
             DropPasteboardResolver.logSummary(r, entry: "row")
             await handleIncomingDrop(r, anchorID: anchorID)
         }

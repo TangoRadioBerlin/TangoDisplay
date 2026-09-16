@@ -100,4 +100,15 @@ public struct MusicDragIDs {
         let path = MusicDragIDs.key(url.path)
         return byPath[path] ?? byName[(path as NSString).lastPathComponent]
     }
+
+    /// The same IDs without the filename fallback. The fallback exists for
+    /// materialised promise copies (different path, same basename), which only
+    /// window-level drops produce; a row drop reads a drag pasteboard that may
+    /// belong to an earlier drag, where a basename match would pin another
+    /// track's ID onto the dropped file. An exact path hit is correct either way.
+    public func exactPathsOnly() -> MusicDragIDs {
+        var copy = self
+        copy.byName = [:]
+        return copy
+    }
 }
