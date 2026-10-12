@@ -173,10 +173,19 @@ Right-click any row:
 | **Ignore Auto-gap before this Track** | Disables auto-gap for this track only. Shows as **Resume Auto-gap** when already set; click again to re-enable it. |
 | **Skip Auto-fade** | Disables auto-fade for this cortina track only, re-enabling the Fade & Stop and Fade & Continue buttons for manual control. Available only when Auto-fade is enabled and fading has not yet started. |
 | **Mark as Last Tanda** | Marks this cortina as the last tanda. TangoDisplay will automatically activate the Last Tanda label when this cortina starts and deactivate it when the next cortina begins. A red flag appears on the row. Shows as **Remove Last Tanda** when already set. Available only on cortina tracks. Requires Last Tanda label text to be configured in Appearance Settings. |
+| **Reload Track Info** | Re-reads the artist, title, genre, year and other tags from the file. Use it when a row shows a filename instead of proper track details — see [Tracks Showing Filenames](#tracks-showing-filenames) below. Select several rows first and the action becomes **Reload Track Info for Selection**. |
 
 > **Screenshot placeholder:** right-click context menu on a setlist row
 
 **Bulk mark:** ⌘-click or Shift-click to select multiple rows, then right-click to apply **Mark as Played** or **Mark as Not Played** to all selected tracks at once. When two or more tracks are selected, the status bar at the bottom of the setlist shows the number of selected tracks and their combined duration.
+
+### Tracks Showing Filenames
+
+TangoDisplay reads a track's tags from the file at the moment you drop it into the setlist. If the file is on an external drive that is asleep, or on a slow or network volume, that read can come back empty — the row then keeps the filename as its title and shows no artist or genre, both in the setlist and on the dancer display.
+
+Right-click the affected rows and choose **Reload Track Info** to read the tags again. Rows that never got a successful read are also retried automatically each time TangoDisplay launches.
+
+> **Worth knowing:** a track with no genre is treated as a cortina under the deny-list rule, because an empty genre is not in your list of dance genres. A failed tag read can therefore throw off tanda counting and the "Coming Up" preview until you reload the track info. Waking an external drive before you build the setlist avoids the problem entirely.
 
 ### Stop After Playing
 

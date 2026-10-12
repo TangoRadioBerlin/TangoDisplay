@@ -1011,6 +1011,10 @@ struct SetlistView: View {
                 }
             }
         }
+        Divider()
+        Button(targets.count == 1 ? "Reload Track Info" : "Reload Track Info for Selection") {
+            setlist.reloadMetadata(ids: Array(targets))
+        }
         // Last Tanda: single cortina entry not yet fully played
         if targets.count == 1, let id = targets.first,
            let e = setlist.entries.first(where: { $0.id == id }),
