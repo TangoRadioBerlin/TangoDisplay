@@ -73,6 +73,87 @@ func test(_ name: String, body: () throws -> Void) {
 
 // MARK: - CortinaDetector tests
 
+// MARK: - GenreMatching (Core) — the one genre-keyword matcher behind cortina rules,
+// scene resolution, label overrides and plugin rules
+
+func runGenreMatchingTests() {
+    suite("GenreMatching.normalized") {
+        test("lowercases, trims and folds diacritics") {
+            try expectEqual(GenreMatching.normalized("  Milongón "), "milongon")
+            try expectEqual(GenreMatching.normalized("VALS Criollo"), "vals criollo")
+        }
+    }
+
+    suite("GenreMatching.contains — the key only has to appear somewhere in the genre") {
+        test("exact, spaced, hyphenated, colon- and slash-joined forms all match") {
+            try expect(GenreMatching.contains(genre: "Vals", key: "Vals"))
+            try expect(GenreMatching.contains(genre: "Tango Vals", key: "vals"))
+            try expect(GenreMatching.contains(genre: "Tango-Vals", key: "Vals"))
+            try expect(GenreMatching.contains(genre: "Tango: Vals", key: "Vals"))
+            try expect(GenreMatching.contains(genre: "Vals/Tango", key: "Vals"))
+            try expect(GenreMatching.contains(genre: "Milonga Candombe", key: "Milonga"))
+        }
+        test("no word boundary required — 'Valses', 'Tangoed' contain the key") {
+            try expect(GenreMatching.contains(genre: "Valses", key: "Vals"))
+            try expect(GenreMatching.contains(genre: "Tangoed", key: "Tango"))
+        }
+        test("diacritics on either side are ignored") {
+            try expect(GenreMatching.contains(genre: "Váls Criollo", key: "Vals"))
+            try expect(GenreMatching.contains(genre: "Vals Criollo", key: "Váls"))
+        }
+        test("Milongón / Milongon count as Milonga via the built-in alias") {
+            try expect(GenreMatching.contains(genre: "Milongón", key: "Milonga"))
+            try expect(GenreMatching.contains(genre: "MILONGON", key: "milonga"))
+            try expect(GenreMatching.contains(genre: "Tango Milongón", key: "Milonga"))
+        }
+        test("unrelated or empty genre does not match; empty key never matches") {
+            try expect(!GenreMatching.contains(genre: "Pop", key: "Vals"))
+            try expect(!GenreMatching.contains(genre: "", key: "Vals"))
+            try expect(!GenreMatching.contains(genre: "Vals", key: ""))
+            try expect(!GenreMatching.contains(genre: "Vals", key: "   "))
+        }
+    }
+
+    suite("GenreMatching.bestMatch — exact first, then the rightmost containment hit") {
+        let keys = ["Tango", "Vals", "Milonga"]
+        let partial: Set<String> = ["Tango", "Vals", "Milonga"]
+        test("exact match wins and returns the key as listed") {
+            try expectEqual(GenreMatching.bestMatch(genre: "vals", keys: keys, partialKeys: partial), "Vals")
+            try expectEqual(GenreMatching.bestMatch(genre: " MILONGA ", keys: keys, partialKeys: partial), "Milonga")
+        }
+        test("'Tango Vals' / 'Tango Milonga' / 'Tango-Vals' resolve to the rightmost key") {
+            try expectEqual(GenreMatching.bestMatch(genre: "Tango Vals", keys: keys, partialKeys: partial), "Vals")
+            try expectEqual(GenreMatching.bestMatch(genre: "Tango: Milonga", keys: keys, partialKeys: partial), "Milonga")
+            try expectEqual(GenreMatching.bestMatch(genre: "Tango-Vals", keys: keys, partialKeys: partial), "Vals")
+        }
+        test("single containment hit resolves regardless of position") {
+            try expectEqual(GenreMatching.bestMatch(genre: "Vals Criollo", keys: keys, partialKeys: partial), "Vals")
+            try expectEqual(GenreMatching.bestMatch(genre: "Milonga Candombe", keys: keys, partialKeys: partial), "Milonga")
+            try expectEqual(GenreMatching.bestMatch(genre: "Argentine Tango", keys: keys, partialKeys: partial), "Tango")
+        }
+        test("rightmost is a position rule, not a priority list — 'Milonga Tango' is Tango") {
+            try expectEqual(GenreMatching.bestMatch(genre: "Milonga Tango", keys: keys, partialKeys: partial), "Tango")
+        }
+        test("alias hit positions like the real word — 'Tango Milongón' is Milonga") {
+            try expectEqual(GenreMatching.bestMatch(genre: "Tango Milongón", keys: keys, partialKeys: partial), "Milonga")
+            try expectEqual(GenreMatching.bestMatch(genre: "Milongón", keys: keys, partialKeys: partial), "Milonga")
+        }
+        test("keys outside the partial set only match exactly") {
+            try expectEqual(GenreMatching.bestMatch(genre: "Tango Vals", keys: keys, partialKeys: ["Tango"]), "Tango")
+            try expectNil(GenreMatching.bestMatch(genre: "Vals Criollo", keys: keys, partialKeys: []))
+            try expectEqual(GenreMatching.bestMatch(genre: "Vals", keys: keys, partialKeys: []), "Vals")
+        }
+        test("partial-set membership is matched case-insensitively against the keys") {
+            try expectEqual(GenreMatching.bestMatch(genre: "Tango Vals", keys: keys, partialKeys: ["vals"]), "Vals")
+        }
+        test("empty genre, no keys, or no hit → nil") {
+            try expectNil(GenreMatching.bestMatch(genre: "", keys: keys, partialKeys: partial))
+            try expectNil(GenreMatching.bestMatch(genre: "Pop", keys: keys, partialKeys: partial))
+            try expectNil(GenreMatching.bestMatch(genre: "Vals", keys: [], partialKeys: partial))
+        }
+    }
+}
+
 func runCortinaDetectorTests() {
     suite("CortinaDetector — Allowlist only") {
         test("matching genre is cortina") {
@@ -3373,6 +3454,7 @@ func runSetTimingsCalculatorTests() {
 runSetTimingsCalculatorTests()
 runSetlistOrderRulesTests()
 runAutoGapTests()
+runGenreMatchingTests()
 runCortinaDetectorTests()
 runTandaTrackerTests()
 runProfileStoreTests()
