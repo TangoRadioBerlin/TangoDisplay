@@ -20,23 +20,22 @@ public struct CortinaDetector {
         self.denylistPartialGenres = denylistPartialGenres
     }
 
-    /// Word-boundary substring match: `g` equals `key`, starts with `key `, or contains ` key`.
-    private static func partialContains(_ set: Set<String>, _ g: String) -> Bool {
-        set.contains { g == $0 || g.hasPrefix($0 + " ") || g.contains(" " + $0) }
+    /// A genre "is" one of `genres`: exactly (or via a built-in alias such as
+    /// Milongón → Milonga), or by containment for keys in `partial` — see `GenreMatching`.
+    private static func matches(_ genre: String, exact genres: Set<String>, partial: Set<String>) -> Bool {
+        genres.contains { GenreMatching.matchesExactly(genre: genre, key: $0) }
+            || partial.contains { GenreMatching.contains(genre: genre, key: $0) }
     }
 
     /// Returns true if the genre indicates this track is a cortina.
     /// Empty genre returns true under denylist rule (not in dance-genres set).
     public func isCortina(genre: String) -> Bool {
-        let g = genre.trimmingCharacters(in: .whitespaces).lowercased()
-        if useAllowlist {
-            if allowlistGenres.contains(g) { return true }
-            if Self.partialContains(allowlistPartialGenres, g) { return true }
+        if useAllowlist, Self.matches(genre, exact: allowlistGenres, partial: allowlistPartialGenres) {
+            return true
         }
-        if useDenylist {
-            let exactMatch = denylistGenres.contains(g) || denylistPartialGenres.contains(g)
-            let partialMatch = denylistPartialGenres.contains { g.hasPrefix($0 + " ") || g.contains(" " + $0) }
-            if !(exactMatch || partialMatch) { return true }
+        if useDenylist, !Self.matches(genre, exact: denylistGenres.union(denylistPartialGenres),
+                                      partial: denylistPartialGenres) {
+            return true
         }
         return false
     }

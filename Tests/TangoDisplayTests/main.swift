@@ -184,13 +184,14 @@ func runCortinaDetectorTests() {
         let d = CortinaDetector(useAllowlist: true, allowlistGenres: ["cortina"],
                                 allowlistPartialGenres: ["cortina"],
                                 useDenylist: false, denylistGenres: [])
-        test("word-boundary partial matches") {
+        test("the key anywhere in the genre matches") {
             try expect(d.isCortina(genre: "Cortina Instrumental"))   // prefix + space
             try expect(d.isCortina(genre: "Alt Cortina"))            // space + suffix
             try expect(d.isCortina(genre: "cortina"))                // exact still works
+            try expect(d.isCortina(genre: "Pop/Cortina"))            // no space needed
         }
-        test("non-word-boundary substring does NOT match") {
-            try expect(!d.isCortina(genre: "Cortinaland"))
+        test("containment needs no word boundary — 'Cortinaland' matches too") {
+            try expect(d.isCortina(genre: "Cortinaland"))
         }
         test("partial off → only exact matches") {
             let exactOnly = CortinaDetector(useAllowlist: true, allowlistGenres: ["cortina"],
@@ -265,9 +266,19 @@ func runCortinaDetectorTests() {
             try expect(!d.isCortina(genre: "tango instrumental"))
             try expect(!d.isCortina(genre: "TANGO VOCALS"))
         }
-        test("no space after term — is cortina") {
-            try expect(d.isCortina(genre: "Tangoed"))
-            try expect(d.isCortina(genre: "Valses"))
+        test("the dance word only has to be contained — hyphen/colon/slash forms, 'Valses', 'Tangoed'") {
+            try expect(!d.isCortina(genre: "Tango-Vals"))
+            try expect(!d.isCortina(genre: "Tango: Milonga"))
+            try expect(!d.isCortina(genre: "Vals/Tango"))
+            try expect(!d.isCortina(genre: "Valses"))
+            try expect(!d.isCortina(genre: "Tangoed"))
+        }
+        test("Milongón / Milongon are Milonga (built-in alias), even without partial match") {
+            try expect(!d.isCortina(genre: "Milongón"))
+            try expect(!d.isCortina(genre: "Tango Milongon"))
+            let noPartial = CortinaDetector(useAllowlist: false, allowlistGenres: [],
+                                            useDenylist: true, denylistGenres: ["tango", "vals", "milonga"])
+            try expect(!noPartial.isCortina(genre: "Milongón"))
         }
         test("unrelated genre — is cortina") {
             try expect(d.isCortina(genre: "Pop"))
