@@ -173,7 +173,7 @@ Priority order: **matching artist background → matching genre background → p
 
 ### Genre Backgrounds
 
-Map specific genres to background images. The list of entries is driven by your **Cortina Rules** — every genre keyword you've added there appears here as a slot, plus one extra **Cortina** slot for when a cortina is playing. When enabled and the playing track's genre matches an entry that has an image set, the matching image is shown.
+Map specific genres to background images. The list of entries is driven by your **Cortina Rules** — every genre keyword you've added there appears here as a slot, plus one extra **Cortina** slot for when a cortina is playing. When enabled and the playing track's genre matches an entry that has an image set, the matching image is shown. Matching follows the Cortina Rules: an entry with **Partial match** on only has to be contained in the tag (`Tango-Vals`, `Vals Criollo`), and when a tag contains several entries the rightmost wins — `Tango Vals` uses the **Vals** scene, not Tango's. `Milongón` counts as `Milonga`.
 
 | Control | Description |
 |---|---|

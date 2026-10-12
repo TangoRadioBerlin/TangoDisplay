@@ -22,7 +22,8 @@ When the **Allowlist rule** toggle is on, a track is classified as a cortina if 
 When the **Denylist rule** toggle is on, a track is classified as a cortina if its genre is **not** in the list of known dance genres.
 
 - Default entries: `Vals`, `Milonga`, `Tango` — all with **Partial match** enabled
-- **Partial match** means "Tango" will also match "Argentine Tango", "Tango Nuevo", etc.
+- **Partial match** means the genre only has to *contain* the entry, anywhere and with any separator: "Vals" matches "Tango Vals", "Vals Criollo", "Tango-Vals" and "Tango: Vals"; "Tango" matches "Argentine Tango" and "Tango Nuevo". Matching ignores case and accents.
+- `Milongón` / `Milongon` always counts as `Milonga` (built-in alias, no entry needed)
 - Tracks with an empty genre field are also treated as cortinas under this rule
 
 ### Both rules active
@@ -40,7 +41,9 @@ When both rules are enabled, a track is a cortina if **either** rule matches.
 **To remove a genre:**
 Click the bin icon to the right of the genre entry.
 
-**Partial match** checkbox (denylist only): when checked, the genre string is matched as a substring rather than an exact match.
+**Partial match** checkbox: when checked, the entry only has to appear somewhere in the genre tag (substring, case- and accent-insensitive) rather than matching it exactly.
+
+When a tag contains several entries — `Tango Vals`, `Tango: Milonga` — the entry that appears **furthest right** wins. That one resolution is shared by everything that asks "which dance is this?": cortina detection, the per-genre scenes in Appearance, the display label below, and per-genre plugin rules.
 
 ---
 
@@ -48,7 +51,7 @@ Click the bin icon to the right of the genre entry.
 
 Each denylist entry has an optional **display label** field. When filled in, the label is shown on the dancer screen instead of the raw genre tag.
 
-This is useful when your library uses compound genre tags like `Tango: Vals` or `Tango: Milonga` for correct organisation, but you want a cleaner label — just `Vals` or `Milonga` — displayed to dancers.
+This is useful when your library uses compound genre tags like `Tango: Vals` or `Tango: Milonga` for correct organisation, but you want a cleaner label — just `Vals` or `Milonga` — displayed to dancers. With **Partial match** on, `Tango: Vals` resolves to the `Vals` entry (the rightmost match), so its label is the one shown.
 
 **Example:**
 
