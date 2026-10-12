@@ -607,23 +607,16 @@ final class AppSettings: ObservableObject {
                               default: def)
     }
 
+    /// The dancer-facing label for a genre tag: the matching denylist entry's override, if any.
+    /// Resolution is GenreMatching.bestMatch — exact first, then the rightmost contained key
+    /// with partial match on — so "Tango Vals" shows the Vals label, not Tango's.
     func displayLabel(for genre: String) -> String {
         let trimmed = genre.trimmingCharacters(in: .whitespaces)
-        let lower = trimmed.lowercased()
-
-        // Exact case-insensitive match
-        if let match = denylistGenres.first(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }),
-           let override = denylistLabelOverrides[match], !override.isEmpty {
-            return override
-        }
-
-        // Partial (prefix) match — mirrors CortinaDetector's hasPrefix($0 + " ") logic
-        if let match = denylistPartialMatchGenres.first(where: { lower.hasPrefix($0.lowercased() + " ") }),
-           let override = denylistLabelOverrides[match], !override.isEmpty {
-            return override
-        }
-
-        return trimmed
+        guard let match = GenreMatching.bestMatch(genre: trimmed, keys: denylistGenres,
+                                                  partialKeys: denylistPartialMatchGenres),
+              let override = denylistLabelOverrides[match], !override.isEmpty
+        else { return trimmed }
+        return override
     }
 
     func transform(_ value: String, for field: TrackInfoField) -> String {
