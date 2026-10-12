@@ -178,17 +178,11 @@ extension AppearanceProfile {
         if detector.isCortina(genre: trackGenre) {
             return genreBackgrounds.first { $0.isCortinaEntry }?.positions
         }
-        let needle = trackGenre.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !needle.isEmpty else { return nil }
-        for entry in genreBackgrounds where !entry.isCortinaEntry {
-            let key = entry.genreKey.trimmingCharacters(in: .whitespaces).lowercased()
-            if key.isEmpty { continue }
-            if needle == key { return entry.positions }
-            if detector.denylistPartialGenres.contains(key),
-               needle.hasPrefix(key + " ") || needle.contains(" " + key) {
-                return entry.positions
-            }
-        }
-        return nil
+        let candidates = genreBackgrounds.filter { !$0.isCortinaEntry }
+        guard let key = GenreMatching.bestMatch(genre: trackGenre,
+                                                keys: candidates.map(\.genreKey),
+                                                partialKeys: detector.denylistPartialGenres)
+        else { return nil }
+        return candidates.first { $0.genreKey == key }?.positions
     }
 }

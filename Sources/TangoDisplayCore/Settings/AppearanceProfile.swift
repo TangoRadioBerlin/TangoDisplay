@@ -986,8 +986,8 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
 
     /// Resolves the genre-background image for the current track. Matching rules:
     /// - If the detector classifies the genre as a cortina, returns the cortina-sentinel entry.
-    /// - Otherwise, looks for an entry whose genreKey matches the track's genre — exact case-insensitive
-    ///   match, or a word-boundary substring match if that key is in the detector's partial-match set.
+    /// - Otherwise, `GenreMatching.bestMatch` over the entries' genreKeys: exact first, then the
+    ///   rightmost containment hit among keys in the detector's partial-match set ("Tango Vals" → Vals).
     /// Returns nil when the feature is disabled or no matching entry has an image.
     public func matchingGenreBackground(
         for trackGenre: String,
@@ -997,18 +997,12 @@ public struct AppearanceProfile: Codable, Identifiable, Equatable {
         if detector.isCortina(genre: trackGenre) {
             return genreBackgrounds.first { $0.isCortinaEntry && $0.imageFilename != nil }
         }
-        let needle = trackGenre.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !needle.isEmpty else { return nil }
-        for entry in genreBackgrounds where !entry.isCortinaEntry && entry.imageFilename != nil {
-            let key = entry.genreKey.trimmingCharacters(in: .whitespaces).lowercased()
-            if key.isEmpty { continue }
-            if needle == key { return entry }
-            if detector.denylistPartialGenres.contains(key),
-               needle.hasPrefix(key + " ") || needle.contains(" " + key) {
-                return entry
-            }
-        }
-        return nil
+        let candidates = genreBackgrounds.filter { !$0.isCortinaEntry && $0.imageFilename != nil }
+        guard let key = GenreMatching.bestMatch(genre: trackGenre,
+                                                keys: candidates.map(\.genreKey),
+                                                partialKeys: detector.denylistPartialGenres)
+        else { return nil }
+        return candidates.first { $0.genreKey == key }
     }
 
     public static let builtIns: [AppearanceProfile] = [.classic, .modern, .highContrast]

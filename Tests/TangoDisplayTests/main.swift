@@ -1468,9 +1468,25 @@ func runAppearanceProfileMatchingTests() {
             let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [tangoBg] }
             try expect(p.matchingGenreBackground(for: "tango", using: detector)?.id == tangoBg.id)
         }
-        test("word-boundary partial match when key is in the partial set") {
+        test("containment match when key is in the partial set — any separator") {
             let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [tangoBg] }
             try expect(p.matchingGenreBackground(for: "Tango Instrumental", using: detector)?.id == tangoBg.id)
+            try expect(p.matchingGenreBackground(for: "Nuevo-Tango", using: detector)?.id == tangoBg.id)
+        }
+        test("'Tango Vals' resolves to the Vals scene even though Tango is listed first (rightmost wins)") {
+            let valsBg = GenreBackground(genreKey: "Vals", imageFilename: "g-vals.jpg")
+            let milongaBg = GenreBackground(genreKey: "Milonga", imageFilename: "g-milonga.jpg")
+            let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [tangoBg, valsBg, milongaBg] }
+            try expect(p.matchingGenreBackground(for: "Tango Vals", using: detector)?.id == valsBg.id)
+            try expect(p.matchingGenreBackground(for: "Tango: Milonga", using: detector)?.id == milongaBg.id)
+            try expect(p.matchingGenreBackground(for: "Milongón", using: detector)?.id == milongaBg.id)
+            try expect(p.matchingGenreBackground(for: "Tango", using: detector)?.id == tangoBg.id)
+        }
+        test("a key outside the partial set still only matches exactly") {
+            let strict = CortinaDetector(useAllowlist: false, allowlistGenres: [],
+                                         useDenylist: true, denylistGenres: ["tango"])
+            let p = profile { $0.genreBackgroundsEnabled = true; $0.genreBackgrounds = [tangoBg] }
+            try expectNil(p.matchingGenreBackground(for: "Tango Instrumental", using: strict))
         }
         test("entry without an image is skipped") {
             let noImg = GenreBackground(genreKey: "Tango", imageFilename: nil)
@@ -3239,6 +3255,18 @@ func runGenrePositionOverrideTests() {
             try expect(!det.isCortina(genre: "Tango Argentino"))
             try expectEqual(p.positionOverride(forGenre: "Tango Argentino", using: det),
                             p.positionOverride(forGenre: "Tango", using: det))
+        }
+        test("'Tango Vals' takes the Vals entry's positions, not Tango's (rightmost wins)") {
+            let det = CortinaDetector(useAllowlist: false, allowlistGenres: [],
+                                      useDenylist: true, denylistGenres: ["tango", "vals"],
+                                      denylistPartialGenres: ["tango", "vals"])
+            var p = tangoProfile()
+            let valsSet = PositionSet(placements: ["title": ElementPlacement(offsetX: -20)])
+            p.genreBackgrounds.append(GenreBackground(genreKey: "Vals", positions: valsSet))
+            try expectEqual(p.positionOverride(forGenre: "Tango Vals", using: det), valsSet)
+            try expectEqual(p.positionOverride(forGenre: "Tango-Vals", using: det), valsSet)
+            try expectEqual(p.positionOverride(forGenre: "Tango", using: det),
+                            p.genreBackgrounds[0].positions)
         }
         test("cortina sentinel resolves for a cortina-classified tag") {
             // Denylist lists "tango" as the only dance genre → "Cortina" classifies as a cortina.
