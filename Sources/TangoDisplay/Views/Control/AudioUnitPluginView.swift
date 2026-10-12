@@ -353,7 +353,7 @@ private struct AutoBypassRuleEditor: View {
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { commit() }
                             .onChange(of: genresText) { _ in commit() }
-                        Text("Case-insensitive, matches exactly or at a word boundary (e.g. “Tango” matches “Tango Vals”).")
+                        Text("Case-insensitive; a keyword matches when it appears anywhere in the genre (e.g. “Tango” matches “Tango Vals” and “Nuevo-Tango”; “Milonga” also matches “Milongón”).")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

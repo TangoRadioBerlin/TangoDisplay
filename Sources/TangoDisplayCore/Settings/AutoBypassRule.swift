@@ -68,18 +68,11 @@ public struct AutoBypassRule: Codable, Equatable {
     }
 
     /// True when the track's genre satisfies the genre condition. Empty list → always true.
-    /// Matching mirrors CortinaDetector: trim + lowercase, exact OR word-boundary substring.
+    /// A keyword matches when it appears anywhere in the genre (GenreMatching: case- and
+    /// diacritic-insensitive, Milongón alias), the same rule the cortina lists use.
     public func genreMatches(_ trackGenre: String) -> Bool {
         guard !matchGenres.isEmpty else { return true }
-        let needle = trackGenre.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !needle.isEmpty else { return false }
-        for raw in matchGenres {
-            let key = raw.trimmingCharacters(in: .whitespaces).lowercased()
-            if key.isEmpty { continue }
-            if needle == key { return true }
-            if needle.hasPrefix(key + " ") || needle.contains(" " + key) { return true }
-        }
-        return false
+        return matchGenres.contains { GenreMatching.contains(genre: trackGenre, key: $0) }
     }
 
     /// True when the track's year satisfies the year condition. No threshold → always true.

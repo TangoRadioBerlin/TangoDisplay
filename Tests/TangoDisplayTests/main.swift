@@ -2844,11 +2844,17 @@ func runAutoBypassRuleTests() {
             try expect(r.genreMatches("  MILONGA "))
             try expect(!r.genreMatches("Tango"))
         }
-        test("word-boundary partial match") {
+        test("keyword contained anywhere matches — no word boundary, any separator") {
             let r = AutoBypassRule(matchGenres: ["Tango"])
             try expect(r.genreMatches("Tango Vals"))
             try expect(r.genreMatches("Argentine Tango"))
-            try expect(!r.genreMatches("Tangoland"))
+            try expect(r.genreMatches("Nuevo-Tango"))
+            try expect(r.genreMatches("Tangoland"))
+            try expect(!r.genreMatches("Vals"))
+        }
+        test("Milongón satisfies a Milonga keyword") {
+            let r = AutoBypassRule(matchGenres: ["Milonga"])
+            try expect(r.genreMatches("Milongón"))
         }
     }
 
