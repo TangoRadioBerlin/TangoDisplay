@@ -79,9 +79,9 @@ private class MusicAppDropView: NSView {
         os_log("draggingEntered types=%{public}@", log: dropLog, type: .info,
                String(describing: sender.draggingPasteboard.types ?? []))
         guard hasAcceptableDrag(sender) else { return [] }
-        // Start the ID-keyed library scan now; by the time the user lets go
-        // the Music start/stop times are usually warm.
-        SetlistManager.warmMusicTrims()
+        // onTargeted(true) also starts the ID-keyed library scan (see the
+        // isDragTargeted observer); by the time the user lets go the Music
+        // start/stop times are usually warm.
         onTargeted(true)
         return .copy
     }
@@ -413,6 +413,11 @@ struct SetlistView: View {
                 Task { @MainActor in await handleIncomingDrop(resolution, anchorID: nil) }
             }
         )
+        // A drag entering the window reloads the Music table and brings existing
+        // entries' start times up to date with it.
+        .onChange(of: isDragTargeted) { targeted in
+            if targeted { setlist.warmAndRefreshMusicStarts() }
+        }
         .onReceive(player.$currentEntryID) { activeEntryID = $0 }
         .onReceive(player.$isActivePlaying) { isPlayerActive = $0 }
         .onReceive(player.$hogModeConflict) { hogConflictWarning = $0 }
@@ -1165,7 +1170,7 @@ struct SetlistView: View {
         // Same resolver as the drop paths (Finder/Music file URLs, foobar2000's
         // bare POSIX strings, Music selection); no dragging info → no
         // materialisation, which paste never had anyway.
-        SetlistManager.warmMusicTrims()
+        setlist.warmAndRefreshMusicStarts()
         let result = DropPasteboardResolver.resolve(NSPasteboard.general, draggingInfo: nil,
                                                     diagEnabled: settings.diagnosticLoggingEnabled)
         Task { @MainActor in

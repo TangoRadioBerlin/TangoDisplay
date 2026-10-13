@@ -43,7 +43,7 @@ When the built-in player is active, tracks use the **start and stop times** you 
 
 Music times are matched by the track's **persistent ID** from the drag itself (not by file path), so they also arrive for cloud tracks that Music materialises as cached copies. The library is scanned in the background the moment a drag enters the window.
 
-Music start times apply to **every track** — cortinas always, dance tracks by default. To play a dance track from the file beginning instead, right-click it → **Ignore Music Start Time** (the badge turns into a grey ♪; **Use Music Start Time** restores it). A manual start trim set in the app always takes precedence (the blue trim badge shows instead of ♪). Saved setlists keep their Music start times: the library is scanned in the background shortly after the built-in player comes up (and on every drag), the badges refresh then, and times you change in Music are picked up by the next scan.
+Music start times apply to **every track** — cortinas always, dance tracks by default. To play a dance track from the file beginning instead, right-click it → **Ignore Music Start Time** (the badge turns into a grey ♪; **Use Music Start Time** restores it). A manual start trim set in the app always takes precedence (the blue trim badge shows instead of ♪). Saved setlists keep their Music start times: the library is scanned in the background shortly after the built-in player comes up and again whenever you drag or paste tracks into the setlist, and every row's badge is brought up to date with each scan — so a time you change in Music reaches tracks that are already in the setlist. To pull a changed time in right away, right-click the track → **Reload Track Info**.
 
 Dragged tracks whose files no longer exist on disk (shown with a warning triangle in Music) are skipped with a brief "N files not found" note, so they can't silently fail at playback later.
 
@@ -173,7 +173,7 @@ Right-click any row:
 | **Ignore Auto-gap before this Track** | Disables auto-gap for this track only. Shows as **Resume Auto-gap** when already set; click again to re-enable it. |
 | **Skip Auto-fade** | Disables auto-fade for this cortina track only, re-enabling the Fade & Stop and Fade & Continue buttons for manual control. Available only when Auto-fade is enabled and fading has not yet started. |
 | **Mark as Last Tanda** | Marks this cortina as the last tanda. TangoDisplay will automatically activate the Last Tanda label when this cortina starts and deactivate it when the next cortina begins. A red flag appears on the row. Shows as **Remove Last Tanda** when already set. Available only on cortina tracks. Requires Last Tanda label text to be configured in Appearance Settings. |
-| **Reload Track Info** | Re-reads the artist, title, genre, year and other tags from the file. Use it when a row shows a filename instead of proper track details — see [Tracks Showing Filenames](#tracks-showing-filenames) below. Select several rows first and the action becomes **Reload Track Info for Selection**. |
+| **Reload Track Info** | Re-reads the artist, title, genre, year and other tags from the file. Use it when a row shows a filename instead of proper track details — see [Tracks Showing Filenames](#tracks-showing-filenames) below. For tracks from Music it also re-imports the start and stop time set in Music (a stop time you removed in Music does not clear a trim end here). Select several rows first and the action becomes **Reload Track Info for Selection**. |
 
 > **Screenshot placeholder:** right-click context menu on a setlist row
 

@@ -199,7 +199,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         setupAudioEngine()
         // Music start times: enumerate the library in the background once the
         // launch has settled, then refresh the entries' cached values.
-        setlist.scheduleMusicStartRefresh()
+        setlist.scheduleMusicStartRefresh(warmPathIndex: true)
         levelMeter = AudioLevelMeter(mixerNode: audioEngine.mainMixerNode)
         playerNode.volume = max(0, min(1, volume))
         applyOutputDevice(settings.builtInOutputDeviceUID)

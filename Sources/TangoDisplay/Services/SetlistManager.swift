@@ -160,10 +160,12 @@ final class SetlistManager: ObservableObject {
         }
         insert(placeholders, before: anchorID)   // calls save() + loadMissingDurations()
         // Drops without a drag plist (Finder, row drops where Music offered no
-        // metadata) still deserve their Music times: a short-delay refresh looks
-        // the new entries up by library path and backfills IDs + start times.
+        // metadata) still deserve their Music times: look the new entries up by
+        // library path right away and backfill IDs + start times, so a track
+        // played straight after the drop already starts where Music says.
+        // draggingEntered has usually just reloaded the table — reuse it.
         if importMusicTimes, placeholders.contains(where: { musicIDs.persistentID(for: $0.fileURL) == nil }) {
-            scheduleMusicStartRefresh(after: .seconds(2))
+            scheduleMusicStartRefresh(after: .zero, tableMaxAge: 30, priority: .userInitiated)
         }
         for p in placeholders {
             let id = p.id, url = p.fileURL
@@ -356,33 +358,32 @@ final class SetlistManager: ObservableObject {
     /// entries without one get a one-time path lookup (which builds the
     /// expensive location index on demand) and the ID is backfilled. Writes and
     /// saves only when something actually changed.
-    func refreshMusicStartTimes() async {
+    func refreshMusicStartTimes(ids: Set<UUID>? = nil, includeStop: Bool = false) async {
         // An unreadable library (TCC denied, Music db missing) must not be
         // mistaken for "every track lost its start time" — skip the pass
         // entirely rather than wiping cached values with nils.
         guard await MusicTrimCache.shared.hasUsableScan() else { return }
-        let snapshot = await MainActor.run {
-            entries.map { (id: $0.id, path: $0.fileURL.path,
-                           pid: $0.musicPersistentID, start: $0.musicStartSeconds) }
+        let candidates = await MainActor.run {
+            entries.filter { ids?.contains($0.id) ?? true }
+                .map { (id: $0.id, path: $0.fileURL.path, pid: $0.musicPersistentID,
+                        start: $0.musicStartSeconds, end: $0.trimEndSeconds) }
         }
-        var updates: [(id: UUID, pid: String?, start: Double?)] = []
-        for e in snapshot {
-            var pid = e.pid
-            if pid == nil { pid = await MusicTrimCache.shared.persistentID(forPath: e.path) }
-            guard let pid else { continue }   // not a Music library track — leave untouched
-            let trim = await MusicTrimCache.shared.trim(forID: pid)
-            if trim.start != e.start || pid != e.pid {
-                updates.append((e.id, pid, trim.start))
-            }
-        }
+        // One actor hop for the whole setlist; entries the library does not
+        // know (not Music tracks) come back without a lookup and stay untouched.
+        let lookups = await MusicTrimCache.shared.lookups(
+            for: candidates.map { (id: $0.id, path: $0.path, pid: $0.pid) })
+        let updates = musicStartUpdates(
+            entries: candidates.map { MusicStartSnapshot(id: $0.id, persistentID: $0.pid,
+                                                         start: $0.start, end: $0.end) },
+            lookups: lookups, includeStop: includeStop)
         guard !updates.isEmpty else { return }
-        let pending = updates
         await MainActor.run {
             var changed = false
-            for u in pending {
+            for u in updates {
                 guard let i = entries.firstIndex(where: { $0.id == u.id }) else { continue }
-                if entries[i].musicPersistentID != u.pid { entries[i].musicPersistentID = u.pid; changed = true }
+                if entries[i].musicPersistentID != u.persistentID { entries[i].musicPersistentID = u.persistentID; changed = true }
                 if entries[i].musicStartSeconds != u.start { entries[i].musicStartSeconds = u.start; changed = true }
+                if includeStop, entries[i].trimEndSeconds != u.end { entries[i].trimEndSeconds = u.end; changed = true }
             }
             if changed { save() }
         }
@@ -390,11 +391,26 @@ final class SetlistManager: ObservableObject {
 
     /// Refresh the library table in the background — after `delay`, so a cold
     /// launch is not slowed — and then bring the entries' cached Music start
-    /// times up to date once.
-    func scheduleMusicStartRefresh(after delay: Duration = .seconds(20)) {
-        Task(priority: .utility) { [weak self] in
-            try? await Task.sleep(for: delay)
-            await MusicTrimCache.shared.refresh()
+    /// times up to date once. A table younger than `tableMaxAge` is reused.
+    /// `warmPathIndex` also builds the location index up front, so the first
+    /// ID-less drop of the session does not have to wait for it.
+    func scheduleMusicStartRefresh(after delay: Duration = .seconds(20), tableMaxAge: TimeInterval = 1,
+                                   priority: TaskPriority = .utility, warmPathIndex: Bool = false) {
+        Task(priority: priority) { [weak self] in
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            await MusicTrimCache.shared.refresh(minAge: tableMaxAge)
+            if warmPathIndex { await MusicTrimCache.shared.warmPathIndex() }
+            await self?.refreshMusicStartTimes()
+        }
+    }
+
+    /// Reload the library table (coalesced) and, when it actually reloaded,
+    /// refresh the entries from it — so a start time edited in Music after the
+    /// track was added reaches the setlist on the next drag or paste, not only
+    /// after a relaunch.
+    func warmAndRefreshMusicStarts() {
+        Task(priority: .userInitiated) { [weak self] in
+            guard await MusicTrimCache.shared.refresh() else { return }
             await self?.refreshMusicStartTimes()
         }
     }
@@ -526,7 +542,18 @@ final class SetlistManager: ObservableObject {
     /// Re-reads tags from disk for the given entries, replacing whatever is in the row.
     /// Tags are otherwise read once, at drop time — a file on a sleeping external volume
     /// returns nothing and that empty result is what gets saved. This is the retry.
-    func reloadMetadata(ids: [UUID]) {
+    ///
+    /// `reloadMusicTimes` also re-imports Music's start/stop (Song Info → Options) for
+    /// those entries from a freshly reloaded library — the explicit way to pull in a
+    /// time edited in Music. Off for the silent launch retry.
+    func reloadMetadata(ids: [UUID], reloadMusicTimes: Bool = true) {
+        if reloadMusicTimes, !ids.isEmpty {
+            let targets = Set(ids)
+            Task(priority: .userInitiated) { [weak self] in
+                await MusicTrimCache.shared.forceReload()
+                await self?.refreshMusicStartTimes(ids: targets, includeStop: true)
+            }
+        }
         for id in ids {
             guard let idx = entries.firstIndex(where: { $0.id == id }) else { continue }
             let url = entries[idx].fileURL
@@ -559,7 +586,7 @@ final class SetlistManager: ObservableObject {
             .filter { $0.track.artist.isEmpty && $0.track.genre.isEmpty }
             .map { $0.id }
         guard !ids.isEmpty else { return }
-        reloadMetadata(ids: ids)
+        reloadMetadata(ids: ids, reloadMusicTimes: false)
     }
 
     private func loadMissingGroupings() {
@@ -805,10 +832,9 @@ final class SetlistManager: ObservableObject {
         await MusicTrimCache.shared.trim(forID: id)
     }
 
-    /// Kick off (or refresh) the ID-keyed library scan in the background —
-    /// called at launch (doubles as the TCC media-library prompt), on
-    /// draggingEntered, and before a Music paste, so the times are warm by the
-    /// time a drop imports them. Cheap: coalesced by the cache's minAge guard.
+    /// Kick off the ID-keyed library scan in the background at launch (doubles
+    /// as the TCC media-library prompt). Table only — drags and pastes go
+    /// through `warmAndRefreshMusicStarts()`, which also updates the entries.
     nonisolated static func warmMusicTrims() {
         Task.detached(priority: .userInitiated) { await MusicTrimCache.shared.refresh() }
     }
@@ -992,7 +1018,13 @@ private actor MusicTrimCache {
     private let library = try? ITLibrary(apiVersion: "1.1")
     private var times: [String: (startMs: Int, stopMs: Int, totalMs: Int)] = [:]
     private var loadedAt: Date?
-    private var pathIDs: [String: String]?   // iTunesMediaRelativeKey → persistent ID
+    // iTunesMediaRelativeKey → persistent ID. Kept across table reloads (a
+    // location rarely changes); MusicLibraryScanPolicy decides when a miss is
+    // worth a rebuild.
+    private var pathIDs: [String: String]?
+    private var pathIndexBuiltAt: Date?
+    private var pathIndexStale = false
+    private var missedPaths: Set<String> = []   // missed a complete, current index
 
     func trim(forID id: String) -> (start: Double?, end: Double?) {
         if loadedAt == nil { reload() }
@@ -1009,16 +1041,51 @@ private actor MusicTrimCache {
         return !times.isEmpty
     }
 
-    /// Persistent ID for a library file path (legacy entries without a stored ID).
+    /// Persistent ID for a library file path (entries without a stored ID).
     func persistentID(forPath path: String) -> String? {
         if loadedAt == nil { reload() }
-        if pathIDs == nil { buildPathIndex() }
-        return pathIDs?[SetlistManager.iTunesMediaRelativeKey(path)]
+        let key = SetlistManager.iTunesMediaRelativeKey(path)
+        if let id = pathIDs?[key] { return id }
+        if MusicLibraryScanPolicy.shouldRebuildPathIndex(
+            hasIndex: pathIDs != nil, staleSinceReload: pathIndexStale,
+            knownMiss: missedPaths.contains(key), lastBuilt: pathIndexBuiltAt, now: Date()) {
+            buildPathIndex()
+            if let id = pathIDs?[key] { return id }
+        }
+        // Only a miss against an index that reflects the current table is final.
+        if !pathIndexStale { missedPaths.insert(key) }
+        return nil
     }
 
-    func refresh(minAge: TimeInterval = 1) {
-        if let loadedAt, Date().timeIntervalSince(loadedAt) < minAge { return }
+    /// Library values for a batch of setlist entries, resolved in one hop.
+    func lookups(for entries: [(id: UUID, path: String, pid: String?)]) -> [UUID: MusicStartLookup] {
+        var result: [UUID: MusicStartLookup] = [:]
+        for e in entries {
+            guard let pid = e.pid ?? persistentID(forPath: e.path) else { continue }
+            let t = trim(forID: pid)
+            result[e.id] = MusicStartLookup(persistentID: pid, start: t.start, end: t.end)
+        }
+        return result
+    }
+
+    /// Reloads the table unless it is younger than `minAge`. Returns whether it reloaded.
+    @discardableResult
+    func refresh(minAge: TimeInterval = 1) -> Bool {
+        guard MusicLibraryScanPolicy.needsReload(loadedAt: loadedAt, now: Date(), minAge: minAge) else { return false }
         reload()
+        return true
+    }
+
+    /// The user asked explicitly: reload now and give every path a fresh chance.
+    func forceReload() {
+        reload()
+        missedPaths.removeAll()
+        pathIndexBuiltAt = nil
+    }
+
+    func warmPathIndex() {
+        if loadedAt == nil { reload() }
+        if pathIDs == nil { buildPathIndex() }
     }
 
     private func reload() {
@@ -1035,7 +1102,7 @@ private actor MusicTrimCache {
                 (item.startTime, item.stopTime, item.totalTime)
         }
         times = result
-        pathIDs = nil   // stale after a reload; rebuilt on demand
+        pathIndexStale = pathIDs != nil   // kept; a miss may now warrant a rebuild
         os_log("music trim scan: %d track(s) in %.0fms", log: trimLog, type: .info,
                result.count, Date().timeIntervalSince(started) * 1000)
     }
@@ -1050,6 +1117,8 @@ private actor MusicTrimCache {
                 String(format: "%016llX", item.persistentID.uint64Value)
         }
         pathIDs = idx
+        pathIndexBuiltAt = Date()
+        pathIndexStale = false
         os_log("music path index: %d location(s) in %.0fms", log: trimLog, type: .info,
                idx.count, Date().timeIntervalSince(started) * 1000)
     }
