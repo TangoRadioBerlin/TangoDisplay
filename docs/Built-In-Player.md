@@ -694,6 +694,12 @@ Enable **Exclusive mode (Hog Mode)** in **Player Settings** to give TangoDisplay
 - If another app claims the device *while a track is playing*, a **Playback Interrupted** alert appears. Click **Retry** to re-acquire exclusive access and resume playback, or **OK** to continue without exclusive mode.
 - Hog Mode is released automatically when TangoDisplay quits or you switch back to the system default output.
 
+### Sleep, Wake and Device Changes
+
+- When the Mac wakes from sleep, TangoDisplay restarts its audio engine on the selected output device, retrying for a few seconds while the interface comes back, and re-acquires Exclusive mode if sleep dropped it. A track that was playing resumes where it was.
+- If the device does not come back, playback stops and an **Audio Device Unavailable** alert appears. Check the device is connected and powered on, then click **Retry** and press play.
+- Plugging in or removing *another* audio device (headphones, a display with speakers) does not interrupt playback as long as the audio engine keeps running on the device you selected.
+
 ---
 
 ## Setlist Remote

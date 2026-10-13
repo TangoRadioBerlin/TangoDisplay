@@ -287,6 +287,7 @@ struct SetlistView: View {
     @State private var flagsMonitor: Any? = nil
     @State private var hogConflictWarning = false
     @State private var hogDeviceStolenAlertShown = false
+    @State private var engineStalledAlertShown = false
     @State private var dropFeedback: String? = nil
 
     // Seed the @State mirrors from the player so the very first body render
@@ -427,6 +428,13 @@ struct SetlistView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Another app has taken exclusive access of the audio output device, so playback was paused. Release the exclusive access in that app, then tap Retry.")
+        }
+        .onReceive(player.$engineStalled) { if $0 { engineStalledAlertShown = true } }
+        .alert("Audio Device Unavailable", isPresented: $engineStalledAlertShown) {
+            Button("Retry") { player.retryOutputDevice() }
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The audio output device did not come back, so playback was stopped. Check the device is connected and powered on, then tap Retry.")
         }
         .alert("Save Setlist Report", isPresented: $showSaveReportDialog) {
             TextField("Setlist name", text: $saveReportName)
