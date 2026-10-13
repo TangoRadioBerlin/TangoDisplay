@@ -3569,6 +3569,7 @@ runGapContextTests()
 runFadeModeRulesTests()
 runMusicDragIDsTests()
 runRestorationTests()
+runMusicStartRefreshTests()
 runSliderSnapTests()
 
 print("\n════════════════════════════════")
