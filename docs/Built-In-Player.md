@@ -555,6 +555,8 @@ Plugins load **out-of-process** by default: each plugin runs in its own process,
 
 A small number of plugins need to be hosted **in-process** for plugin-driven window auto-resize to work (when hosted out-of-process their editor view can't tell the host to grow the window). These are handled via a built-in allowlist — currently Klanghelm MJUC, whose expander panel resizes the editor at runtime. In-process plugins are not crash-isolated.
 
+For every other plugin the editor window can be resized by dragging its edge: the editor follows the window if the plugin supports a scalable interface (FabFilter, for example), and keeps its own size otherwise. The window cannot be made smaller than the editor.
+
 ### Per-Slot Controls
 
 Each slot in the chain has its own controls in **Settings › Player**:

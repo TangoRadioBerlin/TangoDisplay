@@ -1656,7 +1656,9 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                     self.recomputeChainStatus()
                     return
                 }
-                let wrapper = PluginWindowViewController(pluginVC: vc, player: self, slotId: slotId)
+                let wrapper = PluginWindowViewController(
+                    pluginVC: vc, player: self, slotId: slotId,
+                    isRemoteHosted: !avUnit.auAudioUnit.isLoadedInProcess)
                 // Force loadView/viewDidLoad so wrapper.view is sized.
                 _ = wrapper.view
                 let initialSize: NSSize = wrapper.view.frame.size != .zero
@@ -1683,9 +1685,11 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 // and our own setContentSize calls. Setting contentView
                 // directly keeps the window freely resizable. We then hold the
                 // wrapper VC strongly in SlotRuntime since the window doesn't.
-                window.contentView = wrapper.view
+                // Limits first: the wrapper raises the minimum to the editor's
+                // natural size for out-of-process plugins once it appears.
                 window.contentMinSize = NSSize(width: 200, height: 100)
                 window.contentMaxSize = NSSize(width: 4096, height: 4096)
+                window.contentView = wrapper.view
                 window.isReleasedWhenClosed = false
                 window.center()
                 window.makeKeyAndOrderFront(nil)
