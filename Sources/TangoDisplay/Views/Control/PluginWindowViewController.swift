@@ -171,7 +171,12 @@ final class PluginWindowViewController: NSViewController {
     private func adoptPreferredContentSize() {
         let size = pluginVC.preferredContentSize
         guard size.width > 0, size.height > 0 else { return }
-        if isRemoteHosted, let window = view.window {
+        let differs = abs(pluginVC.view.frame.width  - size.width)  > 0.5 ||
+                      abs(pluginVC.view.frame.height - size.height) > 0.5
+        // Mid-drag the size is the user's; a plugin echoing it back must neither fight
+        // the drag nor ratchet the floor up to wherever the window happens to be.
+        if let window = view.window, window.inLiveResize { return }
+        if isRemoteHosted, differs, let window = view.window {
             // The plugin picked a new editor size (its own scale menu): that is
             // the new floor for the window, smaller or larger than before.
             naturalPluginSize = size

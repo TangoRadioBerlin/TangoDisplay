@@ -386,6 +386,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             // Capture all state before leaving the main thread.
             let wasPlaying = self.isActivePlaying
             let savedElapsed = self.elapsed
+            let savedEntryID = self.currentEntryID
             let began = Date()
 
             // Dispatch blocking CoreAudio work off the main thread to avoid a UI spinner.
@@ -464,9 +465,12 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                         self.engineStalled = false
                         self.levelMeter.reinstallTap()
                         self.applyBalance(self._balance)
-                        if self.audioFile != nil {
+                        // The restart can take seconds. A track the user loaded in the
+                        // meantime has scheduled itself and must not be seeked to the old
+                        // track's position; a pause pressed in the meantime stays a pause.
+                        if self.audioFile != nil, self.currentEntryID == savedEntryID {
                             self.seekTo(savedElapsed)
-                            if wasPlaying { self.startPlayerNode() }
+                            if wasPlaying && self.isActivePlaying { self.startPlayerNode() }
                         }
                     }
                 }
@@ -1128,14 +1132,24 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
     private func startPlayerNode() -> Bool {
         engineTopologyLock.lock()
         var failure: Error?
+        var restarted = false
         if !audioEngine.isRunning {
             // The engine drops back to the system default whenever it stops itself.
             if let audioUnit = audioEngine.outputNode.audioUnit {
                 setOutputDeviceProperty(audioUnit: audioUnit, uid: settings.builtInOutputDeviceUID)
             }
-            do { try audioEngine.start() } catch { failure = error }
+            do { try audioEngine.start(); restarted = true } catch { failure = error }
         }
         engineTopologyLock.unlock()
+        if restarted {
+            // Same follow-up as every other restart path.
+            levelMeter.reinstallTap()
+            applyBalance(_balance)
+            let uid = settings.builtInOutputDeviceUID, hogEnabled = settings.builtInHogMode
+            audioDeviceQueue.async { [weak self] in
+                self?.reacquireHogIfNeeded(uid: uid, hogEnabled: hogEnabled)
+            }
+        }
         if let failure {
             os_log(.error, "TangoDisplay: play blocked, engine not running: %{public}@",
                    failure.localizedDescription)

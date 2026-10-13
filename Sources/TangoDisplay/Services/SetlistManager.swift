@@ -377,13 +377,18 @@ final class SetlistManager: ObservableObject {
                                                          start: $0.start, end: $0.end) },
             lookups: lookups, includeStop: includeStop)
         guard !updates.isEmpty else { return }
+        let scannedEnds = Dictionary(uniqueKeysWithValues: candidates.map { ($0.id, $0.end) })
         await MainActor.run {
             var changed = false
             for u in updates {
                 guard let i = entries.firstIndex(where: { $0.id == u.id }) else { continue }
                 if entries[i].musicPersistentID != u.persistentID { entries[i].musicPersistentID = u.persistentID; changed = true }
                 if entries[i].musicStartSeconds != u.start { entries[i].musicStartSeconds = u.start; changed = true }
-                if includeStop, entries[i].trimEndSeconds != u.end { entries[i].trimEndSeconds = u.end; changed = true }
+                // Only when Music supplied a different stop time — never write back the
+                // value read before the scan, which the user may have edited meanwhile.
+                if includeStop, u.end != scannedEnds[u.id] ?? nil, entries[i].trimEndSeconds != u.end {
+                    entries[i].trimEndSeconds = u.end; changed = true
+                }
             }
             if changed { save() }
         }

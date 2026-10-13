@@ -429,7 +429,8 @@ struct SetlistView: View {
         } message: {
             Text("Another app has taken exclusive access of the audio output device, so playback was paused. Release the exclusive access in that app, then tap Retry.")
         }
-        .onReceive(player.$engineStalled) { if $0 { engineStalledAlertShown = true } }
+        // Follows the flag both ways: a recovery that succeeds after all takes the alert down.
+        .onReceive(player.$engineStalled) { engineStalledAlertShown = $0 }
         .alert("Audio Device Unavailable", isPresented: $engineStalledAlertShown) {
             Button("Retry") { player.retryOutputDevice() }
             Button("OK", role: .cancel) {}
