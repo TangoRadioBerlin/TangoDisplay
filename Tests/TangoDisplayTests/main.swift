@@ -3570,6 +3570,7 @@ runFadeModeRulesTests()
 runMusicDragIDsTests()
 runRestorationTests()
 runMusicStartRefreshTests()
+runEngineRecoveryTests()
 runSliderSnapTests()
 
 print("\n════════════════════════════════")
