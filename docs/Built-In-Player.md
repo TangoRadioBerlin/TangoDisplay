@@ -555,7 +555,9 @@ Plugins load **out-of-process** by default: each plugin runs in its own process,
 
 A small number of plugins need to be hosted **in-process** for plugin-driven window auto-resize to work (when hosted out-of-process their editor view can't tell the host to grow the window). These are handled via a built-in allowlist — currently Klanghelm MJUC, whose expander panel resizes the editor at runtime. In-process plugins are not crash-isolated.
 
-For every other plugin the editor window can be resized by dragging its edge: the editor follows the window if the plugin supports a scalable interface (FabFilter, for example), and keeps its own size otherwise. The window cannot be made smaller than the editor.
+Every other plugin is hosted out-of-process, which keeps TangoDisplay running if the plugin crashes but fixes the editor window at its first size — neither dragging the window edge nor the plugin's own size controls change it. To get a resizable editor (FabFilter Pro-Q, for example), tick **Resizable editor** on that plugin's row in the chain. The plugin is then reloaded inside TangoDisplay with its current settings, and its editor follows the window and its own size and scale controls. The window cannot be made smaller than the size the plugin last chose.
+
+The trade-off is crash isolation: a plugin hosted this way takes TangoDisplay down with it if it crashes. If TangoDisplay quits unexpectedly while such a plugin is loaded, **Resizable editor** is switched off again at the next launch and a notice in the plugin settings says so. Try the setting at home before relying on it at a milonga.
 
 ### Per-Slot Controls
 

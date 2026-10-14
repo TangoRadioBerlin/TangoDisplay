@@ -372,6 +372,19 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// Plugins the user chose to host in-process so their editor can be resized
+    /// (see PluginHostingRules). Per component, not per slot.
+    @Published var audioUnitInProcessOptIns: [PluginComponentKey] {
+        didSet {
+            if let data = try? JSONEncoder().encode(audioUnitInProcessOptIns) {
+                UserDefaults.standard.set(data, forKey: kPrefix + "audioUnitInProcessOptIns")
+            }
+        }
+    }
+    /// Opt-ins withdrawn at this launch because the app stopped unexpectedly while
+    /// they were loaded. Not persisted — shown once in the plugin settings.
+    @Published var revokedInProcessOptIns: [PluginComponentKey] = []
+
     // MARK: - Shellac restoration
 
     /// Declick/dehum settings, persisted as one JSON blob (same shape as the
@@ -576,6 +589,20 @@ final class AppSettings: ObservableObject {
         } else {
             audioUnitPluginChain = []
         }
+        // An opted-in plugin that was loaded in-process when the app last stopped
+        // without a clean quit may be what took it down: back to out-of-process.
+        let storedOptIns = AppSettings.decodeOrQuarantine(
+            [PluginComponentKey].self, key: kPrefix + "audioUnitInProcessOptIns") ?? []
+        let loadedAtExit = AppSettings.decodeOrQuarantine(
+            [PluginComponentKey].self, key: InProcessPluginSentinel.key) ?? []
+        let recovered = PluginHostingRules.recover(optIns: Set(storedOptIns), loadedAtExit: Set(loadedAtExit))
+        let keptOptIns = storedOptIns.filter { recovered.optIns.contains($0) }
+        audioUnitInProcessOptIns = keptOptIns
+        revokedInProcessOptIns = storedOptIns.filter { recovered.revoked.contains($0) }
+        if !recovered.revoked.isEmpty, let data = try? JSONEncoder().encode(keptOptIns) {
+            ud.set(data, forKey: kPrefix + "audioUnitInProcessOptIns")
+        }
+        InProcessPluginSentinel.clear()
         restoration = AppSettings.decodeOrQuarantine(
             RestorationSettings.self, key: kPrefix + "restoration") ?? .defaults
         decibelMeterEnabled = ud.object(forKey: kPrefix + "decibelMeterEnabled").flatMap { $0 as? Bool } ?? false

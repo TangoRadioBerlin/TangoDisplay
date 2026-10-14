@@ -20,19 +20,20 @@ import os.log
 // frame-observer path below is a no-op for OOP plugins (they resize, if at
 // all, via the preferredContentSize observer instead).
 //
-// The other direction does work out-of-process: a host-side frame change on
-// the remote view is forwarded to the plugin process. So for OOP plugins the
-// window keeps its resize grip and the plugin view tracks the window — a
-// plugin with a scalable editor (FabFilter) follows, one with a fixed editor
-// simply keeps its size inside a larger window. The window never shrinks
-// below the editor's natural size, so nothing is ever clipped.
+// The host cannot resize an OOP editor either: the remote container holds its
+// first size against window drags and setContentSize alike (measured with
+// FabFilter Pro-Q 4.12 in a standalone harness). Hosted in-process the same
+// editor follows its window. So a plugin the user opted into in-process
+// hosting gets a resize grip whatever its autoresize mask says, and its view
+// tracks the window, floored at the size the plugin itself last chose.
 
 final class PluginWindowViewController: NSViewController {
     private let pluginVC: NSViewController
     private let player: LocalPlayerSource
     private let slotId: UUID
-    /// The AU runs in its own process and its editor is a remote view.
-    private let isRemoteHosted: Bool
+    /// The user opted this plugin into in-process hosting so its editor can be
+    /// resized; the plugin's autoresize mask (usually empty) is not trusted then.
+    private let allowsHostResize: Bool
     private var naturalPluginSize = NSSize(width: 600, height: 400)
     private let barHeight: CGFloat = 44
     private var sizeObservation: NSKeyValueObservation?
@@ -45,11 +46,11 @@ final class PluginWindowViewController: NSViewController {
 
     private static let log = OSLog(subsystem: "com.tangodisplay", category: "PluginWindow")
 
-    init(pluginVC: NSViewController, player: LocalPlayerSource, slotId: UUID, isRemoteHosted: Bool) {
+    init(pluginVC: NSViewController, player: LocalPlayerSource, slotId: UUID, allowsHostResize: Bool) {
         self.pluginVC = pluginVC
         self.player = player
         self.slotId = slotId
-        self.isRemoteHosted = isRemoteHosted
+        self.allowsHostResize = allowsHostResize
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -111,10 +112,10 @@ final class PluginWindowViewController: NSViewController {
         // resize grip off the window (Embrace's pattern). JUCE plugins
         // typically have no autoresize mask set.
         let mask = pluginVC.view.autoresizingMask
-        if isRemoteHosted {
-            // A remote view reports no autoresize mask whatever the plugin
-            // supports, so the mask says nothing here. Keep the grip and let
-            // the view follow the window; growing only, from the natural size.
+        if allowsHostResize {
+            // FabFilter-style editors report no autoresize mask but redraw at
+            // whatever size they are given. Keep the grip and let the view
+            // follow the window; never below the editor's own size.
             pluginVC.view.autoresizingMask = [.width, .height]
             window.contentMinSize = NSSize(width: naturalPluginSize.width,
                                            height: naturalPluginSize.height + barHeight)
@@ -176,7 +177,7 @@ final class PluginWindowViewController: NSViewController {
         // Mid-drag the size is the user's; a plugin echoing it back must neither fight
         // the drag nor ratchet the floor up to wherever the window happens to be.
         if let window = view.window, window.inLiveResize { return }
-        if isRemoteHosted, differs, let window = view.window {
+        if allowsHostResize, differs, let window = view.window {
             // The plugin picked a new editor size (its own scale menu): that is
             // the new floor for the window, smaller or larger than before.
             naturalPluginSize = size
@@ -214,6 +215,12 @@ final class PluginWindowViewController: NSViewController {
 
         inFrameCallback = true
         defer { inFrameCallback = false }
+
+        if allowsHostResize {
+            // Not a window drag (those are skipped above): the plugin chose this size
+            // itself, so it is the new floor, smaller or larger than before.
+            window.contentMinSize = NSSize(width: target.width, height: target.height + barHeight)
+        }
 
         let effectView = pluginVC.view
         let oldMask = effectView.autoresizingMask

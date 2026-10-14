@@ -32,6 +32,19 @@ struct AudioUnitPluginSettingsSection: View {
             ))
             .disabled(!settings.audioUnitPluginEnabled || settings.audioUnitPluginChain.isEmpty)
 
+            if !settings.revokedInProcessOptIns.isEmpty {
+                let names = settings.revokedInProcessOptIns.map { key in
+                    settings.audioUnitPluginChain.first { PluginComponentKey($0.selection) == key }?
+                        .selection.name ?? key.displayCode
+                }
+                Label("TangoDisplay quit unexpectedly while \(names.joined(separator: ", ")) was loaded inside it, so "
+                      + "Resizable editor was switched off again for safety.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if settings.audioUnitPluginChain.isEmpty {
                 Text("No plugins added yet.")
                     .font(.caption)
@@ -182,6 +195,7 @@ struct AudioUnitPluginSettingsSection: View {
 
 private struct AudioUnitChainSlotRow: View {
     @ObservedObject var player: LocalPlayerSource
+    @EnvironmentObject var settings: AppSettings
     let slot: AudioUnitChainSlot
     let index: Int
     let chainCount: Int
@@ -255,6 +269,19 @@ private struct AudioUnitChainSlotRow: View {
                 .toggleStyle(.checkbox)
 
                 Button("Replace…", action: onReplace)
+
+                // Built-in in-process plugins (MJUC) are resizable already.
+                if !AudioUnitPluginManager.isBuiltInInProcess(slot.selection) {
+                    Toggle("Resizable editor", isOn: Binding(
+                        get: { settings.audioUnitInProcessOptIns.contains(PluginComponentKey(slot.selection)) },
+                        set: { player.setInProcessHosting($0, forSlot: slot.id) }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .help("Loads the plugin inside TangoDisplay instead of in its own process, so its "
+                        + "editor window can be resized. Without that isolation a crash in the plugin "
+                        + "takes TangoDisplay down with it — if that happens, this is switched off "
+                        + "again automatically at the next launch. Try it before a milonga, not during one.")
+                }
 
                 if status.isActive, !presets.isEmpty {
                     let factoryPresets = presets.filter(\.isFactory)

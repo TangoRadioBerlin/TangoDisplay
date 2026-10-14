@@ -2,6 +2,7 @@ import AppKit
 import iTunesLibrary
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var terminationSignalSource: DispatchSourceSignal?
 
     // Injected by TangoDisplayApp after initialisation
     var appState: AppState?
@@ -13,6 +14,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // windows would otherwise get auto-merged into a tabbed container,
         // which disables the resize handle and breaks setContentSize calls.
         NSWindow.allowsAutomaticWindowTabbing = false
+
+        // A SIGTERM (`pkill`, an installer replacing the app) is a deliberate stop, not a
+        // crash: clear the in-process plugin guard so it does not withdraw opt-ins.
+        signal(SIGTERM, SIG_IGN)
+        let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        term.setEventHandler {
+            InProcessPluginSentinel.clear()
+            exit(0)
+        }
+        term.resume()
+        terminationSignalSource = term
 
         guard let appState else { return }
         appState.profileStore.load()
@@ -45,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        InProcessPluginSentinel.clear()
         hotkeyService.unregister()
         if let appState {
             // Flush any pending debounced saves so work in progress is not lost on quit.

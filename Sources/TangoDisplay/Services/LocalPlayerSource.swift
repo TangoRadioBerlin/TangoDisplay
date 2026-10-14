@@ -155,6 +155,14 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         var loadGeneration: Int = 0
         var loadTask: Task<Void, Never>?
         var isApplyingPreset: Bool = false
+        /// Plugin state carried across a reload (switching hosting mode).
+        var pendingFullState: [String: Any]?
+    }
+
+    /// Opted-in plugins currently loading or loaded in-process, per slot — mirrored
+    /// into InProcessPluginSentinel so a crash inside one withdraws its opt-in.
+    private var inProcessOptInSlots: [UUID: PluginComponentKey] = [:] {
+        didSet { InProcessPluginSentinel.set(Set(inProcessOptInSlots.values)) }
     }
 
     private var slotRuntimes: [UUID: SlotRuntime] = [:]
@@ -1721,6 +1729,36 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         rewireGraphSafely()
     }
 
+    /// Whether `slotId`'s plugin is hosted in-process at the user's request.
+    func isInProcessOptIn(slotId: UUID) -> Bool {
+        guard let slot = settings.audioUnitPluginChain.first(where: { $0.id == slotId }) else { return false }
+        return settings.audioUnitInProcessOptIns.contains(PluginComponentKey(slot.selection))
+    }
+
+    /// Switch a plugin between out-of-process and in-process hosting. Applies to every
+    /// slot holding the same plugin; each is reloaded with its current state carried over.
+    func setInProcessHosting(_ inProcess: Bool, forSlot slotId: UUID) {
+        guard let slot = settings.audioUnitPluginChain.first(where: { $0.id == slotId }) else { return }
+        let key = PluginComponentKey(slot.selection)
+        var optIns = settings.audioUnitInProcessOptIns.filter { $0 != key }
+        if inProcess { optIns.append(key) }
+        settings.audioUnitInProcessOptIns = optIns
+        settings.revokedInProcessOptIns.removeAll { $0 == key }
+        for affected in settings.audioUnitPluginChain where PluginComponentKey(affected.selection) == key {
+            let state = slotRuntimes[affected.id]?.avUnit?.auAudioUnit.fullState
+            tearDownSlot(id: affected.id, detachAVUnit: true)
+            let runtime = SlotRuntime()
+            runtime.pendingFullState = state
+            slotRuntimes[affected.id] = runtime
+            if settings.audioUnitPluginEnabled {
+                startSlotLoad(affected)
+            } else {
+                slotStatuses[affected.id] = .disabled
+            }
+        }
+        rewireGraphSafely()
+    }
+
     func removePluginSlot(id: UUID) {
         tearDownSlot(id: id, detachAVUnit: true)
         slotRuntimes.removeValue(forKey: id)
@@ -1798,7 +1836,8 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                 }
                 let wrapper = PluginWindowViewController(
                     pluginVC: vc, player: self, slotId: slotId,
-                    isRemoteHosted: !avUnit.auAudioUnit.isLoadedInProcess)
+                    allowsHostResize: avUnit.auAudioUnit.isLoadedInProcess
+                        && self.isInProcessOptIn(slotId: slotId))
                 // Force loadView/viewDidLoad so wrapper.view is sized.
                 _ = wrapper.view
                 let initialSize: NSSize = wrapper.view.frame.size != .zero
@@ -1939,11 +1978,18 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
         slotStatuses[slotId] = runtime.status
         recomputeChainStatus()
 
+        let optIns = Set(settings.audioUnitInProcessOptIns)
+        let componentKey = PluginComponentKey(selection)
+        // Marked before instantiation: a plugin can crash the host while loading.
+        if optIns.contains(componentKey) { inProcessOptInSlots[slotId] = componentKey }
+
         runtime.loadTask = Task { [weak self, weak runtime] in
             guard let self else { return }
             do {
-                let avUnit = try await pluginManager.instantiate(selection)
+                let avUnit = try await pluginManager.instantiate(selection, inProcessOptIns: optIns)
                 await MainActor.run { [weak self, weak runtime] in
+                    // Fell back to out-of-process (or superseded): nothing in-process to guard.
+                    if !avUnit.auAudioUnit.isLoadedInProcess { self?.inProcessOptInSlots[slotId] = nil }
                     guard let self, let runtime,
                           runtime.loadGeneration == gen,
                           self.settings.audioUnitPluginChain.contains(where: { $0.id == slotId })
@@ -1989,10 +2035,16 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
                         }
                     }
 
+                    if let state = runtime.pendingFullState {
+                        runtime.pendingFullState = nil
+                        avUnit.auAudioUnit.fullState = state
+                    }
+
                     self.rewireGraphSafely()
                 }
             } catch {
                 await MainActor.run { [weak self, weak runtime] in
+                    self?.inProcessOptInSlots[slotId] = nil
                     guard let self, let runtime, runtime.loadGeneration == gen else { return }
                     runtime.status = .failed(selection.name, reason: error.localizedDescription)
                     self.slotStatuses[slotId] = runtime.status
@@ -2048,6 +2100,7 @@ final class LocalPlayerSource: NSObject, ObservableObject, MusicPlayerSource {
             audioEngine.detach(unit)
         }
         runtime.avUnit = nil
+        inProcessOptInSlots[id] = nil
         runtime.presetManager = nil
         runtime.availablePresets = []
         runtime.activePresetID = nil
