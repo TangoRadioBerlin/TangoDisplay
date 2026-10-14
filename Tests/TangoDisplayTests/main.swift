@@ -3571,6 +3571,7 @@ runMusicDragIDsTests()
 runRestorationTests()
 runMusicStartRefreshTests()
 runEngineRecoveryTests()
+runPluginHostingTests()
 runSliderSnapTests()
 
 print("\n════════════════════════════════")
